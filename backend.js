@@ -226,15 +226,26 @@
   }
   function subscribe(q, next, error) { const s = { q, next, error }; subs.add(s); runSub(s); return () => subs.delete(s); }
 
+  // Re-read this person's role; reload the app if it changed or access was removed.
+  let roleT = null;
+  function roleCheckSoon() {
+    if (ROLE === "owner") return;
+    clearTimeout(roleT);
+    roleT = setTimeout(() => window.blissAccount?.recheck?.().catch((e) => console.warn("role check", e)), 1500);
+  }
+
   function startRealtime() {
     SB.channel("docs-" + ORG)
       .on("postgres_changes", { event: "*", schema: "public", table: "docs", filter: `org_id=eq.${ORG}` }, (p) => {
         const path = (p.new && p.new.path) || (p.old && p.old.path);
         refresh(path ? collOf(path) : null);
+        // Team list changed: someone's role or access may have changed, maybe this person's.
+        if (!path || /^(employees|links)\//.test(path)) roleCheckSoon();
       })
       .subscribe();
     setInterval(() => { if (!document.hidden) refresh(null); }, 30000);
-    document.addEventListener("visibilitychange", () => { if (!document.hidden) refresh(null); });
+    setInterval(() => { if (!document.hidden) roleCheckSoon(); }, 120000);
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) { refresh(null); roleCheckSoon(); } });
   }
 
   function docRef(path) {

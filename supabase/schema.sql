@@ -168,8 +168,47 @@ begin
   return o;
 end $$;
 
--- Called after every sign-in. Links the signed-in email to any employee record
--- with the same email, then returns every business this person belongs to.
+-- Bring one person's access to one business in line with the team list:
+-- an active employee record with their email (or the record their account is linked to) decides
+-- manager vs staff; with no active record they lose access. Owners are never changed here.
+create or replace function public.refresh_member(o uuid, uid uuid, em text) returns void
+language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare is_mgr boolean; n int; emp text; cur text;
+begin
+  em := lower(coalesce(em, ''));
+  select m.role into cur from public.members m where m.org_id = o and m.user_id = uid;
+  if cur = 'owner' then return; end if;
+  select count(*), bool_or(d.data ->> 'role' = 'Manager'),
+         (array_agg(d.doc_id order by (d.data ->> 'role' = 'Manager') desc, d.updated_at desc))[1]
+    into n, is_mgr, emp
+    from public.docs d
+   where d.org_id = o and d.coll = 'employees' and em <> '' and lower(d.data ->> 'email') = em
+     and coalesce((d.data ->> 'active')::boolean, true);
+  if n = 0 then   -- no email match: keep a hand-made link if it points to an active employee
+    select e.doc_id, e.data ->> 'role' = 'Manager' into emp, is_mgr
+      from public.docs l join public.docs e on e.org_id = l.org_id and e.coll = 'employees' and e.doc_id = l.data ->> 'empId'
+     where l.org_id = o and l.path = 'links/' || uid::text and coalesce((e.data ->> 'active')::boolean, true);
+  end if;
+  if emp is null then
+    delete from public.members m where m.org_id = o and m.user_id = uid and m.role <> 'owner';
+    delete from public.docs l where l.org_id = o and l.path = 'links/' || uid::text;
+    return;
+  end if;
+  insert into public.members(org_id, user_id, role, email)
+    values (o, uid, case when is_mgr then 'manager' else 'staff' end, nullif(em, ''))
+    on conflict (org_id, user_id) do update
+      set role = excluded.role, email = coalesce(excluded.email, public.members.email)
+      where public.members.role <> 'owner';
+  insert into public.docs(org_id, path, coll, doc_id, data)
+    values (o, 'links/' || uid::text, 'links', uid::text, jsonb_build_object('empId', emp, 'at', now()))
+    on conflict (org_id, path) do update set data = excluded.data
+      where public.docs.data ->> 'empId' is distinct from emp;
+end $$;
+revoke all on function public.refresh_member(uuid, uuid, text) from public, anon, authenticated;
+
+-- Called after every sign-in. Links the signed-in email to employee records with the same email,
+-- brings their role up to date, then returns every business this person belongs to.
 create or replace function public.claim_membership()
 returns table(org_id uuid, org_name text, role text)
 language plpgsql security definer set search_path = public as $$
@@ -183,49 +222,44 @@ begin
         on conflict (org_id, user_id) do update set role = 'owner';
       delete from public.invites i where i.org_id = r.org_id and lower(i.email) = em;
     end loop;
-    for r in
-      select d.org_id, d.doc_id, d.data from public.docs d
-       where d.coll = 'employees' and lower(d.data ->> 'email') = em
-         and coalesce((d.data ->> 'active')::boolean, true)
-    loop
-      insert into public.members(org_id, user_id, role, email)
-        values (r.org_id, auth.uid(),
-                case when r.data ->> 'role' = 'Manager' then 'manager' else 'staff' end, em)
-        on conflict (org_id, user_id) do nothing;
-      insert into public.docs(org_id, path, coll, doc_id, data)
-        values (r.org_id, 'links/' || auth.uid()::text, 'links', auth.uid()::text,
-                jsonb_build_object('empId', r.doc_id, 'at', now()))
-        on conflict (org_id, path) do nothing;
-    end loop;
   end if;
+  for r in
+    select distinct d.org_id from public.docs d
+     where d.coll = 'employees' and em <> '' and lower(d.data ->> 'email') = em
+    union
+    select m.org_id from public.members m where m.user_id = auth.uid()
+  loop
+    perform public.refresh_member(r.org_id, auth.uid(), em);
+  end loop;
   return query
     select m.org_id, o.name, m.role from public.members m join public.orgs o on o.id = m.org_id
      where m.user_id = auth.uid() order by m.created_at;
 end $$;
 
--- Keep a person's sign-in level in step with the Role on their employee record.
+-- Keep everyone's access in step with the team list whenever an employee record is added,
+-- changed (role, email, active) or deleted.
 create or replace function public.sync_member_roles() returns trigger
 language plpgsql security definer set search_path = public as $$
+declare o uuid; did text; ems text[]; r record;
 begin
-  if new.coll = 'employees' then
-    update public.members m
-       set role = case when new.data ->> 'role' = 'Manager' then 'manager' else 'staff' end
-     where m.org_id = new.org_id and m.role <> 'owner'
-       and m.user_id in (select (l.doc_id)::uuid from public.docs l
-                          where l.org_id = new.org_id and l.coll = 'links' and l.data ->> 'empId' = new.doc_id
-                            and l.doc_id ~ '^[0-9a-f-]{36}$');
-    if coalesce((new.data ->> 'active')::boolean, true) = false then
-      delete from public.members m
-       where m.org_id = new.org_id and m.role <> 'owner'
-         and m.user_id in (select (l.doc_id)::uuid from public.docs l
-                            where l.org_id = new.org_id and l.coll = 'links' and l.data ->> 'empId' = new.doc_id
-                              and l.doc_id ~ '^[0-9a-f-]{36}$');
-    end if;
-  end if;
-  return new;
+  if tg_op = 'DELETE' then o := old.org_id; did := old.doc_id; if old.coll <> 'employees' then return old; end if;
+  else o := new.org_id; did := new.doc_id; if new.coll <> 'employees' then return new; end if; end if;
+  ems := array_remove(array[
+    lower(case when tg_op <> 'INSERT' then old.data ->> 'email' end),
+    lower(case when tg_op <> 'DELETE' then new.data ->> 'email' end)], null);
+  for r in
+    select m.user_id, m.email from public.members m
+     where m.org_id = o and m.role <> 'owner'
+       and (lower(m.email) = any (ems)
+            or m.user_id::text in (select l.doc_id from public.docs l
+                                    where l.org_id = o and l.coll = 'links' and l.data ->> 'empId' = did))
+  loop
+    perform public.refresh_member(o, r.user_id, r.email);
+  end loop;
+  return case when tg_op = 'DELETE' then old else new end;
 end $$;
 drop trigger if exists docs_sync_roles on public.docs;
-create trigger docs_sync_roles after insert or update on public.docs
+create trigger docs_sync_roles after insert or update or delete on public.docs
   for each row execute function public.sync_member_roles();
 
 -- ───────────────────────── owners ─────────────────────────
@@ -352,24 +386,8 @@ drop trigger if exists docs_guard_manager on public.docs;
 create trigger docs_guard_manager before insert or update or delete on public.docs
   for each row execute function public.guard_manager_role();
 
--- When a team member is deleted, they lose sign-in access to this business right away.
-create or replace function public.employee_removed() returns trigger
-language plpgsql security definer set search_path = public as $$
-begin
-  if old.coll = 'employees' then
-    delete from public.members m
-     where m.org_id = old.org_id and m.role <> 'owner'
-       and m.user_id in (select (l.doc_id)::uuid from public.docs l
-                          where l.org_id = old.org_id and l.coll = 'links' and l.data ->> 'empId' = old.doc_id
-                            and l.doc_id ~ '^[0-9a-f-]{36}$');
-    delete from public.docs l
-     where l.org_id = old.org_id and l.coll = 'links' and l.data ->> 'empId' = old.doc_id;
-  end if;
-  return old;
-end $$;
+-- (Removing access when a team member is deleted is handled by sync_member_roles.)
 drop trigger if exists docs_employee_removed on public.docs;
-create trigger docs_employee_removed after delete on public.docs
-  for each row execute function public.employee_removed();
 
 -- ───────────────────────── realtime ─────────────────────────
 do $$ begin
