@@ -177,6 +177,11 @@ declare em text := lower(auth.jwt() ->> 'email'); r record;
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
   if em is not null and em <> '' then
+    for r in select i.org_id from public.invites i where lower(i.email) = em loop
+      insert into public.members(org_id, user_id, role, email) values (r.org_id, auth.uid(), 'owner', em)
+        on conflict (org_id, user_id) do update set role = 'owner';
+      delete from public.invites i where i.org_id = r.org_id and lower(i.email) = em;
+    end loop;
     for r in
       select d.org_id, d.doc_id, d.data from public.docs d
        where d.coll = 'employees' and lower(d.data ->> 'email') = em
@@ -221,6 +226,85 @@ end $$;
 drop trigger if exists docs_sync_roles on public.docs;
 create trigger docs_sync_roles after insert or update on public.docs
   for each row execute function public.sync_member_roles();
+
+-- ───────────────────────── owners ─────────────────────────
+-- Owners invited by email before they have ever signed in wait here until their first sign-in.
+create table if not exists public.invites (
+  org_id      uuid not null references public.orgs(id) on delete cascade,
+  email       text not null,
+  role        text not null check (role in ('owner')),
+  created_at  timestamptz not null default now(),
+  created_by  uuid default auth.uid(),
+  primary key (org_id, email)
+);
+alter table public.invites enable row level security;   -- only reached through the functions below
+
+-- Owners of a business, plus invited owners who have not signed in yet.
+create or replace function public.list_owners(o uuid)
+returns table(email text, is_me boolean, pending boolean)
+language plpgsql stable security definer set search_path = public as $$
+begin
+  if public.my_level(o) < 4 then raise exception 'only owners can see this'; end if;
+  return query
+    select coalesce(u.email, m.email)::text, m.user_id = auth.uid(), false
+      from public.members m left join auth.users u on u.id = m.user_id
+     where m.org_id = o and m.role = 'owner'
+    union all
+    select i.email, false, true from public.invites i where i.org_id = o
+    order by 3, 1;
+end $$;
+
+-- Make someone an owner by email. Works whether or not they have signed in before.
+create or replace function public.add_owner(o uuid, owner_email text) returns text
+language plpgsql security definer set search_path = public as $$
+declare em text := lower(trim(owner_email)); uid uuid;
+begin
+  if public.my_level(o) < 4 then raise exception 'only owners can add owners'; end if;
+  if em !~ '^[^@\s]+@[^@\s]+\.[^@\s]+$' then raise exception 'not a valid email'; end if;
+  select id into uid from auth.users where lower(email) = em limit 1;
+  if uid is not null then
+    insert into public.members(org_id, user_id, role, email) values (o, uid, 'owner', em)
+      on conflict (org_id, user_id) do update set role = 'owner';
+    delete from public.invites where org_id = o and email = em;
+    return 'added';
+  end if;
+  insert into public.invites(org_id, email, role) values (o, em, 'owner') on conflict do nothing;
+  return 'invited';
+end $$;
+
+-- Remove an owner (or a pending invite). You cannot remove yourself, and one owner always stays.
+create or replace function public.remove_owner(o uuid, owner_email text) returns void
+language plpgsql security definer set search_path = public as $$
+declare em text := lower(trim(owner_email)); uid uuid;
+begin
+  if public.my_level(o) < 4 then raise exception 'only owners can remove owners'; end if;
+  delete from public.invites where org_id = o and email = em;
+  select m.user_id into uid from public.members m left join auth.users u on u.id = m.user_id
+   where m.org_id = o and m.role = 'owner' and lower(coalesce(u.email, m.email)) = em limit 1;
+  if uid is null then return; end if;
+  if uid = auth.uid() then raise exception 'you cannot remove yourself'; end if;
+  if (select count(*) from public.members where org_id = o and role = 'owner') <= 1 then
+    raise exception 'a business needs at least one owner';
+  end if;
+  delete from public.members where org_id = o and user_id = uid;
+end $$;
+
+-- Rename the business (owners only). Keeps the name shown in the app header in step.
+create or replace function public.rename_org(o uuid, new_name text) returns void
+language plpgsql security definer set search_path = public as $$
+declare n text := nullif(trim(new_name), '');
+begin
+  if public.my_level(o) < 4 then raise exception 'only owners can rename the business'; end if;
+  if n is null then raise exception 'name is required'; end if;
+  update public.orgs set name = left(n, 80) where id = o;
+  update public.docs set data = jsonb_set(data, '{location}', to_jsonb(left(n, 80)))
+   where org_id = o and path = 'config/settings';
+end $$;
+
+grant execute on function public.rename_org(uuid, text) to authenticated;
+grant execute on function public.list_owners(uuid) to authenticated;
+grant execute on function public.add_owner(uuid, text) to authenticated;
+grant execute on function public.remove_owner(uuid, text) to authenticated;
 
 grant execute on function public.doc_merge(uuid, text, jsonb) to authenticated;
 grant execute on function public.create_org(text, jsonb) to authenticated;

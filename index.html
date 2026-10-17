@@ -624,6 +624,7 @@ function spark(v){if(v.length<2)return'';const w=90,h=28,mn=Math.min(...v,60),mx
 function teamSet(){const s=D.settings;
   return `${isOwner?`<div class="card stack"><h3>Preview other views</h3><p class="small muted">See the app the way a store manager or a staff member sees it. Nothing changes for anyone else. Tap "Exit preview" to come back.</p><div class="g2"><button class="btn" data-act="pvStart" data-k="mgr">${ic('users')} Preview as manager</button><button class="btn" data-act="pvStart" data-k="emp">${ic('clock')} Preview as staff</button></div></div>`:''}
   ${accountCard()}
+  ${isOwner&&!UI.pv?businessCard():''}
   <div class="card stack"><h3>${L('Daily times','每日时间')}</h3>
    <div class="g3"><label class="f">${L('Prep 1','备料 1')}<input class="in" type="time" id="st_prep1" value="${esc(s.prep1)}"></label><label class="f">${L('Prep 2','备料 2')}<input class="in" type="time" id="st_prep2" value="${esc(s.prep2)}"></label><label class="f">${L('Closing by','打烊截止')}<input class="in" type="time" id="st_close" value="${esc(s.closeBy)}"></label></div>
    <div class="g3"><label class="f">${L('Photo grace (min)','照片宽限(分)')}<input class="in" type="number" id="st_pg" value="${s.photoGrace}"></label><label class="f">${L('Late after (min)','迟到宽限(分)')}<input class="in" type="number" id="st_lg" value="${s.lateGrace}"></label><label class="f">${L('OT after (h/wk)','加班线(时/周)')}<input class="in" type="number" id="st_ot" value="${s.otWeekly}"></label></div>
@@ -735,6 +736,20 @@ function fixedSheet(id){const f=id?(D.fixed||[]).find(x=>x.id===id):{name:'',amo
    <div class="g2"><label class="f">Amount ($)<input class="in" type="number" step="0.01" inputmode="decimal" id="fx_amt" value="${esc(f.amount)}"></label><label class="f">Every<select class="in" id="fx_freq">${[['month','Month'],['week','Week'],['year','Year']].map(([k,n])=>`<option value="${k}" ${f.freq===k?'selected':''}>${n}</option>`).join('')}</select></label></div>
    <label class="f">Store<select class="in" id="fx_loc"><option value="all" ${f.loc==='all'?'selected':''}>Both stores (split evenly)</option>${LOCS().map(l=>`<option value="${l.id}" ${f.loc===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></label>`,
    foot:()=>`${id?`<button class="btn bad" data-act="fixedDel" data-id="${esc(id)}">Delete</button>`:''}<button class="btn pri" data-act="fixedSave" data-id="${esc(id||'')}">Save</button>`})}
+function businessCard(){const a=window.blissAccount;if(!a?.renameOrg)return'';
+  if(UI.owners===undefined){UI.owners=null;a.listOwners().then(r=>{UI.owners=r||[];render()}).catch(e=>{UI.owners=[];UI.ownErr=e.message;render()})}
+  const os=UI.owners;
+  return `<div class="card stack"><h3>Business</h3>
+   <label class="f">Business name<input class="in" id="bz_name" maxlength="80" value="${esc(a.org||'')}"></label>
+   <button class="btn" data-act="bzRename">Save name</button></div>
+  <div class="card stack"><h3>Stores</h3><p class="small muted">Rename a store here. Everything recorded for it stays with it.</p>
+   ${LOCS().map(l=>`<label class="f">${esc(l.name)}<input class="in" data-loc="${esc(l.id)}" maxlength="40" value="${esc(l.name)}"></label>`).join('')}
+   <label class="f">Add a store (optional)<input class="in" id="bz_newloc" maxlength="40" placeholder="e.g. Glastonbury"></label>
+   <button class="btn" data-act="bzStores">Save stores</button></div>
+  <div class="card stack"><h3>Owners</h3><p class="small muted">Owners see everything: profit, every store, wages. Add someone by email. If they have never signed in, they become an owner the first time they do.</p>
+   ${os===null?'<p class="small muted">Loading…</p>':`<div class="list">${os.map(o=>`<div class="li" style="padding-inline:0"><div class="grow"><div class="t">${esc(o.email)}</div><div class="small muted">${o.is_me?'You':o.pending?'Invited · becomes owner at first sign-in':'Owner'}</div></div>${o.is_me?'':`<button class="btn sm" data-act="bzOwnDel" data-e="${esc(o.email)}">${UI.ownDel===o.email?'Tap again to remove':'Remove'}</button>`}</div>`).join('')}</div>`}
+   ${UI.ownErr?`<div class="hint warn">${esc(UI.ownErr)}</div>`:''}
+   <div class="row"><input class="in grow" id="bz_own" type="email" inputmode="email" autocomplete="off" placeholder="email@example.com"><button class="btn pri" data-act="bzOwnAdd">Add owner</button></div></div>`}
 function accountCard(){const a=window.blissAccount;if(!a)return'';return `<div class="card row wrapr"><div class="grow"><div class="eyebrow">Signed in</div><div class="t" style="font-weight:600">${esc(a.email||'')}</div><div class="small muted">${esc(a.org||'')} · ${esc(a.role||'')}</div></div>${(a.orgs||[]).length>1?`<button class="btn sm" data-act="switchOrg">Switch business</button>`:''}<button class="btn sm" data-act="signOut">Sign out</button></div>`}
 const VIEWS={owner:vOwner,home:vHome,stock:vStock,photos:vPhotos,sched:vSched,team:vTeam,etoday:vEToday,eshift:vEShift,etrain:vETrain};
 function level(t){if(t>=90)return['ok','Excellent'];if(t>=80)return['info','Good'];if(t>=70)return['warn','Needs Improvement'];return['bad','Unsatisfactory']}
@@ -1026,6 +1041,12 @@ const ACT={
  ruleDel:d=>{asGrab();const R=asRules();d.k==='keep'?asRulesSet(R.keep.filter(r=>r.id!==d.id),R.week):asRulesSet(R.keep,R.week.filter(r=>r.id!==d.id))},
  ruleOn:(d,el)=>{const R=asRules();const f=l=>l.map(r=>r.id===d.id?{...r,on:el.checked}:r);asGrab();d.k==='keep'?asRulesSet(f(R.keep),R.week):asRulesSet(R.keep,f(R.week))},
  ruleKeep:d=>{asGrab();const R=asRules();const r=R.week.find(x=>x.id===d.id);if(!r)return;asRulesSet([...R.keep,r],R.week.filter(x=>x.id!==d.id));toast('Kept for every week')},asGen:()=>{if(!AS?.busy)asGenerate()},asApply:()=>asApply(),asWk:d=>{asGrab();AS.ws=addDays(AS.ws,+d.n);asLoadDraft();drawSheet()},asRange:d=>{asGrab();AS.ws=d.s;AS.n=+d.n;asLoadDraft();drawSheet()},needsEdit:()=>{asGrab();needsSheet()},
+ bzRename:async()=>{const n=$('#bz_name').value.trim();if(!n){toast('Enter a name');return}try{await window.blissAccount.renameOrg(n);D.settings={...D.settings,location:n};toast('Business name saved');render()}catch(e){toast(e.message)}},
+ bzStores:async()=>{const locs=LOCS().map(l=>{const v=document.querySelector(`[data-loc="${CSS.escape(l.id)}"]`)?.value.trim();return {...l,name:v||l.name}});const nl=$('#bz_newloc').value.trim();
+   if(nl){let id=slug(nl).slice(0,12)||'store';while(locs.some(l=>l.id===id))id+='2';locs.push({id,name:nl})}
+   const s={...D.settings,locations:locs};if(await W(A.db.doc('config/settings').set(s))){D.settings=s;toast('Stores saved');render()}},
+ bzOwnAdd:async()=>{const e=$('#bz_own').value.trim();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)){toast('Enter a valid email');return}try{const r=await window.blissAccount.addOwner(e);toast(r==='invited'?'Invited. They become an owner when they first sign in':'Added as owner');UI.ownErr=null;UI.owners=undefined;render()}catch(x){toast(x.message)}},
+ bzOwnDel:async d=>{if(UI.ownDel!==d.e){UI.ownDel=d.e;render();return}UI.ownDel=null;try{await window.blissAccount.removeOwner(d.e);toast('Removed');UI.owners=undefined;render()}catch(x){toast(x.message)}},
  signOut:()=>window.blissAccount?.signOut(),switchOrg:()=>window.blissAccount?.switchOrg(),
  stF:d=>{UI.stF=d.k;render()},stT:d=>{UI.stT=d.k;render()},
  ownerSub:d=>{UI.osub=d.k;render()},

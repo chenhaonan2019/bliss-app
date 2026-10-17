@@ -122,7 +122,16 @@
   let started = false;
   function useOrg(o) {
     ORG = o.org_id; ROLE = o.role; lsSet("org", ORG);
-    window.blissAccount = { email: EMAIL, org: o.org_name, role: ROLE, orgs: ORGS, signOut, switchOrg: () => { lsSet("org", ""); location.reload(); } };
+    const rpc = async (fn, args) => { const { data, error } = await SB.rpc(fn, { o: ORG, ...args }); if (error) throw new Error(error.message); return data; };
+    window.blissAccount = {
+      email: EMAIL, org: o.org_name, role: ROLE, orgs: ORGS, signOut,
+      switchOrg: () => { lsSet("org", ""); location.reload(); },
+      // owner tools
+      listOwners: () => rpc("list_owners", {}),
+      addOwner: (email) => rpc("add_owner", { owner_email: email }),
+      removeOwner: (email) => rpc("remove_owner", { owner_email: email }),
+      renameOrg: async (name) => { await rpc("rename_org", { new_name: name }); window.blissAccount.org = name.trim(); },
+    };
     hideAuth();
     if (started) { location.reload(); return; }
     started = true; startRealtime(); readyResolve();
