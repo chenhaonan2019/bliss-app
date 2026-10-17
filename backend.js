@@ -1,5 +1,5 @@
 /* BLISS Manager · backend bridge
- * Signs people in with Supabase (email + 6-digit code) and gives the app the same
+ * Signs people in with Supabase (email + one-time code) and gives the app the same
  * small data API it used inside Claude: db, user, assets, sample (Claude AI), downloads.
  */
 (function () {
@@ -35,7 +35,7 @@
 
   function showEmail(msg) {
     screen(`<h2 style="text-align:center">Sign in</h2>
-      <p class="muted small" style="text-align:center">Enter your email. We'll send you a 6-digit code.</p>
+      <p class="muted small" style="text-align:center">Enter your email. We'll send you a sign-in code.</p>
       <label class="f">Email<input class="in" id="au_email" type="email" autocomplete="email" inputmode="email" value="${esc(lsGet("email") || "")}" placeholder="you@example.com"></label>
       <button class="btn pri big" id="au_send">Send code</button><div class="err" id="au_err">${esc(msg || "")}</div>`);
     const go = async () => {
@@ -61,7 +61,7 @@
   function showCode(email) {
     screen(`<h2 style="text-align:center">Check your email</h2>
       <p class="muted small" style="text-align:center">We sent a code to <b>${esc(email)}</b>. Enter it below, or tap the link in the email.</p>
-      <input class="in code" id="au_code" inputmode="numeric" autocomplete="one-time-code" maxlength="8" placeholder="······" aria-label="Code">
+      <input class="in code" id="au_code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code" aria-label="Code">
       <button class="btn pri big" id="au_ok">Sign in</button><div class="err" id="au_err"></div>
       <button class="link" id="au_back">Use a different email</button>`);
     const go = async () => {
@@ -72,7 +72,14 @@
       if (error) { b.disabled = false; b.textContent = "Sign in"; document.getElementById("au_err").textContent = "That code didn't work. Check it or request a new one."; }
     };
     document.getElementById("au_ok").onclick = go;
-    document.getElementById("au_code").oninput = (e) => { if (e.target.value.replace(/\D/g, "").length >= 6) go(); };
+    // Codes can be 6–10 digits (a Supabase setting). Submit by itself only when the whole code
+    // arrives at once (paste or the phone's code autofill); otherwise the person taps Sign in.
+    document.getElementById("au_code").oninput = (e) => {
+      const n = e.target.value.replace(/\D/g, "").length;
+      const whole = e.inputType === "insertFromPaste" || e.inputType === "insertReplacementText" || !e.inputType;
+      if (whole && n >= 6) go();
+    };
+    document.getElementById("au_code").onkeydown = (e) => { if (e.key === "Enter") go(); };
     document.getElementById("au_back").onclick = () => showEmail();
     setTimeout(() => document.getElementById("au_code")?.focus(), 50);
   }
