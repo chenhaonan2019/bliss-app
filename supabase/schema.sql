@@ -289,6 +289,19 @@ begin
   delete from public.members where org_id = o and user_id = uid;
 end $$;
 
+-- Mark team members' sign-in accounts as confirmed, so they get the normal sign-in code email
+-- (not a "confirm your email" email). Only the "team" Edge Function can call this.
+create or replace function public.confirm_team_emails(emails text[]) returns int
+language sql security definer set search_path = public, auth as $$
+  with u as (
+    update auth.users set email_confirmed_at = now()
+     where lower(email) = any (select lower(e) from unnest(emails) e) and email_confirmed_at is null
+    returning 1)
+  select count(*)::int from u
+$$;
+revoke all on function public.confirm_team_emails(text[]) from public, anon, authenticated;
+grant execute on function public.confirm_team_emails(text[]) to service_role;
+
 -- Rename the business (owners only). Keeps the name shown in the app header in step.
 create or replace function public.rename_org(o uuid, new_name text) returns void
 language plpgsql security definer set search_path = public as $$

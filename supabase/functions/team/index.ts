@@ -64,5 +64,11 @@ Deno.serve(async (req) => {
     else if (r.status === 422 || r.status === 409) existing.push(email); // already has an account
     else skipped.push(email);
   }
+  // Someone who requested a code before being added has an unconfirmed account: confirm it.
+  if (existing.length) {
+    await fetch(`${url}/rest/v1/rpc/confirm_team_emails`, {
+      method: "POST", headers: { ...svc, "Content-Type": "application/json" }, body: JSON.stringify({ emails: existing }),
+    });
+  }
   return json({ created, existing, skipped });
 });
