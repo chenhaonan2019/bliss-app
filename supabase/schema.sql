@@ -311,6 +311,25 @@ grant execute on function public.create_org(text, jsonb) to authenticated;
 grant execute on function public.claim_membership() to authenticated;
 grant execute on function public.my_level(uuid) to authenticated;
 
+-- Only owners can make someone a Manager or change a Manager's role.
+-- (Changes made in the SQL Editor, with no signed-in user, are allowed.)
+create or replace function public.guard_manager_role() returns trigger
+language plpgsql security definer set search_path = public as $$
+declare was text; now_role text;
+begin
+  if new.coll <> 'employees' or auth.uid() is null or public.my_level(new.org_id) >= 4 then return new; end if;
+  now_role := new.data ->> 'role';
+  was := case when tg_op = 'UPDATE' then old.data ->> 'role' else null end;
+  if (now_role = 'Manager' and coalesce(was, '') <> 'Manager')
+     or (was = 'Manager' and coalesce(now_role, '') <> 'Manager') then
+    raise exception 'Only an owner can add or change a Manager' using errcode = '42501';
+  end if;
+  return new;
+end $$;
+drop trigger if exists docs_guard_manager on public.docs;
+create trigger docs_guard_manager before insert or update on public.docs
+  for each row execute function public.guard_manager_role();
+
 -- ───────────────────────── realtime ─────────────────────────
 do $$ begin
   alter publication supabase_realtime add table public.docs;

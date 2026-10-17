@@ -26,7 +26,10 @@ It is a static web app (no build step) backed by [Supabase](https://supabase.com
 4. **Claude AI.** Supabase → Edge Functions → Deploy a new function → *Via Editor* → name `ai` → paste
    `supabase/functions/ai/index.ts` → Deploy. Then Edge Functions → *Secrets* → add `ANTHROPIC_API_KEY`
    with your key from console.anthropic.com.
-5. **Website.** vercel.com → Add New → Project → import `bliss-app` → Framework preset *Other* → Deploy.
+5. **Team sign-in accounts.** Edge Functions → Deploy a new function → *Via Editor* → name `team` → paste
+   `supabase/functions/team/index.ts` → Deploy. When a manager or owner adds someone's email in Team → People,
+   this creates their sign-in account, so only people on the team can get a sign-in code.
+6. **Website.** vercel.com → Add New → Project → import `bliss-app` → Framework preset *Other* → Deploy.
    No build command or environment variables are needed.
 
 ## First sign-in

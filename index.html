@@ -924,7 +924,8 @@ function empSheet(id){const e=id?D.employees[id]:{name:'',email:'',role:'Staff',
    <label class="f">${L('Name','姓名')}<input class="in" id="e_name" value="${esc(e.name)}"></label>
    <label class="f">Location<select class="in" id="e_loc">${LOCS().map(l=>`<option value="${l.id}" ${(e.loc||curLoc())===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></label>
    <div class="g2"><label class="f">${L('Email','邮箱')}<input class="in" type="email" id="e_email" value="${esc(e.email||'')}"></label><label class="f">Phone<input class="in" type="tel" inputmode="tel" id="e_phone" value="${esc(e.phone||'')}" placeholder="(860) 555-0123"></label></div>
-   <div class="g2"><label class="f">${L('Role','职位')}<select class="in" id="e_role">${['Staff','Shift Lead','Manager','Trainee'].map(r=>`<option ${e.role===r?'selected':''}>${r}</option>`).join('')}</select></label><span></span></div>
+   ${(()=>{const lockMgr=!isOwner&&e.role==='Manager';const roles=isOwner||lockMgr?['Staff','Shift Lead','Manager','Trainee']:['Staff','Shift Lead','Trainee'];
+     return `<div class="g2"><label class="f">${L('Role','职位')}<select class="in" id="e_role" ${lockMgr?'disabled':''}>${roles.map(r=>`<option ${e.role===r?'selected':''}>${r}</option>`).join('')}</select></label><span></span></div>${lockMgr?'<p class="tiny muted">Only an owner can change a manager\'s role.</p>':isOwner?'':'<p class="tiny muted">Only an owner can add a manager.</p>'}`})()}
    <div class="g3"><label class="f">Payroll $/h<input class="in" type="number" step="0.01" id="e_wage" value="${esc(D.wages[id]??'')}"></label><label class="f">Cash $/h<input class="in" type="number" step="0.01" id="e_cash" value="${esc(D.cashRates?.[id]??'')}"></label><label class="f">Payroll hours/week<input class="in" type="number" step="0.5" id="e_cap" value="${esc(D.payCaps?.[id]??'')}" placeholder="all"></label></div>
    <p class="tiny muted">With both rates, the first hours each week go on payroll and the rest are paid in cash. Leave payroll hours blank to put every hour on payroll.</p>
    <label class="f">${L('Store-phone PIN','共用手机 PIN')}<input class="in" inputmode="numeric" maxlength="6" id="e_pin" value="${esc(D.mgrSet.pins?.[id]||'')}"></label>
@@ -1125,7 +1126,11 @@ const ACT={
  empEdit:d=>empSheet(d.id),
  empSave:async d=>{const name=$('#e_name').value.trim();if(!name){toast(L('Enter a name','请填写姓名'));return}const id=d.id||slug(name)+'-'+uidGen().slice(-4);
    const body={name,loc:$('#e_loc').value,email:$('#e_email').value.trim(),phone:$('#e_phone').value.trim(),role:$('#e_role').value,color:document.querySelector('input[name=e_color]:checked')?.value||COLORS[0],active:$('#e_active').checked};
+   const prev=D.employees[id]?{...D.employees[id]}:null;
+   if(body.role==='Manager'&&!isOwner&&prev?.role!=='Manager'){toast('Only an owner can add a manager');return}
    if(!await W(A.db.doc('employees/'+id).set(body)))return;
+   if(body.email&&body.active&&window.blissAccount?.ensureUsers&&(!prev||body.email.toLowerCase()!==String(prev.email||'').toLowerCase()||prev.active===false)){
+     window.blissAccount.ensureUsers([body.email]).then(r=>{if(r?.created?.length)toast(`${name} can now sign in with ${body.email}`)}).catch(e=>toast(e.message))}
    const st=(o,v)=>{const x={...(o||{})};if(v==null)delete x[id];else x[id]=v;return x};await W(A.db.doc('mgr/wages').set({rates:st(D.wages,num($('#e_wage').value)),cash:st(D.cashRates,num($('#e_cash').value)),caps:st(D.payCaps,num($('#e_cap').value))}));
    const pin=$('#e_pin').value.trim();const pins={...(D.mgrSet.pins||{})};if(pin)pins[id]=pin;else delete pins[id];await W(A.db.doc('mgr/settings').set({...D.mgrSet,pins}));closeSheet()},
  linkAcct:async d=>{const e=$('#lk_'+CSS.escape(d.u))?.value;if(!e){toast(L('Choose a team member','请选择员工'));return}if(await W(A.db.doc('links/'+d.u).set({empId:e,at:new Date().toISOString()}))){await W(A.db.doc('pending/'+d.u).delete());toast(L('Linked','已关联'))}},
@@ -1353,6 +1358,9 @@ async function boot(){
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
     subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='sched')D.schedCfg=v})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
+  if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
+    if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
+      window.blissAccount.ensureUsers(em).then(()=>{try{localStorage.setItem(k,t)}catch{}}).catch(e=>console.warn('acct sync',e))},3000)}
   if(uid&&!isOwner){const l=await db.doc('links/'+uid).get().catch(()=>null);if(!l?.exists){db.doc('pending/'+uid).set({at:new Date().toISOString()}).catch(()=>{})}}
   render();
   setInterval(()=>{if(!SH&&!typing($('#view')))render()},60000);

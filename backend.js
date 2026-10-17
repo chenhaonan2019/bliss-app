@@ -42,8 +42,16 @@
       const email = document.getElementById("au_email").value.trim().toLowerCase();
       if (!/^\S+@\S+\.\S+$/.test(email)) { document.getElementById("au_err").textContent = "Enter a valid email address."; return; }
       const b = document.getElementById("au_send"); b.disabled = true; b.textContent = "Sending…";
-      const { error } = await SB.auth.signInWithOtp({ email, options: { shouldCreateUser: true, emailRedirectTo: location.origin + location.pathname } });
-      if (error) { b.disabled = false; b.textContent = "Send code"; document.getElementById("au_err").textContent = errOf(error); return; }
+      // Accounts are created when a manager or owner adds the email, so unknown emails get a clear message.
+      const { error } = await SB.auth.signInWithOtp({ email, options: { shouldCreateUser: false, emailRedirectTo: location.origin + location.pathname } });
+      if (error) {
+        b.disabled = false; b.textContent = "Send code";
+        const m = errOf(error);
+        document.getElementById("au_err").textContent = /signups? not allowed|not found|user/i.test(m) && !/rate/i.test(m)
+          ? "This email isn't on a team yet. Ask your manager to add it in Team → People, then try again."
+          : m;
+        return;
+      }
       lsSet("email", email); showCode(email);
     };
     document.getElementById("au_send").onclick = go;
@@ -132,8 +140,20 @@
       switchOrg: () => { lsSet("org", ""); location.reload(); },
       // owner tools
       listOwners: () => rpc("list_owners", {}),
-      addOwner: (email) => rpc("add_owner", { owner_email: email }),
+      addOwner: async (email) => {
+        const r = await rpc("add_owner", { owner_email: email });
+        if (r === "invited") await window.blissAccount.ensureUsers([email]).catch((e) => console.warn(e));
+        return r;
+      },
       removeOwner: (email) => rpc("remove_owner", { owner_email: email }),
+      // Create sign-in accounts for team emails (runs the "team" Edge Function).
+      ensureUsers: async (emails) => {
+        const list = (emails || []).filter(Boolean);
+        if (!list.length) return { created: [], existing: [], skipped: [] };
+        const { data, error } = await SB.functions.invoke("team", { body: { org_id: ORG, emails: list } });
+        if (error) throw new Error("Could not create the sign-in account. Is the \"team\" function deployed?");
+        return data;
+      },
       renameOrg: async (name) => { await rpc("rename_org", { new_name: name }); window.blissAccount.org = name.trim(); },
     };
     hideAuth();
