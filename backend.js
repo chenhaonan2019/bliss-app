@@ -60,7 +60,7 @@
 
   function showCode(email) {
     screen(`<h2 style="text-align:center">Check your email</h2>
-      <p class="muted small" style="text-align:center">We sent a code to <b>${esc(email)}</b>. Enter it below, or tap the link in the email.</p>
+      <p class="muted small" style="text-align:center">We sent a code to <b>${esc(email)}</b>. Enter it below. Check Spam if it is not in your inbox.</p>
       <input class="in code" id="au_code" inputmode="numeric" autocomplete="one-time-code" maxlength="10" placeholder="Code" aria-label="Code">
       <button class="btn pri big" id="au_ok">Sign in</button><div class="err" id="au_err"></div>
       <button class="link" id="au_back">Use a different email</button>`);
