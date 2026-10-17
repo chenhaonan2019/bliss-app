@@ -271,8 +271,8 @@ const chip=(k,t)=>`<span class="chip ${k}">${t}</span>`;
 
 /* ---------- toast / sheet / viewer ---------- */
 let toastT;
-function toast(m){const t=$('#toast');t.innerHTML=`<div class="toast" role="status">${esc(m)}</div>`;clearTimeout(toastT);toastT=setTimeout(()=>t.innerHTML='',2600)}
-function errMsg(e){const c=e?.code||'';if(/^Only an owner/.test(e?.message||''))return e.message;if(c==='invalid_argument')return L('You do not have permission to change this.','你没有权限修改这一项。');if(c==='quota_exceeded')return L('Storage is full. Delete old records first.','存储已满，请先删除旧记录。');if(c==='too_large')return L('Photo is too large.','照片太大。');if(c==='rate_limited'||c==='resource_exhausted')return L('Too many requests. Try again in a moment.','操作太频繁，请稍后再试。');return L('Could not save. Check your connection and try again.','保存失败，请检查网络后重试。')}
+function toast(m){const t=$('#toast');t.innerHTML=`<div class="toast" role="status">${esc(m)}</div>`;clearTimeout(toastT);toastT=setTimeout(()=>t.innerHTML='',String(m).length>80?7000:2600)}
+function errMsg(e){const c=e?.code||'';if(/^Only an owner/.test(e?.message||''))return e.message;if(c==='invalid_argument')return L('You do not have permission to change this.','你没有权限修改这一项。')+(e?.message?` (${String(e.message).slice(0,140)})`:'');if(c==='quota_exceeded')return L('Storage is full. Delete old records first.','存储已满，请先删除旧记录。');if(c==='too_large')return L('Photo is too large.','照片太大。');if(c==='rate_limited'||c==='resource_exhausted')return L('Too many requests. Try again in a moment.','操作太频繁，请稍后再试。');return L('Could not save. Check your connection and try again.','保存失败，请检查网络后重试。')}
 async function W(p){try{await p;return true}catch(e){console.warn(e);toast(errMsg(e));if(e?.code==='invalid_argument')window.blissAccount?.recheck?.();return false}}
 let SH=null;
 function openSheet(o){SH=o;drawSheet();document.body.style.overflow='hidden'}
