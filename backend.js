@@ -59,7 +59,7 @@
     const go = async () => {
       const token = document.getElementById("au_code").value.replace(/\D/g, "");
       if (token.length < 6) { document.getElementById("au_err").textContent = "Enter the code from the email."; return; }
-      const b = document.getElementById("au_ok"); b.disabled = true; b.textContent = "Checking…";
+      const b = document.getElementById("au_ok"); if (b.disabled) return; b.disabled = true; b.textContent = "Checking…";
       const { error } = await SB.auth.verifyOtp({ email, token, type: "email" });
       if (error) { b.disabled = false; b.textContent = "Sign in"; document.getElementById("au_err").textContent = "That code didn't work. Check it or request a new one."; }
     };
@@ -105,7 +105,11 @@
     document.getElementById("au_out").onclick = signOut;
   }
 
-  async function afterSignIn() {
+  // Only one sign-in check runs at a time (page load and the auth event can both start one).
+  let signing = null;
+  function afterSignIn() { if (!signing) signing = doSignIn().finally(() => { signing = null; }); return signing; }
+  async function doSignIn() {
+    if (started) return;
     const { data: { session } } = await SB.auth.getSession();
     if (!session) return showEmail();
     UID = session.user.id; EMAIL = session.user.email;
@@ -133,7 +137,7 @@
       renameOrg: async (name) => { await rpc("rename_org", { new_name: name }); window.blissAccount.org = name.trim(); },
     };
     hideAuth();
-    if (started) { location.reload(); return; }
+    if (started) return;
     started = true; startRealtime(); readyResolve();
   }
 
@@ -175,6 +179,9 @@
     try {
       const rows = await fetchQuery(s.q);
       if (!subs.has(s)) return;
+      const sig = JSON.stringify(rows);
+      if (sig === s.last) return;   // nothing changed: don't redraw
+      s.last = sig;
       if (s.q.path) s.next(snapDoc(rows[0], idOf(s.q.path)));
       else { const docs = rows.map((r) => snapDoc(r)); s.next({ docs, size: docs.length, empty: !docs.length, docChanges: () => docs.map((d, i) => ({ type: "added", doc: d, oldIndex: -1, newIndex: i })), metadata: { fromCache: false, hasPendingWrites: false } }); }
     } catch (e) { console.warn("bliss sub", e); }
