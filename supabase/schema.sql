@@ -52,9 +52,10 @@ $$;
 -- Minimum level to READ a path.
 create or replace function public.read_level(p text) returns int
 language sql immutable as $$
-  select case split_part(p, '/', 1)
-    when 'mgr'   then 3          -- wages, evaluations, scheduling priorities
-    when 'owner' then 4          -- fixed costs, sales, profit inputs
+  select case
+    when p = 'mgr/wages'                then 4   -- pay rates: owners only
+    when split_part(p, '/', 1) = 'mgr'   then 3   -- evaluations, scheduling priorities, PINs
+    when split_part(p, '/', 1) = 'owner' then 4   -- fixed costs, sales, profit inputs
     else 2 end
 $$;
 
@@ -62,7 +63,7 @@ $$;
 create or replace function public.write_level(p text) returns int
 language sql stable as $$
   select case
-    when split_part(p, '/', 1) = 'owner' then 4
+    when split_part(p, '/', 1) = 'owner' or p = 'mgr/wages' then 4
     when split_part(p, '/', 1) in ('mgr','config','employees','links','shifts','training') then 3
     when split_part(p, '/', 1) = 'trainreq'
       then case when split_part(p, '/', 2) = auth.uid()::text then 2 else 4 end
