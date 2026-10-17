@@ -317,6 +317,13 @@ create or replace function public.guard_manager_role() returns trigger
 language plpgsql security definer set search_path = public as $$
 declare was text; now_role text;
 begin
+  if tg_op = 'DELETE' then
+    if old.coll = 'employees' and auth.uid() is not null and public.my_level(old.org_id) < 4
+       and old.data ->> 'role' = 'Manager' then
+      raise exception 'Only an owner can remove a Manager' using errcode = '42501';
+    end if;
+    return old;
+  end if;
   if new.coll <> 'employees' or auth.uid() is null or public.my_level(new.org_id) >= 4 then return new; end if;
   now_role := new.data ->> 'role';
   was := case when tg_op = 'UPDATE' then old.data ->> 'role' else null end;
@@ -327,8 +334,27 @@ begin
   return new;
 end $$;
 drop trigger if exists docs_guard_manager on public.docs;
-create trigger docs_guard_manager before insert or update on public.docs
+create trigger docs_guard_manager before insert or update or delete on public.docs
   for each row execute function public.guard_manager_role();
+
+-- When a team member is deleted, they lose sign-in access to this business right away.
+create or replace function public.employee_removed() returns trigger
+language plpgsql security definer set search_path = public as $$
+begin
+  if old.coll = 'employees' then
+    delete from public.members m
+     where m.org_id = old.org_id and m.role <> 'owner'
+       and m.user_id in (select (l.doc_id)::uuid from public.docs l
+                          where l.org_id = old.org_id and l.coll = 'links' and l.data ->> 'empId' = old.doc_id
+                            and l.doc_id ~ '^[0-9a-f-]{36}$');
+    delete from public.docs l
+     where l.org_id = old.org_id and l.coll = 'links' and l.data ->> 'empId' = old.doc_id;
+  end if;
+  return old;
+end $$;
+drop trigger if exists docs_employee_removed on public.docs;
+create trigger docs_employee_removed after delete on public.docs
+  for each row execute function public.employee_removed();
 
 -- ───────────────────────── realtime ─────────────────────────
 do $$ begin

@@ -263,7 +263,7 @@ const payType=e=>{const w=wageOf(e);return w.pay&&w.cash?'split':w.cash?'cash':'
 const wageLabel=e=>{const w=wageOf(e);const a=[];if(w.pay)a.push(money(w.pay)+'/h payroll'+(w.cash&&w.cap!=null?` (first ${w.cap} h/wk)`:''));if(w.cash)a.push(money(w.cash)+'/h cash');return a.join(' + ')};
 function empTax(g){const t=taxRates();const fica=g*t.fica/100,futa=g*t.futa/100,suta=g*t.suta/100;return{fica,futa,suta,total:fica+futa+suta}}
 function laborSum(R){const o={payroll:0,cash:0,hrs:0,ot:0,sched:0,late:0,fica:0,futa:0,suta:0,tax:0};Object.values(R).forEach(r=>{o.hrs+=r.hrs;o.ot+=r.ot;o.sched+=r.sched;o.late+=r.late;o.cash+=r.cashPay;o.payroll+=r.payPay});const t=empTax(o.payroll);o.fica=t.fica;o.futa=t.futa;o.suta=t.suta;o.tax=t.total;o.cost=o.payroll+o.tax+o.cash;return o}
-const empName=id=>id==='manager'?'Manager':D.employees[id]?.name||L('Unknown','未知');
+const empName=id=>id==='manager'?'Manager':D.employees[id]?.name||D.former?.[id]||L('Unknown','未知');
 const COLORS=['#4E6B45','#2C6A9E','#B5562B','#7A4F9E','#B7700E','#1F8A7A','#A23B62','#56606B'];
 const COLOR_NAMES=['Matcha','Blue','Terracotta','Purple','Amber','Teal','Berry','Slate'];
 const avatar=id=>{const e=D.employees[id];const c=e?.color||COLORS[0];return `<span class="av" style="background:${esc(c)}">${esc((e?.name||'?').trim().charAt(0).toUpperCase())}</span>`};
@@ -932,7 +932,7 @@ function empSheet(id){const e=id?D.employees[id]:{name:'',email:'',role:'Staff',
    <div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:var(--muted)">Color on schedule<div class="swatches" role="radiogroup" aria-label="Color">${COLORS.map((c,i)=>`<label title="${COLOR_NAMES[i]}"><input type="radio" name="e_color" value="${c}" ${(e.color||COLORS[0])===c?'checked':''}><span class="sw" style="background:${c}">${esc((e.name||'A').trim().charAt(0).toUpperCase())}</span><small>${COLOR_NAMES[i]}</small></label>`).join('')}</div></div>
    <label class="row"><input type="checkbox" id="e_active" ${e.active!==false?'checked':''}> ${L('Active (shows in schedule and store phone)','在职（显示在排班和共用手机）')}</label>
    <p class="tiny muted">${L('Wage and PIN are only visible to managers.','时薪和 PIN 只有经理能看到。')}</p>`,
-   foot:()=>`<button class="btn pri" data-act="empSave" data-id="${id||''}">${L('Save','保存')}</button>`})}
+   foot:()=>`${id&&(isOwner||e.role!=='Manager')?`<button class="btn bad" data-act="empDel" data-id="${id}">${SH.confirmDel===id?'Tap again to delete':'Delete'}</button>`:''}<button class="btn pri" data-act="empSave" data-id="${id||''}">${L('Save','保存')}</button>`})}
 
 const EVAL=[{sec:'A',title:'Drink Quality & Recipe Accuracy',areas:[
   {id:'matcha',name:'Matcha Preparation',max:10,std:['Uses 3.5 matcha + 30–35g water at 80°C (3 points)','Whisking 20 times for one shot (3 points)','No obvious clumps or powder dropping down in milk or coconut water (4 points)']},
@@ -1124,6 +1124,17 @@ const ACT={
  punchNew:d=>punchSheet(null,d.emp),
  payCsv:d=>exportPay(d.ps,+d.pl),
  empEdit:d=>empSheet(d.id),
+ empDel:async d=>{const e=D.employees[d.id];if(!e)return;if(e.role==='Manager'&&!isOwner){toast('Only an owner can remove a manager');return}
+   if(SH.confirmDel!==d.id){SH.confirmDel=d.id;drawSheet();toast(`Tap again to delete ${e.name}. Past hours and pay stay in reports. Future shifts are removed.`);return}
+   SH.confirmDel=null;
+   if(!await W(A.db.doc('config/former').set({...(D.former||{}),[d.id]:e.name})))return;
+   const fut=Object.values(D.shifts).filter(s=>s.empId===d.id&&s.date>=today());
+   for(const s of fut)await W(A.db.doc('shifts/'+s.id).delete());
+   if(!await W(A.db.doc('employees/'+d.id).delete()))return;
+   const drop=o=>{const x={...(o||{})};delete x[d.id];return x};
+   await W(A.db.doc('mgr/wages').set({rates:drop(D.wages),cash:drop(D.cashRates),caps:drop(D.payCaps)}));
+   if(D.mgrSet.pins?.[d.id])await W(A.db.doc('mgr/settings').set({...D.mgrSet,pins:drop(D.mgrSet.pins)}));
+   D.former={...(D.former||{}),[d.id]:e.name};delete D.employees[d.id];closeSheet();toast(`${e.name} removed`);render()},
  empSave:async d=>{const name=$('#e_name').value.trim();if(!name){toast(L('Enter a name','请填写姓名'));return}const id=d.id||slug(name)+'-'+uidGen().slice(-4);
    const body={name,loc:$('#e_loc').value,email:$('#e_email').value.trim(),phone:$('#e_phone').value.trim(),role:$('#e_role').value,color:document.querySelector('input[name=e_color]:checked')?.value||COLORS[0],active:$('#e_active').checked};
    const prev=D.employees[id]?{...D.employees[id]}:null;
@@ -1342,7 +1353,7 @@ async function boot(){
   if(!db){render();return}
   uid=user?await user.id():null;isMgr=user?await user.canEdit():false;isOwner=user?await user.isOwner():false;
   c.use('assets').then(x=>{A.assets=x;rerender()});c.use('sample').then(x=>{A.sample=x;rerender()});c.use('downloads').then(x=>{A.downloads=x;rerender()});
-  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
+  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
   subscribe(db.collection('employees'),s=>{D.employees=mapDocs(s)});
   subscribe(db.collection('links'),s=>{D.links=mapDocs(s)});
   subscribe(db.collection('counts').orderBy('date','desc').limit(120),s=>{D.counts=mapDocs(s)});
