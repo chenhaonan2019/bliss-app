@@ -83,6 +83,7 @@ main{padding-block:16px 110px}
 .seg button{flex:1;border:0;background:none;border-radius:9px;padding:8px 10px;font-weight:600;font-size:14px;color:var(--muted);cursor:pointer;white-space:nowrap}
 .swatches{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}.swatches label{position:relative;display:flex;flex-direction:column;align-items:center;gap:4px;cursor:pointer;padding:6px 2px;border-radius:12px;border:2px solid transparent}.swatches input{position:absolute;opacity:0;inset:0;cursor:pointer}.swatches .sw{width:36px;height:36px;border-radius:50%;display:grid;place-items:center;color:#fff;font-weight:700;font-size:15px}.swatches small{font-size:11px;font-weight:600;color:var(--muted)}.swatches label:has(input:checked){border-color:var(--ink);background:var(--surface)}.swatches label:has(input:checked) small{color:var(--ink)}.swatches label:has(input:focus-visible){outline:2px solid var(--matcha)}
 .seg.rad label{flex:1;position:relative;cursor:pointer}.seg.rad input{position:absolute;opacity:0;inset:0}.seg.rad span{display:block;text-align:center;border-radius:9px;padding:8px 6px;font-weight:600;font-size:14px;color:var(--muted)}.seg.rad input:checked+span{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0/.08)}.seg.rad input:focus-visible+span{outline:2px solid var(--matcha)}
+.seg.wrap{flex-wrap:wrap}.seg.wrap button{flex:1 1 auto}
 .seg button.on{background:var(--surface);color:var(--ink);box-shadow:0 1px 2px rgb(0 0 0/.08)}
 .chips{display:flex;gap:6px;overflow-x:auto;padding-bottom:2px}
 .chips button{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:6px 10px;cursor:pointer;text-align:center;min-width:52px}
@@ -349,7 +350,12 @@ const daysTxt=f=>f==='daily'?'every night':schedDays(f).map(i=>WD()[i]).join(' &
 const freqName=f=>(FREQS.find(x=>x[0]===f)||FREQS[0])[1];const freqDays=f=>(FREQS.find(x=>x[0]===f)||FREQS[0])[2];
 const itemFreq=it=>FREQS.some(x=>x[0]===it?.freq)?it.freq:(it?.freq==='biweekly'||it?.freq==='monthly'?'weekly':["BJ's",'Walmart'].includes(it?.store)?'daily':'twice');
 const itemsOf=f=>D.items.filter(it=>itemFreq(it)===f);
-const TYPES=[['food','Food'],['pack','Packaging']];const itemType=it=>it?.type==='pack'?'pack':'food';const typeName=t=>t==='pack'?'Packaging':'Food';
+// Item sections (Food, Packaging, …). Managers can add, rename and remove them; saved in config/itemTypes.
+const DEF_TYPES=[{id:'food',name:'Food'},{id:'pack',name:'Packaging'},{id:'bulk',name:'Bulk Order Food'}];
+const typeList=()=>(D.itemTypes?.length?D.itemTypes:DEF_TYPES);
+const TYPES=()=>typeList().map(t=>[t.id,t.name]);
+const itemType=it=>{const ids=typeList().map(t=>t.id);return ids.includes(it?.type)?it.type:(ids.includes('food')?'food':ids[0])};
+const typeName=t=>typeList().find(x=>x.id===t)?.name||'Other';
 const usedFreqs=()=>FREQS.map(x=>x[0]).filter(f=>itemsOf(f).length);
 function latestCount(){const c=C();const ds=Object.keys(c).sort();return ds.length?c[ds[ds.length-1]]:null}
 function lastQty(id,before){const c=C();const ds=Object.keys(c).sort().reverse();for(const d of ds){if(before&&d>=before)continue;const v=num(c[d].counts?.[id]);if(v!=null)return{q:v,date:d}}return null}
@@ -533,9 +539,10 @@ function stockNow(){const rows=usageRows();const sug=suggestions();const flt=UI.
   const cats=[...new Set(shown.map(x=>x.it.cat||'Other'))];
   return `<div class="g2"><button class="btn pri" data-act="itemEdit">${ic('plus')} Add item</button><button class="btn" data-act="orderList">${ic('list')} Order list${sug.length?` · ${sug.length}`:''}</button></div>
   ${D.items.length?`<div class="eyebrow">Counts</div><div class="tiles" style="grid-template-columns:repeat(auto-fit,minmax(170px,1fr))">${tiles}</div>
-  <div class="seg" role="tablist" aria-label="Item type">${[['all','All'],...TYPES].map(([k,n])=>`<button role="tab" class="${tf===k?'on':''}" data-act="stT" data-k="${k}">${n} <span class="muted" style="font-weight:400">${k==='all'?all.length:all.filter(x=>itemType(x.it)===k).length}</span></button>`).join('')}</div>
+  <div class="row" style="justify-content:space-between"><span class="eyebrow">Sections</span><button class="btn sm" data-act="typesEdit">${ic('list')} Edit sections</button></div>
+  <div class="seg wrap" role="tablist" aria-label="Item type">${[['all','All'],...TYPES()].map(([k,n])=>`<button role="tab" class="${tf===k?'on':''}" data-act="stT" data-k="${k}">${n} <span class="muted" style="font-weight:400">${k==='all'?all.length:all.filter(x=>itemType(x.it)===k).length}</span></button>`).join('')}</div>
   <div class="chips" role="tablist">${[['all',`All ${base.length}`],...FREQS.filter(([f])=>itemsOf(f).length).map(([f,n])=>[f,`${n} ${fN(f)}`]),['low',`Low ${lowN}`]].map(([k,n])=>`<button role="tab" class="${flt===k?'on':''}" data-act="stF" data-k="${k}" style="padding:7px 12px"><b style="font-size:13px">${n}</b></button>`).join('')}</div>
-  ${shown.length?TYPES.map(([t,tn])=>{const tc=cats.filter(c=>shown.some(x=>(x.it.cat||'Other')===c&&itemType(x.it)===t));return tc.length?`${tf==='all'?`<h3 style="margin-top:4px">${tn}</h3>`:''}`+tc.map(c=>`<div class="card flush"><div class="li" style="min-height:0;padding-block:8px;background:var(--sunk)"><span class="eyebrow grow">${esc(c)}</span></div><div class="list">${shown.filter(x=>(x.it.cat||'Other')===c&&itemType(x.it)===t).map(({it,q,lq,st,f})=>{const av=avgDaily(it.id,rows);const left=av&&av>0&&q!=null?q/av:null;
+  ${shown.length?TYPES().map(([t,tn])=>{const tc=cats.filter(c=>shown.some(x=>(x.it.cat||'Other')===c&&itemType(x.it)===t));return tc.length?`${tf==='all'?`<h3 style="margin-top:4px">${tn}</h3>`:''}`+tc.map(c=>`<div class="card flush"><div class="li" style="min-height:0;padding-block:8px;background:var(--sunk)"><span class="eyebrow grow">${esc(c)}</span></div><div class="list">${shown.filter(x=>(x.it.cat||'Other')===c&&itemType(x.it)===t).map(({it,q,lq,st,f})=>{const av=avgDaily(it.id,rows);const left=av&&av>0&&q!=null?q/av:null;
     return `<div class="li tap" data-act="itemEdit" data-id="${it.id}" tabindex="0"><div class="grow"><div class="t">${esc(it.name)}</div><div class="small muted">${freqName(f)}${lq?` · counted ${fmtD(lq.date,{month:'numeric',day:'numeric'})}`:''}${av!=null?` · ${Math.round(av*10)/10}/day`:''}${left!=null?` · ≈${Math.floor(left)} days left`:''}</div></div><div style="text-align:right;min-width:72px"><div style="font-weight:700;font-size:17px">${q??'—'} <span class="small muted" style="font-weight:400">${esc(it.unit||'')}</span></div>${chip(st[0],st[1])}</div></div>`}).join('')}</div></div>`).join(''):''}).join(''):`<div class="empty card">Nothing here.</div>`}
   ${Object.keys(C()).length>1?`<button class="btn sm" data-act="countHist" style="align-self:flex-start">Count history</button>`:''}`
   :`<div class="empty card"><b>No items yet</b>Tap "Add item" to add what staff should count.</div>`}`}
@@ -553,6 +560,7 @@ function stockOrders(){const os=ORD().sort((a,b)=>(b.createdAt||'').localeCompar
 function stockItems(){const row=it=>`<div class="li tap" data-act="itemEdit" data-id="${it.id}" tabindex="0"><div class="grow"><div class="t">${esc(it.name)}</div><div class="small muted">${typeName(itemType(it))} · ${esc(it.cat||'')} · ${esc(it.unit||'')} · reorder ${it.min??'—'} / target ${it.par??'—'}${num(it.packSize)>1?` · pack ${it.packSize}`:''}</div></div>${it.store?chip('',esc(it.store)):''}${ic('chev')}</div>`;
   return `<p class="small muted">Items are grouped by how often staff count them. Tap an item to change it. Reorder at = when to buy; Target = how much to have after restocking.</p>
   <div class="g2"><button class="btn pri" data-act="itemEdit">${ic('plus')} Add item</button><button class="btn" data-act="freqEdit">${ic('cal')} Change count schedule</button></div>
+  <button class="btn" data-act="typesEdit">${ic('list')} Edit sections (${typeList().map(t=>esc(t.name)).join(', ')})</button>
   ${FREQS.map(([f,n])=>{const its=itemsOf(f);return its.length?`<div class="card flush"><div class="li" style="min-height:0;padding-block:10px;background:var(--sunk)"><span class="eyebrow grow">${n} count · ${its.length}</span></div><div class="list">${its.map(row).join('')}</div></div>`:''}).join('')}`}
 
 function vPhotos(){const d=UI.pDate||bizDate();const days=[...Array(7)].map((_,i)=>addDays(bizDate(),-i));
@@ -782,7 +790,7 @@ function countSheet(f){f=f||'daily';const d=bizDate();const CC=C();const ex=CC[d
   const title=f==='daily'?'Night inventory count':`${freqName(f)} inventory count`;
   openSheet({title:()=>title,body:()=>`<div class="small muted">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${f==='daily'?'Count what is left after closing.':`These ${its.length} items are counted ${freqName(f).toLowerCase()}.`} Grey number = last count.</div>
    ${ex?.groups?.[f]||(!ex?.groups&&ex&&f==='daily')?`<div class="hint">Already submitted by ${esc(empName((ex.groups?.[f]||ex).by))}. Saving again replaces it.</div>`:''}
-   ${its.length?TYPES.map(([t,tn])=>{const tc=cats.filter(c=>its.some(i=>(i.cat||'Other')===c&&itemType(i)===t));return tc.length?`<h3>${tn}</h3>`+tc.map(c=>`<div class="card stack"><div class="eyebrow">${esc(c)}</div>${its.filter(i=>(i.cat||'Other')===c&&itemType(i)===t).map(it=>{const lq=lastQty(it.id,d);return `<div class="row"><label for="c_${it.id}" class="grow"><div style="font-weight:600">${esc(it.name)}</div><div class="tiny muted">${esc(it.unit||'')}${lq?` · last ${lq.q}${f!=='daily'?' on '+fmtD(lq.date,{month:'numeric',day:'numeric'}):''}`:''}</div></label><input class="in" style="width:96px;text-align:right" type="number" inputmode="decimal" step="any" min="0" id="c_${it.id}" value="${ex?.counts?.[it.id]??''}"></div>`}).join('')}</div>`).join(''):''}).join(''):`<div class="empty">No items are set to ${freqName(f).toLowerCase()} counting.</div>`}
+   ${its.length?TYPES().map(([t,tn])=>{const tc=cats.filter(c=>its.some(i=>(i.cat||'Other')===c&&itemType(i)===t));return tc.length?`<h3>${tn}</h3>`+tc.map(c=>`<div class="card stack"><div class="eyebrow">${esc(c)}</div>${its.filter(i=>(i.cat||'Other')===c&&itemType(i)===t).map(it=>{const lq=lastQty(it.id,d);return `<div class="row"><label for="c_${it.id}" class="grow"><div style="font-weight:600">${esc(it.name)}</div><div class="tiny muted">${esc(it.unit||'')}${lq?` · last ${lq.q}${f!=='daily'?' on '+fmtD(lq.date,{month:'numeric',day:'numeric'}):''}`:''}</div></label><input class="in" style="width:96px;text-align:right" type="number" inputmode="decimal" step="any" min="0" id="c_${it.id}" value="${ex?.counts?.[it.id]??''}"></div>`}).join('')}</div>`).join(''):''}).join(''):`<div class="empty">No items are set to ${freqName(f).toLowerCase()} counting.</div>`}
    <label class="f">Note (optional)<textarea class="in" id="c_note" placeholder="e.g. milk expires tomorrow">${esc(ex?.notes?.[f]??(f==='daily'?ex?.note:'')??'')}</textarea></label>
    <div id="c_err"></div>`,
    foot:()=>`<button class="btn pri big" data-act="countSave" data-f="${f}">Submit count</button>`})}
@@ -809,7 +817,7 @@ function freqSheet(){const cats=[...new Set(D.items.map(i=>i.cat||'Other'))];
 function itemSheet(id){const it=id?itemById(id):{id:'',name:'',unit:'',cat:'',min:'',par:'',packSize:1,store:"BJ's",url:'',freq:'daily'};
   openSheet({title:()=>id?L('Edit item','编辑物品'):L('New item','新物品'),body:()=>`
   <label class="f">${L('Name','名称')}<input class="in" id="it_name" value="${esc(it.name)}" placeholder="e.g. Whole Milk"></label>
-  <label class="f">Type<select class="in" id="it_type">${TYPES.map(([k,n])=>`<option value="${k}" ${itemType(it)===k?'selected':''}>${n}</option>`).join('')}</select></label>
+  <label class="f">Type<select class="in" id="it_type">${TYPES().map(([k,n])=>`<option value="${k}" ${itemType(it)===k?'selected':''}>${n}</option>`).join('')}</select></label>
   <label class="f">Count how often<select class="in" id="it_freq">${FREQS.map(([k,n])=>`<option value="${k}" ${itemFreq(it)===k?'selected':''}>${n} (${daysTxt(k)})</option>`).join('')}</select></label>
   <div class="g2"><label class="f">${L('Count unit','盘点单位')}<input class="in" id="it_unit" value="${esc(it.unit)}" placeholder="bag, gallon, sleeve"></label><label class="f">${L('Category','分类')}<select class="in" id="it_cat">${(()=>{const cs=[...new Set(D.items.map(i=>i.cat).filter(Boolean))];const cur=it.cat||cs[0]||'';return cs.map(c=>`<option value="${esc(c)}" ${cur===c?'selected':''}>${esc(c)}</option>`).join('')+`<option value="__new" ${!cs.length?'selected':''}>+ New category…</option>`})()}</select></label></div>
   <div class="row" id="it_newcat_row" ${D.items.some(i=>i.cat)?'hidden':''}><input class="in grow" id="it_newcat" placeholder="New category name, e.g. Cups & Lids" aria-label="New category name"></div>
@@ -992,6 +1000,15 @@ function evalViewSheet(id){const x=D.evals[id];if(!x)return;const[k,lv]=level(x.
    <div class="g2">${['sigMgr','sigEmp'].map((s,i)=>`<div class="card stack"><div class="eyebrow">${i?'Employee':'Manager'} signature</div>${x[s]?`<img src="${esc(x[s])}" alt="" style="background:#fff;border-radius:8px">`:`<span class="muted small">—</span>`}</div>`).join('')}</div>`,
    foot:()=>`<button class="btn bad" data-act="evalDel" data-id="${id}">${L('Delete','删除')}</button>`})}
 
+function typesSheet(){SH=null;const T={list:typeList().map(t=>({...t}))};
+  const cnt=id=>D.items.filter(i=>itemType(i)===id).length;
+  openSheet({title:()=>'Item sections',body:()=>`<p class="small muted">Sections group your items (for example Food, Packaging, Bulk Order Food). Rename one by typing over its name. Removing a section moves its items into the first section.</p>
+   <div class="card flush list">${T.list.map((t,i)=>`<div class="li" style="gap:8px"><input class="in grow" data-tn="${i}" maxlength="30" value="${esc(t.name)}" aria-label="Section name"><span class="tiny muted" style="white-space:nowrap">${cnt(t.id)} item${cnt(t.id)===1?'':'s'}</span>
+     <button class="btn sm" data-act="typeMove" data-i="${i}" data-n="-1" ${i===0?'disabled':''} aria-label="Move up">↑</button>
+     ${T.list.length>1?`<button class="btn sm bad" data-act="typeDel" data-i="${i}">${SH?.confirmDel===t.id?'Tap again':'Remove'}</button>`:''}</div>`).join('')}</div>
+   <div class="row"><input class="in grow" id="ty_new" maxlength="30" placeholder="New section, e.g. Bulk Order Food"><button class="btn" data-act="typeAdd">${ic('plus')} Add</button></div>`,
+   foot:()=>`<button class="btn pri" data-act="typesSave">Save sections</button>`,mount:()=>{SH.T=T}})}
+function typesGrab(){document.querySelectorAll('[data-tn]').forEach(el=>{const t=SH.T.list[+el.dataset.tn];if(t)t.name=el.value})}
 function slotSheet(tab){const cp=l=>(l||[]).map(x=>({id:x.id,name:x.name}));
   const ed={prep:cp(D.slots.prep),close:cp(D.slots.close),deep:Object.fromEntries([0,1,2,3,4,5,6].map(i=>[i,cp((D.slots.deepDays||{})[i])]))};
   let cur=tab||'prep',day=parseYmd(bizDate()).getDay();
@@ -1049,6 +1066,18 @@ const ACT={
  bzOwnAdd:async()=>{const e=$('#bz_own').value.trim();if(!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)){toast('Enter a valid email');return}try{const r=await window.blissAccount.addOwner(e);toast(r==='invited'?'Invited. They become an owner when they first sign in':'Added as owner');UI.ownErr=null;UI.owners=undefined;render()}catch(x){toast(x.message)}},
  bzOwnDel:async d=>{if(UI.ownDel!==d.e){UI.ownDel=d.e;render();return}UI.ownDel=null;try{await window.blissAccount.removeOwner(d.e);toast('Removed');UI.owners=undefined;render()}catch(x){toast(x.message)}},
  signOut:()=>window.blissAccount?.signOut(),switchOrg:()=>window.blissAccount?.switchOrg(),
+ typesEdit:()=>typesSheet(),
+ typeAdd:()=>{typesGrab();const n=$('#ty_new').value.trim();if(!n){$('#ty_new').focus();return}const L2=SH.T.list;if(L2.some(t=>t.name.trim().toLowerCase()===n.toLowerCase())){toast('That section already exists');return}
+   let id=slug(n).slice(0,16)||'sec';while(L2.some(t=>t.id===id))id+='2';L2.push({id,name:n});drawSheet()},
+ typeMove:d=>{typesGrab();const L2=SH.T.list,i=+d.i,j=i+(+d.n);if(j<0||j>=L2.length)return;[L2[i],L2[j]]=[L2[j],L2[i]];drawSheet()},
+ typeDel:d=>{typesGrab();const L2=SH.T.list,t=L2[+d.i];if(!t)return;if(SH.confirmDel!==t.id&&D.items.some(i=>itemType(i)===t.id)){SH.confirmDel=t.id;toast(`Tap again to remove ${t.name}. Its items move to ${L2.find(x=>x.id!==t.id).name}.`);drawSheet();return}
+   SH.confirmDel=null;L2.splice(+d.i,1);drawSheet()},
+ typesSave:async()=>{typesGrab();const list=SH.T.list.map(t=>({id:t.id,name:t.name.trim()||t.id}));
+   const keep=new Set(list.map(t=>t.id));const first=list[0].id;
+   const items=D.items.map(i=>keep.has(itemType(i))?i:{...i,type:first});const moved=items.some((x,k)=>x!==D.items[k]);
+   if(!await W(A.db.doc('config/itemTypes').set({list})))return;
+   if(moved&&!await W(A.db.doc('config/items').set({list:items})))return;
+   D.itemTypes=list;if(moved)D.items=items;if(UI.stT&&!keep.has(UI.stT))UI.stT='all';toast('Sections saved');closeSheet();render()},
  stF:d=>{UI.stF=d.k;render()},stT:d=>{UI.stT=d.k;render()},
  ownerSub:d=>{UI.osub=d.k;render()},
  fixedEdit:d=>fixedSheet(d.id),
@@ -1353,7 +1382,7 @@ async function boot(){
   if(!db){render();return}
   uid=user?await user.id():null;isMgr=user?await user.canEdit():false;isOwner=user?await user.isOwner():false;
   c.use('assets').then(x=>{A.assets=x;rerender()});c.use('sample').then(x=>{A.sample=x;rerender()});c.use('downloads').then(x=>{A.downloads=x;rerender()});
-  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
+  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
   subscribe(db.collection('employees'),s=>{D.employees=mapDocs(s)});
   subscribe(db.collection('links'),s=>{D.links=mapDocs(s)});
   subscribe(db.collection('counts').orderBy('date','desc').limit(120),s=>{D.counts=mapDocs(s)});
