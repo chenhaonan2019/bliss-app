@@ -1,0 +1,5 @@
+{
+  "headers": [
+    { "source": "/(.*)\\.(js|html|webmanifest)", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }
+  ]
+}

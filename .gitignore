@@ -1,0 +1,4 @@
+.DS_Store
+*.local.sql
+node_modules/
+.vercel
