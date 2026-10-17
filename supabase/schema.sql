@@ -173,6 +173,7 @@ end $$;
 create or replace function public.claim_membership()
 returns table(org_id uuid, org_name text, role text)
 language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
 declare em text := lower(auth.jwt() ->> 'email'); r record;
 begin
   if auth.uid() is null then raise exception 'not signed in'; end if;
@@ -243,6 +244,7 @@ alter table public.invites enable row level security;   -- only reached through 
 create or replace function public.list_owners(o uuid)
 returns table(email text, is_me boolean, pending boolean)
 language plpgsql stable security definer set search_path = public as $$
+#variable_conflict use_column
 begin
   if public.my_level(o) < 4 then raise exception 'only owners can see this'; end if;
   return query
