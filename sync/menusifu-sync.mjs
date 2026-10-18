@@ -102,7 +102,9 @@ async function fetchDay(page, hdr, merchant, date) {
     if (!r.ok) return { err: r.status };
     const j = await r.json();
     const t = (j?.reportData?.serviceData || []).find((s) => s.title === "Sales Summary" && s.style === "table");
-    if (!t) return { err: "no hourly table" };
+    // headers were verified on a real hourly report, so a day without the table simply had no sales;
+    // only a reply with no report data at all is an error
+    if (!t) return Array.isArray(j?.reportData?.serviceData) ? { out: {} } : { err: "no report data" };
     const labels = t.data.labels.slice(1), names = t.data.dataSets[0].data, iN = names.indexOf("Net Sales"), iO = names.indexOf("Orders"), out = {};
     labels.forEach((l, j2) => { const col = t.data.dataSets[j2 + 1]?.data || []; const m = /^(\d\d)(AM|PM)$/.exec(l); if (!m) return; const hh = (+m[1] % 12) + (m[2] === "PM" ? 12 : 0); out[hh] = [+String(col[iN]).replace(/[$,]/g, "") || 0, +col[iO] || 0]; });
     return { out };
