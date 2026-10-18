@@ -167,6 +167,8 @@ input.in:focus,select.in:focus,textarea.in:focus{outline:2px solid var(--matcha)
 .cele.small{background:transparent;pointer-events:none}.cele.small .cele-box{padding:18px 22px}.cele.small .cele-check svg{width:56px;height:56px}.cele.small b{font-size:18px}
 @keyframes cfade{from{opacity:0}}@keyframes cpop{from{transform:scale(.6);opacity:0}}@keyframes cdraw{to{stroke-dashoffset:0}}@keyframes cfall{to{transform:translateY(112vh) rotate(620deg)}}
 @media (prefers-reduced-motion: reduce){.cele,.cele *{animation:none!important}.cele-check path{stroke-dashoffset:0}.cele i{display:none}}
+.drag{flex:none;width:30px;align-self:stretch;display:grid;place-items:center;cursor:grab;touch-action:none;color:var(--muted);font-size:18px;letter-spacing:-3px;user-select:none;-webkit-user-select:none;border-radius:8px}
+.drag:hover{background:var(--sunk)}.dragging{box-shadow:0 12px 30px rgb(0 0 0/.2);border-radius:12px;opacity:.97;cursor:grabbing}.drag-ph{background:var(--sunk);border:2px dashed var(--line);border-radius:10px}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:80;background:var(--ink);color:var(--bg);border-radius:12px;padding:10px 16px;font-weight:600;max-width:calc(100% - 32px);box-shadow:0 6px 24px rgb(0 0 0/.25)}
 .viewer{position:fixed;inset:0;z-index:70;background:rgb(0 0 0/.92);display:flex;flex-direction:column;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}
 .viewer img{flex:1;min-height:0;object-fit:contain;width:100%}
@@ -308,12 +310,25 @@ function celebrate(title,sub,big){document.querySelectorAll('.cele').forEach(x=>
   document.body.appendChild(el);el.addEventListener('click',()=>el.remove());setTimeout(()=>el.remove(),big?3200:1500)}
 const allTasksDone=d=>{const ts=tasksOn(d);return ts.length>0&&ts.every(T=>['ontime','late'].includes(taskState(d,T.type).st))};
 function afterTaskDone(type,date,justDone){if(!justDone)return;if(date===bizDate()&&allTasksDone(date))celebrate("All of today's tasks are done!",'Great work 🎉',true);else celebrate('Task complete',taskName(type))}
+// Drag to reorder: a list marked data-sortable="name" with rows marked data-sid="…"; drag a row by its .drag handle.
+// When dropped, SORT[name](ids in new order) is called. Works with touch and mouse (pointer events).
+const SORT={};let DRAGGING=false;const DRAG_H=`<span class="drag" data-drag aria-label="Drag to reorder" title="Drag to reorder">⋮⋮</span>`;
+document.addEventListener('pointerdown',e=>{const h=e.target.closest('[data-drag]');if(!h)return;const row=h.closest('[data-sid]'),box=row?.parentElement;if(!row||!box?.dataset.sortable)return;e.preventDefault();
+  const r0=row.getBoundingClientRect(),y0=e.clientY,keep=row.getAttribute('style')||'';const ph=document.createElement('div');ph.className='drag-ph';ph.style.height=r0.height+'px';row.after(ph);
+  row.classList.add('dragging');row.style.cssText=keep+`;position:fixed;left:${r0.left}px;top:${r0.top}px;width:${r0.width}px;z-index:150;background:var(--surface);margin:0`;DRAGGING=true;
+  try{h.setPointerCapture(e.pointerId)}catch{}const scroller=row.closest('.sb')||document.scrollingElement;let raf=null,lastY=e.clientY;
+  const place=y=>{row.style.top=(r0.top+y-y0)+'px';let done=false;for(const o of box.querySelectorAll(':scope > [data-sid]')){if(o===row)continue;const rr=o.getBoundingClientRect();if(y<rr.top+rr.height/2){o.before(ph);done=true;break}}if(!done)box.appendChild(ph)};
+  const tick=()=>{const vh=innerHeight;const d=lastY<90?-12:lastY>vh-110?12:0;if(d){scroller.scrollTop+=d;place(lastY)}raf=requestAnimationFrame(tick)};raf=requestAnimationFrame(tick);
+  const move=ev=>{lastY=ev.clientY;place(ev.clientY)};
+  const up=()=>{cancelAnimationFrame(raf);h.removeEventListener('pointermove',move);ph.replaceWith(row);row.classList.remove('dragging');row.setAttribute('style',keep);DRAGGING=false;
+    const ids=[...box.querySelectorAll(':scope > [data-sid]')].map(x=>x.dataset.sid);const f=SORT[box.dataset.sortable];f&&f(ids)};
+  h.addEventListener('pointermove',move);h.addEventListener('pointerup',up,{once:true});h.addEventListener('pointercancel',up,{once:true})});
 function toast(m){const t=$('#toast');t.innerHTML=`<div class="toast" role="status">${esc(m)}</div>`;clearTimeout(toastT);toastT=setTimeout(()=>t.innerHTML='',String(m).length>80?7000:2600)}
 function errMsg(e){const c=e?.code||'';if(/^Only an owner/.test(e?.message||''))return e.message;if(c==='invalid_argument')return L('You do not have permission to change this.','你没有权限修改这一项。')+(e?.message?` (${String(e.message).slice(0,140)})`:'');if(c==='quota_exceeded')return L('Storage is full. Delete old records first.','存储已满，请先删除旧记录。');if(c==='too_large')return L('Photo is too large.','照片太大。');if(c==='rate_limited'||c==='resource_exhausted')return L('Too many requests. Try again in a moment.','操作太频繁，请稍后再试。');return L('Could not save. Check your connection and try again.','保存失败，请检查网络后重试。')}
 async function W(p){try{await p;return true}catch(e){console.warn(e);toast(errMsg(e));if(e?.code==='invalid_argument')window.blissAccount?.recheck?.();return false}}
 let SH=null;
 function openSheet(o){SH=o;drawSheet();document.body.style.overflow='hidden'}
-function drawSheet(){if(!SH){$('#sheet').innerHTML='';return}
+function drawSheet(){if(DRAGGING)return;if(!SH){$('#sheet').innerHTML='';return}
   const sb=$('#sheet .sb');const top=sb?sb.scrollTop:0;
   $('#sheet').innerHTML=`<div class="sheet" role="dialog" aria-modal="true"><div class="sh"><h2>${SH.title()}</h2><button class="x" data-act="closeSheet" aria-label="${L('Close','关闭')}">${ic('x')}</button></div><div class="sb"><div class="wrap stack">${SH.body()}</div></div>${SH.foot?`<div class="sf">${SH.foot()}</div>`:''}</div>`;
   const nb=$('#sheet .sb');if(nb)nb.scrollTop=top;SH.mount&&SH.mount()}
@@ -330,7 +345,7 @@ function mode(){if(!A.db)return D.ready?'nodb':'loading';if(isMgr){if(UI.pv==='e
 function actor(){const m=mode();if(m==='emp')return isMgr?UI.kActor:D.links[uid]?.empId;if(m==='mgr')return D.links[uid]?.empId||null;return null}
 const MGR_TABS=[['home','home',()=>L('Today','今天')],['stock','box',()=>L('Stock','库存订货')],['photos','cam',()=>L('Photos','照片')],['sched','cal',()=>L('Schedule','排班工时')],['team','users',()=>L('Team','团队')]];
 const EMP_TABS=[['etoday','home',()=>L('Today','今天')],['eshift','cal',()=>L('My shifts','我的班')],['etrain','grad',()=>L('Training','培训')]];
-function render(force){
+function render(force){if(DRAGGING){setTimeout(()=>render(force),300);return}
   if(!force&&typing($('#view'))){pendingMain=true;return}
   const m=mode();
   const tabs=m==='mgr'?(ownerView()?[['owner','star',()=>'Owner'],...MGR_TABS]:MGR_TABS):m==='emp'?(D.employees[actor()]?.role==='Trainee'?EMP_TABS:EMP_TABS.filter(t=>t[0]!=='etrain')):null;
@@ -849,9 +864,8 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
     <h3>Costs</h3><div class="tbl"><table><thead><tr><th>Store</th><th>Labor</th><th>Inventory used</th><th>Fixed costs</th><th>Total cost</th></tr></thead><tbody>${rows.map((x,j)=>`<tr><td>${dot(j)}${esc(x.l.name)}</td><td>${money(x.lb)}</td><td>${money(x.iv)}</td><td>${money(x.fx)}</td><td><b>${money(x.tot)}</b></td></tr>`).join('')}
      <tr><td><b>Total</b></td><td><b>${money(T.lb)}</b></td><td><b>${money(T.iv)}</b></td><td><b>${money(T.fx)}</b></td><td><b>${money(T.tot)}</b></td></tr></tbody></table></div>
     <div class="card stack"><div class="row wrapr"><span class="eyebrow grow">${perName()} total cost, ${perLast()}</span>${legend}</div>${barChart(otr,L2,labels,SC,'Total cost by store')}</div>
-    <div class="card flush"><div class="li" style="background:var(--sunk);min-height:0;padding-block:10px"><span class="eyebrow grow">Fixed costs</span><button class="btn sm pri" data-act="fixedEdit">${ic('plus')} Add</button></div><div class="list">
-      ${fx.length?fx.map((f,k)=>{const pd=f.freq==='week'?num(f.amount)/7:f.freq==='year'?num(f.amount)/365:num(f.amount)*12/365;return `<div class="li" style="gap:6px"><div class="grow tap" data-act="fixedEdit" data-id="${esc(f.id)}" tabindex="0" style="cursor:pointer;display:flex;gap:10px;align-items:center;min-width:0"><div class="grow" style="min-width:0"><div class="t">${esc(f.name)}</div><div class="small muted">${f.loc==='all'?'Both stores (split)':esc(locName(f.loc))}</div></div><div style="text-align:right"><b>${money(num(f.amount)||0)}</b><div class="tiny muted">per ${f.freq||'month'} · ${money(pd*PN)} this period</div></div></div>
-        <div style="display:flex;flex-direction:column;gap:4px"><button class="btn sm" style="min-height:28px;padding:0 10px" data-act="fixedMv" data-id="${esc(f.id)}" data-to="${esc(fx[k-1]?.id||'')}" ${k?'':'disabled'} aria-label="Move ${esc(f.name)} up">↑</button><button class="btn sm" style="min-height:28px;padding:0 10px" data-act="fixedMv" data-id="${esc(f.id)}" data-to="${esc(fx[k+1]?.id||'')}" ${k<fx.length-1?'':'disabled'} aria-label="Move ${esc(f.name)} down">↓</button></div></div>`}).join('')
+    <div class="card flush"><div class="li" style="background:var(--sunk);min-height:0;padding-block:10px"><span class="eyebrow grow">Fixed costs</span><button class="btn sm pri" data-act="fixedEdit">${ic('plus')} Add</button></div><div class="list" data-sortable="fixed">
+      ${fx.length?fx.map((f,k)=>{const pd=f.freq==='week'?num(f.amount)/7:f.freq==='year'?num(f.amount)/365:num(f.amount)*12/365;return `<div class="li" style="gap:6px;padding-left:6px" data-sid="${esc(f.id)}">${DRAG_H}<div class="grow tap" data-act="fixedEdit" data-id="${esc(f.id)}" tabindex="0" style="cursor:pointer;display:flex;gap:10px;align-items:center;min-width:0"><div class="grow" style="min-width:0"><div class="t">${esc(f.name)}</div><div class="small muted">${f.loc==='all'?'Both stores (split)':esc(locName(f.loc))}</div></div><div style="text-align:right"><b>${money(num(f.amount)||0)}</b><div class="tiny muted">per ${f.freq||'month'} · ${money(pd*PN)} this period</div></div></div></div>`}).join('')
        :`<div class="empty"><b>No fixed costs yet</b>Add rent, internet, trash, insurance, utilities and other regular bills.</div>`}</div></div>
     <p class="tiny muted">Fixed costs are spread evenly by day, so a $3,000 monthly rent counts as about $690 in a week. "Both stores" costs are split evenly between the stores. Only you can see fixed costs.</p>`}
   else if(sub==='staff'){const from=addDays(today(),-30);
@@ -1184,8 +1198,7 @@ function evalViewSheet(id){const x=D.evals[id];if(!x)return;const[k,lv]=level(x.
 function typesSheet(){SH=null;const T={list:typeList().map(t=>({...t}))};
   const cnt=id=>D.items.filter(i=>itemType(i)===id).length;
   openSheet({title:()=>'Item sections',body:()=>`<p class="small muted">Sections group your items (for example Food, Packaging, Bulk Order Food). Rename one by typing over its name. Removing a section moves its items into the first section.</p>
-   <div class="card flush list">${T.list.map((t,i)=>`<div class="li" style="gap:8px"><input class="in grow" data-tn="${i}" maxlength="30" value="${esc(t.name)}" aria-label="Section name"><span class="tiny muted" style="white-space:nowrap">${cnt(t.id)} item${cnt(t.id)===1?'':'s'}</span>
-     <button class="btn sm" data-act="typeMove" data-i="${i}" data-n="-1" ${i===0?'disabled':''} aria-label="Move up">↑</button>
+   <div class="card flush list" data-sortable="types">${T.list.map((t,i)=>`<div class="li" style="gap:8px;padding-left:6px" data-sid="${i}">${DRAG_H}<input class="in grow" data-tn="${i}" maxlength="30" value="${esc(t.name)}" aria-label="Section name"><span class="tiny muted" style="white-space:nowrap">${cnt(t.id)} item${cnt(t.id)===1?'':'s'}</span>
      ${T.list.length>1?`<button class="btn sm bad" data-act="typeDel" data-i="${i}">${SH?.confirmDel===t.id?'Tap again':'Remove'}</button>`:''}</div>`).join('')}</div>
    <div class="row"><input class="in grow" id="ty_new" maxlength="30" placeholder="New section, e.g. Bulk Order Food"><button class="btn" data-act="typeAdd">${ic('plus')} Add</button></div>`,
    foot:()=>`<button class="btn pri" data-act="typesSave">Save sections</button>`,mount:()=>{SH.T=T}})}
@@ -1202,12 +1215,11 @@ function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEa
     ${t.dayTimes?`<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${[1,2,3,4,5,6,0].filter(i=>t.days.includes(i)).map(i=>`<label class="f" style="min-width:0">${DOW[i]}<input class="in" style="min-width:0;width:100%" type="time" id="tkdt_${i}" value="${esc(t.dayTimes[i]||'')}" placeholder="${esc(t.time||'')}"></label>`).join('')}</div><p class="tiny muted" style="margin:0">Leave a day empty to use the usual time (${fmtT(t.time||'22:00')}).</p>`:''}
    </div>
    <p class="small muted">Set how often each item repeats, like an alarm: every day, some weekdays, once a month, or one date only. 📷 = staff must take a photo. ☑ = staff just tap to check it off. Add an example photo to show what "done right" looks like.</p>
-   <div class="card flush list">${l.length?l.map((x,i)=>`<div class="li" style="gap:6px;padding-block:8px;flex-wrap:wrap">
-     <input class="in" id="ti_${i}" value="${esc(x.name)}" aria-label="Item ${i+1}" style="flex:1 1 100%;min-width:0">
+   <div class="card flush list" data-sortable="tkitems">${l.length?l.map((x,i)=>`<div class="li" style="gap:6px;padding-block:8px;padding-left:6px;flex-wrap:wrap" data-sid="${i}">
+     <div class="row" style="flex:1 1 100%;gap:4px;min-width:0">${DRAG_H}<input class="in grow" id="ti_${i}" value="${esc(x.name)}" aria-label="Item ${i+1}" style="min-width:0"></div>
      <button class="btn sm" data-act="tiPhoto" data-i="${i}" title="Photo or check">${x.photo===false?'☑ Check':'📷 Photo'}</button>
      ${x.ref?`<img src="${BLOB}${esc(x.ref)}" alt="Example" data-act="viewPh" data-pid="${esc(x.ref)}" data-cap="Example: ${esc(x.name)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;cursor:zoom-in"><button class="btn sm" data-act="tiRefDel" data-i="${i}" aria-label="Remove example photo">✕</button>`
        :`<label class="btn sm" style="cursor:pointer">+ Example<input type="file" accept="image/*" data-up="tref" data-i="${i}" hidden></label>`}
-     <button class="btn sm" data-act="tiMv" data-i="${i}" data-n="-1" ${i?'':'disabled'} aria-label="Move up">↑</button>
      <button class="btn sm bad" data-act="tiDel" data-i="${i}" aria-label="Delete item">✕</button>
      <div class="row wrapr" style="gap:6px;flex:1 1 100%;align-items:center"><span class="tiny muted">Repeats</span>
       <select class="in" data-tirep="${i}" style="width:auto;min-height:34px;padding:4px 8px">${[['daily','Every day'],['weekly','Some weekdays'],['monthly','Monthly'],['once','One date only']].map(([k,n])=>`<option value="${k}" ${(x.rep||'daily')===k?'selected':''}>${n}</option>`).join('')}</select>
@@ -1271,6 +1283,8 @@ const ACT={
  stF:d=>{UI.stF=d.k;render()},stT:d=>{UI.stT=d.k;render()},
  ownerSub:d=>{UI.osub=d.k;render()},
  fixedEdit:d=>fixedSheet(d.id),
+ fixedOrder:async ids=>{const all=[...(D.fixed||[])];const pos=all.map((x,k)=>ids.includes(x.id)?k:-1).filter(k=>k>=0);const byId=Object.fromEntries(all.map(x=>[x.id,x]));const list=[...all];pos.forEach((k,n)=>list[k]=byId[ids[n]]);
+   if(list.every((x,k)=>x===all[k]))return;const prev=D.fixed;D.fixed=list;render();if(!await W(A.db.doc('owner/fixed').set({list}))){D.fixed=prev;render()}},
  fixedMv:async d=>{if(!d.to)return;const list=[...(D.fixed||[])];const a=list.findIndex(x=>x.id===d.id),b=list.findIndex(x=>x.id===d.to);if(a<0||b<0)return;[list[a],list[b]]=[list[b],list[a]];
    const prev=D.fixed;D.fixed=list;render();if(!await W(A.db.doc('owner/fixed').set({list}))){D.fixed=prev;render()}},
  fixedSave:async d=>{const name=$('#fx_name').value.trim(),amount=num($('#fx_amt').value);if(!name||amount==null){toast('Enter a name and amount');return}const f={id:d.id||slug(name)+'-'+uidGen().slice(-3),name,amount,freq:$('#fx_freq').value,loc:$('#fx_loc').value};const list=d.id?(D.fixed||[]).map(x=>x.id===d.id?f:x):[...(D.fixed||[]),f];if(await W(A.db.doc('owner/fixed').set({list}))){D.fixed=list;closeSheet()}},
@@ -1649,6 +1663,10 @@ async function boot(){
   render();
   setInterval(()=>{if(!SH&&!typing($('#view')))render()},60000);
 }
+Object.assign(SORT,{
+  fixed:ids=>ACT.fixedOrder(ids),
+  types:ids=>{if(!SH?.T)return;typesGrab();const L0=SH.T.list;SH.T.list=ids.map(i=>L0[+i]);drawSheet()},
+  tkitems:ids=>{if(!TK)return;tkGrab();const L0=tkList().slice();const t=TK.E[TK.cur];const nl=ids.map(i=>L0[+i]);if(t.byDay)t.dayItems[TK.day]=nl;else t.items=nl;drawSheet()}});
 boot();
 </script>
 
