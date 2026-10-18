@@ -298,7 +298,7 @@ function drawSheet(){if(!SH){$('#sheet').innerHTML='';return}
   const sb=$('#sheet .sb');const top=sb?sb.scrollTop:0;
   $('#sheet').innerHTML=`<div class="sheet" role="dialog" aria-modal="true"><div class="sh"><h2>${SH.title()}</h2><button class="x" data-act="closeSheet" aria-label="${L('Close','关闭')}">${ic('x')}</button></div><div class="sb"><div class="wrap stack">${SH.body()}</div></div>${SH.foot?`<div class="sf">${SH.foot()}</div>`:''}</div>`;
   const nb=$('#sheet .sb');if(nb)nb.scrollTop=top;SH.mount&&SH.mount()}
-function closeSheet(){SH=null;$('#sheet').innerHTML='';document.body.style.overflow='';render()}
+function closeSheet(){RQ=null;SH=null;$('#sheet').innerHTML='';document.body.style.overflow='';render()}
 function typing(root){const a=document.activeElement;return a&&root&&root.contains(a)&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.type!=='file'}
 function viewPhoto(id,extra=''){ $('#viewer').innerHTML=`<div class="viewer" data-act="closeViewer"><img src="${BLOB}${esc(id)}" alt=""><div class="vb">${extra}<span class="grow"></span><button class="btn sm">${L('Close','关闭')}</button></div></div>`}
 
@@ -450,8 +450,16 @@ function countRows(d,mgr){return usedFreqs().filter(f=>mgr||!MGR_ONLY_FREQ.inclu
   const c=g.st==='done'?chip('ok','Done'):g.st==='overdue'?chip('bad','Overdue'):chip(f==='daily'?'':'warn',f==='daily'?'Tonight':'Due today');
   return `<div class="li tap" data-act="countSheet" data-f="${f}" tabindex="0">${ic('list')}<div class="grow"><div class="t">${t}${MGR_ONLY_FREQ.includes(f)?' <span class="chip" style="vertical-align:1px">Manager</span>':''}</div><div class="small muted">${sub}</div></div>${c}${ic('chev')}</div>`}).join('')}
 function badgeCount(){if(mode()!=='mgr')return 0;return attention().length}
+// Tasks from the last 7 days that staff finished (or ran out of time on) and no manager has reviewed yet.
+function toReview(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.filled&&['ontime','late','missed'].includes(s.st)&&!s.doc?.review)r.push({d,type:T.type,st:s.st})})}return r.sort((a,b)=>a.d.localeCompare(b.d))}
+function missedTasks(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.st==='missed'&&!s.filled)r.push({d,type:T.type})})}return r}
+function reviewCard(){const q=toReview(),m=missedTasks();if(!q.length&&!m.length)return `<div class="card row" style="gap:12px;border-left:4px solid var(--ok)"><span style="font-size:22px;color:var(--ok)">✓</span><div class="grow"><div class="t">All photo tasks reviewed</div><div class="small muted">Nothing waiting from the last 7 days.</div></div></div>`;
+  return `<div class="card stack" style="gap:10px;border:2px solid ${q.length?'var(--brand)':'var(--warn)'}">
+   <div class="row" style="gap:12px">${ic('cam')}<div class="grow"><div style="font-weight:700;font-size:17px">Review photos & tasks</div><div class="small muted">${q.length?`${q.length} task${q.length>1?'s':''} waiting for your review`:'Nothing to review'}${m.length?` · ${m.length} not done`:''}</div></div>${q.length?chip('info',String(q.length)):''}</div>
+   ${q.length?`<div class="small">${q.slice(0,4).map(x=>`${esc(taskName(x.type))} · ${fmtD(x.d,{weekday:'short',month:'short',day:'numeric'})}${x.st==='late'?' (late)':x.st==='missed'?' (incomplete)':''}`).join('<br>')}${q.length>4?`<br>+ ${q.length-4} more`:''}</div>
+    <button class="btn pri big block" data-act="reviewStart">${ic('check')} Start review</button>`:''}
+   ${m.length?`<details><summary class="small" style="cursor:pointer;color:var(--warn);font-weight:600">${m.length} task${m.length>1?'s were':' was'} not done at all</summary><div class="small" style="margin-top:6px">${m.map(x=>`${esc(taskName(x.type))} · ${fmtD(x.d,{weekday:'short',month:'short',day:'numeric'})}`).join('<br>')}</div></details>`:''}</div>`}
 function attention(){const a=[];const t=bizDate();
-  for(let i=0;i<3;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.filled&&['ontime','late','missed'].includes(s.st)&&!s.doc?.review)a.push({k:'review',d,type:T.type})})}
   ORD().forEach(o=>{if(o.status==='issue'&&!o.issueSeen)a.push({k:'order',o});if(o.status==='ordered'&&o.expected&&o.expected<t)a.push({k:'late',o})});
   const seen=+(ls.get('availSeen')||0);Object.entries(D.avail).forEach(([e,v])=>{if(v.updatedAt&&new Date(v.updatedAt).getTime()>seen&&D.employees[e]&&locOf(e)===curLoc())a.push({k:'avail',e})});
   if(t>availDue(t)){const nw=nextWk(t);emps().forEach(e=>{if(!D.avail[e.id]?.weeks?.[nw])a.push({k:'availMiss',e:e.id})})}
@@ -558,6 +566,7 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
   return `<div class="stack">${isMgr&&!isOwner&&!D.links[uid]?`<div class="hint warn">Your account isn't linked to a store yet. Ask the owner to link you in Team → People, then you'll only see your store.</div>`:''}<div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${esc(locName(curLoc()))}</div><h2>${L('Today at BLISS','BLISS 今日')}</h2></div>
   <div class="stats"><div class="stat"><b>${onNow}</b><span>${L('Clocked in now','正在上班')}</span></div><div class="stat"><b>${tdone}/${tasksOn(d).length+1}</b><span>${L('Tasks done','任务完成')}</span></div><div class="stat"><b style="color:${low?'var(--warn)':'inherit'}">${low}</b><span>${L('Low / out items','库存偏低')}</span></div><div class="stat"><b>${arriving}</b><span>${L('Deliveries due','待到货')}</span></div></div>
   ${actor()?(openPunch(actor())?`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock out (me)</button>`:`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock in (me)</button>`):''}
+  ${reviewCard()}
   <h3>${L('Shifts today','今日班次')}</h3>
   ${sh.length?`<div class="card flush list">${sh.map(s=>{const ps=Object.values(D.punches).filter(p=>p.empId===s.empId&&p.date===d);const p=ps[0];let c;
     if(!p)c=Date.now()>atTime(d,s.start).getTime()+(D.settings.lateGrace||0)*6e4?chip('bad',L('Not clocked in','未打卡')):chip('',L('Not started','未开始'));
@@ -987,11 +996,13 @@ async function receiveSave(){const st=SH_RECV,o=D.orders[st.id];if(!st.photos.le
   const body={...o,lines,diffs,status:diffs||note?'issue':'received',receivedAt:new Date().toISOString(),receivedDate:bizDate(),receivedBy:actor()||'manager',recvPhotos:st.photos,recvNote:note,issueSeen:false};delete body.id;
   if(await W(A.db.doc('orders/'+st.id).set(body))){toast(diffs?'Saved. Your count was sent to the manager to check.':'Delivery received');SH_RECV=null;closeSheet()}}
 
+let RQ=null;
+function reviewNext(){if(!RQ)return;const x=RQ.list[RQ.i];if(!x){const n=RQ.done;RQ=null;closeSheet();toast(n?`Done. ${n} task${n>1?'s':''} reviewed.`:'Review finished');render();return}reviewSheet(x.d,x.type)}
 function reviewSheet(date,type){const doc=photoDoc(date,type);if(!doc)return;const slots=slotsOf(type,date);const T=TASKS().find(t=>t.type===type)||{name:()=>'Task'};const flags={...(doc.flags||{})};
-  openSheet({title:()=>`${L('Review','检查')} · ${T.name()}`,body:()=>`<div class="small muted">${fmtD(date)} · ${L('Tap a photo to view it full size. Flag photos that need to be redone.','点照片放大查看。需要重做的照片请标记。')}</div>
+  openSheet({title:()=>`${L('Review','检查')} · ${T.name()}`,body:()=>`${RQ?`<div class="row"><span class="eyebrow grow">Review ${RQ.i+1} of ${RQ.list.length}</span><button class="btn sm" data-act="reviewSkip">Skip</button></div>`:''}<div class="small muted">${fmtD(date)} · ${doc.completedBy?'By '+esc(empName(doc.completedBy))+' · ':''}${chip(stChip(taskState(date,type).st),taskState(date,type).label)} ${L('Tap a photo to view it full size. Flag photos that need to be redone.','点照片放大查看。需要重做的照片请标记。')}</div>
    <div class="tiles">${slots.map(sl=>{const p=doc.photos?.[sl.id];return p?`<div class="tile has" style="cursor:default"><img src="${BLOB}${esc(p.id)}" alt="" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)}" style="cursor:zoom-in"><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}</span><span class="flag"><button class="chip ${flags[sl.id]?'bad':''}" style="border:0;cursor:pointer" data-act="flagPh" data-slot="${sl.id}">${flags[sl.id]?L('Flagged','已标记'):L('Flag','标记')}</button></span></div>`:doc.checks?.[sl.id]?`<div class="tile has" style="cursor:default;display:grid;place-items:center;text-align:center;padding:10px"><div><div style="font-size:28px;color:var(--ok)">✓</div><b>${esc(sl.name)}</b><div class="tiny muted">${esc(empName(doc.checks[sl.id].by))} · ${fmtT(hm(new Date(doc.checks[sl.id].at)))}</div></div></div>`:`<div class="tile">${esc(sl.name)}<br>${L('missing','缺')}</div>`}).join('')}</div>
    <label class="f">${L('Note to staff','给员工的备注')}<textarea class="in" id="rv_note" placeholder="${L('e.g. wipe under the blender, drains not cleaned','例如：搅拌机下面没擦，下水道没清理')}">${esc(doc.review?.note||'')}</textarea></label>`,
-   foot:()=>`<button class="btn bad" data-act="reviewSave" data-st="issue">${L('Has issues','有问题')}</button><button class="btn pri" data-act="reviewSave" data-st="ok">${ic('check')} ${L('Passed','合格')}</button>`,mount:()=>{SH.flags=flags;SH.date=date;SH.type=type}})}
+   foot:()=>`<button class="btn bad" data-act="reviewSave" data-st="issue">${L('Has issues','有问题')}</button><button class="btn pri" data-act="reviewSave" data-st="ok">${ic('check')} ${L('Passed','合格')}${RQ&&RQ.i<RQ.list.length-1?' · next':''}</button>`,mount:()=>{SH.flags=flags;SH.date=date;SH.type=type}})}
 
 function shiftSheet(id,date){const s=id?D.shifts[id]:{empId:'',date,start:'11:00',end:'17:00',note:''};const ems=emps();
   SH={editId:id||null};openSheet({editId:id||null,title:()=>id?L('Edit shift','编辑班次'):L('Add shift','添加班次'),body:()=>`
@@ -1228,7 +1239,10 @@ const ACT={
  reviewSheet:d=>reviewSheet(d.d,d.type),
  flagPh:d=>{SH.flags[d.slot]=!SH.flags[d.slot];const b=document.querySelector(`[data-act=flagPh][data-slot="${d.slot}"]`);b.className='chip '+(SH.flags[d.slot]?'bad':'');b.textContent=SH.flags[d.slot]?L('Flagged','已标记'):L('Flag','标记')},
  reviewSave:async d=>{const flags=SH.flags,date=SH.date,type=SH.type;const status=d.st==='ok'&&Object.values(flags).some(Boolean)?'issue':d.st;
-   const cur={...photoDoc(date,type)};delete cur.id;const ok=await W(A.db.doc(`photoLogs/${curLoc()}_${date}_${type}`).set({...cur,loc:curLoc(),flags,review:{status,note:$('#rv_note').value.trim(),at:new Date().toISOString()}}));if(ok)closeSheet()},
+   const cur={...photoDoc(date,type)};delete cur.id;const review={status,note:$('#rv_note').value.trim(),at:new Date().toISOString(),by:actor()||uid||'manager'};const ok=await W(A.db.doc(`photoLogs/${curLoc()}_${date}_${type}`).set({...cur,loc:curLoc(),date,type,flags,review}));
+   if(ok){const k=`${curLoc()}_${date}_${type}`;D.photos[k]={...(D.photos[k]||{}),flags,review};if(RQ){RQ.done++;RQ.i++;reviewNext()}else closeSheet()}},
+ reviewStart:()=>{const list=toReview();if(!list.length){toast('Nothing to review');return}RQ={list,i:0,done:0};reviewNext()},
+ reviewSkip:()=>{if(!RQ)return;RQ.i++;reviewNext()},
  slotEdit:d=>tasksSheet(d.k),
  taskCheck:d=>onTaskCheck(d.type,d.slot,d.date),
  tkPick:d=>{tkGrab();TK.cur=+d.i;TK.del=null;const t=TK.E[TK.cur];if(t?.byDay&&!t.days.includes(TK.day))TK.day=t.days[0];drawSheet()},
