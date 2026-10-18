@@ -240,7 +240,7 @@ const ICON={
  dl:'<path d="M12 4v11M7 10l5 5 5-5M5 20h14"/>',
  spark:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
  link:'<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
- list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',
+ list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',doc:'<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/>',
  star:'<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
 };
 const ic=(n,c='i')=>`<svg class="${c}" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]||''}</svg>`;
@@ -344,7 +344,7 @@ function mode(){if(!A.db)return D.ready?'nodb':'loading';if(isMgr){if(UI.pv==='e
   const e=D.links[uid]?.empId;return e&&D.employees[e]?'emp':'unlinked'}
 function actor(){const m=mode();if(m==='emp')return isMgr?UI.kActor:D.links[uid]?.empId;if(m==='mgr')return D.links[uid]?.empId||null;return null}
 const MGR_TABS=[['home','home',()=>L('Today','今天')],['stock','box',()=>L('Stock','库存订货')],['photos','cam',()=>L('Photos','照片')],['sched','cal',()=>L('Schedule','排班工时')],['team','users',()=>L('Team','团队')]];
-const EMP_TABS=[['etoday','home',()=>L('Today','今天')],['eshift','cal',()=>L('My shifts','我的班')],['etrain','grad',()=>L('Training','培训')]];
+const EMP_TABS=[['etoday','home',()=>L('Today','今天')],['eshift','cal',()=>L('My shifts','我的班')],['efiles','doc',()=>'Files'],['etrain','grad',()=>L('Training','培训')]];
 function render(force){if(DRAGGING){setTimeout(()=>render(force),300);return}
   if(!force&&typing($('#view'))){pendingMain=true;return}
   const m=mode();
@@ -757,8 +757,42 @@ function schedTime(){const ps=UI.ps||weekStart(today());const pl=UI.pl||7;const 
   <div class="row"><span class="tiny muted grow">${L(`Overtime is paid at 1.5× over ${D.settings.otWeekly||40} h per week.`,`每周超过 ${D.settings.otWeekly||40} 小时按 1.5 倍计算加班。`)}</span>${A.downloads?`<button class="btn sm" data-act="payCsv" data-ps="${ps}" data-pl="${pl}">${ic('dl')} ${seePay()?L('Export payroll','导出工资表'):'Export hours'}</button>`:''}</div>`}
 
 function vTeam(){const s=curSub('team','people');
-  return `<div class="stack"><h2>${L('Team','团队')}</h2>${subTabs('team',[['people',L('People','员工')],['train',L('Training','培训')],['eval',L('Reviews','评估')],['set',L('Settings','设置')]])}
-  ${s==='people'?teamPeople():s==='train'?teamTrain():s==='eval'?teamEval():teamSet()}</div>`}
+  return `<div class="stack"><h2>${L('Team','团队')}</h2>${subTabs('team',[['people',L('People','员工')],['files','Files'],['train',L('Training','培训')],['eval',L('Reviews','评估')],['set',L('Settings','设置')]])}
+  ${s==='people'?teamPeople():s==='files'?teamFiles():s==='train'?teamTrain():s==='eval'?teamEval():teamSet()}</div>`}
+// ---------- files (PDF, Word, Excel, images…) ----------
+// Everyone's files live in config/files, managers-only files in mgr/files (the database keeps those from staff).
+const FILE_EXT={pdf:'PDF',doc:'Word',docx:'Word',xls:'Excel',xlsx:'Excel',csv:'Excel',ppt:'PowerPoint',pptx:'PowerPoint',txt:'Text',jpg:'Image',jpeg:'Image',png:'Image',heic:'Image',webp:'Image',gif:'Image',mp4:'Video',mov:'Video'};
+const fileKind=f=>FILE_EXT[String(f.ext||'').toLowerCase()]||'File';
+const fileIcon=f=>({PDF:'📕',Word:'📘',Excel:'📗',PowerPoint:'📙',Image:'🖼️',Video:'🎬',Text:'📄'})[fileKind(f)]||'📄';
+const fmtSize=b=>!b?'':b>1048576?(b/1048576).toFixed(1)+' MB':Math.max(1,Math.round(b/1024))+' KB';
+const allFiles=()=>[...(D.files||[]).map(f=>({...f,mgr:false})),...(mode()==='mgr'?(D.mgrFiles||[]).map(f=>({...f,mgr:true})):[])];
+const filesHere=()=>allFiles().filter(f=>!f.loc||f.loc==='all'||f.loc===curLoc());
+function fileRows(list,edit){const cats=[...new Set(list.map(f=>f.cat||'General'))].sort((a,b)=>a==='General'?1:b==='General'?-1:a.localeCompare(b));
+  return cats.map(c=>`<div class="card flush"><div class="li" style="min-height:0;padding-block:8px;background:var(--sunk)"><span class="eyebrow grow">${esc(c)}</span><span class="tiny muted">${list.filter(f=>(f.cat||'General')===c).length}</span></div><div class="list">${list.filter(f=>(f.cat||'General')===c).map(f=>`
+    <div class="li" style="gap:10px"><a class="grow row" style="gap:10px;color:inherit;text-decoration:none;min-width:0" href="${BLOB}${esc(f.path)}" target="_blank" rel="noopener"><span style="font-size:24px">${fileIcon(f)}</span><div class="grow" style="min-width:0"><div class="t" style="overflow:hidden;text-overflow:ellipsis">${esc(f.name)}</div><div class="small muted">${fileKind(f)}${f.size?' · '+fmtSize(f.size):''}${f.mgr?' · managers only':''}${edit&&f.loc&&f.loc!=='all'?' · '+esc(locName(f.loc)):''}</div></div></a>
+    ${edit?`<button class="btn sm" data-act="fileEdit" data-id="${esc(f.id)}" data-m="${f.mgr?1:0}">Edit</button>`:`<a class="btn sm" href="${BLOB}${esc(f.path)}" target="_blank" rel="noopener">Open</a>`}</div>`).join('')}</div></div>`).join('')}
+function vEFiles(){const list=filesHere();return `<div class="stack"><h2>Files</h2><p class="small muted">Recipes, guides and documents from your manager. Tap one to open it.</p>
+  ${list.length>6?`<input class="in" id="file_q" placeholder="Search files" value="${esc(UI.fileQ||'')}">`:''}
+  ${list.length?fileRows(list.filter(f=>!UI.fileQ||(f.name+' '+(f.cat||'')).toLowerCase().includes(UI.fileQ.toLowerCase())),false):`<div class="empty card"><b>No files yet</b>Your manager will add recipes, guides and documents here.</div>`}</div>`}
+function teamFiles(){const list=allFiles().filter(f=>!f.loc||f.loc==='all'||f.loc===curLoc());
+  return `<label class="btn pri" style="cursor:pointer">${ic('plus')} Upload files (PDF, Word, Excel, images…)<input type="file" multiple data-up="files" hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,image/*,video/*"></label>
+  ${UI.fileBusy?`<div class="hint">Uploading ${esc(UI.fileBusy)}…</div>`:''}
+  <p class="small muted">Staff see these under Files in their app. Mark a file "Managers only" to hide it from staff. Max 50 MB per file.</p>
+  ${list.length?fileRows(list,true):`<div class="empty card"><b>No files yet</b>Upload recipes, training guides, the employee handbook, cleaning checklists and so on.</div>`}`}
+function fileSheet(id,isMgr){const src=isMgr?(D.mgrFiles||[]):(D.files||[]);const f=src.find(x=>x.id===id);if(!f)return;const cats=[...new Set(allFiles().map(x=>x.cat).filter(Boolean))];
+  openSheet({title:()=>'Edit file',body:()=>`<a class="btn" href="${BLOB}${esc(f.path)}" target="_blank" rel="noopener">${fileIcon(f)} Open ${esc(f.name)}</a>
+   <label class="f">Name<input class="in" id="fl_name" value="${esc(f.name)}"></label>
+   <label class="f">Category<input class="in" id="fl_cat" value="${esc(f.cat||'')}" placeholder="e.g. Recipes, Training, Policies" list="fl_cats"><datalist id="fl_cats">${cats.map(c=>`<option value="${esc(c)}">`).join('')}</datalist></label>
+   <label class="f">Store<select class="in" id="fl_loc"><option value="all" ${!f.loc||f.loc==='all'?'selected':''}>All stores</option>${LOCS().map(l=>`<option value="${l.id}" ${f.loc===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></label>
+   <label class="row" style="gap:8px"><input type="checkbox" id="fl_mgr" ${isMgr?'checked':''}> <span>Managers only (staff can't see it)</span></label>
+   <div class="tiny muted">${fileKind(f)}${f.size?' · '+fmtSize(f.size):''} · added ${f.at?fmtDT(f.at):''}</div>`,
+   foot:()=>`<button class="btn bad" data-act="fileDel" data-id="${esc(id)}" data-m="${isMgr?1:0}">${SH?.confirmDel===id?'Tap again to delete':'Delete'}</button><button class="btn pri" data-act="fileSave" data-id="${esc(id)}" data-m="${isMgr?1:0}">Save</button>`})}
+async function saveFileLists(pub,mgr){const ok1=pub?await W(A.db.doc('config/files').set({list:pub})):true;const ok2=mgr?await W(A.db.doc('mgr/files').set({list:mgr})):true;if(ok1&&pub)D.files=pub;if(ok2&&mgr)D.mgrFiles=mgr;return ok1&&ok2}
+async function onFilesUpload(inp){const fs=[...(inp.files||[])];if(!fs.length)return;if(!A.assets){toast('File upload is not available');return}const added=[];
+  for(const f of fs){if(f.size>50*1048576){toast(`${f.name} is over 50 MB`);continue}UI.fileBusy=f.name;render();const ext=(f.name.split('.').pop()||'bin').toLowerCase().replace(/[^a-z0-9]/g,'').slice(0,5)||'bin';
+    try{const r=await A.assets.upload(f,{type:f.type||'application/octet-stream',ext});added.push({id:uidGen(),name:f.name.replace(/\.[^.]+$/,''),ext,path:r.id,size:f.size,cat:'',loc:curLoc(),at:new Date().toISOString(),by:myName()})}
+    catch(e){console.warn(e);toast(`Could not upload ${f.name}`)}}
+  UI.fileBusy=null;if(added.length&&await saveFileLists([...(D.files||[]),...added],null))toast(`${added.length} file${added.length>1?'s':''} added. Tap Edit to set a category.`);render()}
 function teamPeople(){const es=Object.values(D.employees).filter(e=>locOf(e.id)===curLoc()).sort((a,b)=>(a.active===false)-(b.active===false)||a.name.localeCompare(b.name));const pend=Object.entries(D.pending).filter(([p])=>!D.links[p]);
   const linked=Object.fromEntries(Object.entries(D.links).map(([u,v])=>[v.empId,u]));
   return `${pend.length?`<div class="card stack"><h3>${L('Accounts waiting to be linked','等待关联的账号')}</h3><p class="small muted">${L('These people opened the app. Pick who each one is.','这些人打开了 app，请选择他们对应的员工。')}</p>${pend.map(([p])=>`<div class="row"><span class="grow" data-pname="${esc(p)}">…</span><select class="in" style="width:auto" id="lk_${esc(p)}"><option value="">${L('Choose…','选择…')}</option>${es.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select><button class="btn sm pri" data-act="linkAcct" data-u="${esc(p)}">${L('Link','关联')}</button></div>`).join('')}</div>`:''}
@@ -911,7 +945,7 @@ function businessCard(){const a=window.blissAccount;if(!a?.renameOrg)return'';
    ${UI.ownErr?`<div class="hint warn">${esc(UI.ownErr)}</div>`:''}
    <div class="row"><input class="in grow" id="bz_own" type="email" inputmode="email" autocomplete="off" placeholder="email@example.com"><button class="btn pri" data-act="bzOwnAdd">Add owner</button></div></div>`}
 function accountCard(){const a=window.blissAccount;if(!a)return'';return `<div class="card row wrapr"><div class="grow"><div class="eyebrow">Signed in</div><div class="t" style="font-weight:600">${esc(a.email||'')}</div><div class="small muted">${esc(a.org||'')} · ${esc(a.role||'')}</div></div>${(a.orgs||[]).length>1?`<button class="btn sm" data-act="switchOrg">Switch business</button>`:''}<button class="btn sm" data-act="signOut">Sign out</button></div>`}
-const VIEWS={owner:vOwner,home:vHome,stock:vStock,photos:vPhotos,sched:vSched,team:vTeam,etoday:vEToday,eshift:vEShift,etrain:vETrain};
+const VIEWS={owner:vOwner,home:vHome,stock:vStock,photos:vPhotos,sched:vSched,team:vTeam,etoday:vEToday,eshift:vEShift,etrain:vETrain,efiles:vEFiles};
 function level(t){if(t>=90)return['ok','Excellent'];if(t>=80)return['info','Good'];if(t>=70)return['warn','Needs Improvement'];return['bad','Unsatisfactory']}
 
 function mountView(){
@@ -1353,6 +1387,13 @@ const ACT={
  taskCheck:d=>onTaskCheck(d.type,d.slot,d.date),
  tkPick:d=>{tkGrab();TK.cur=+d.i;TK.del=null;const t=TK.E[TK.cur];if(t?.byDay&&!t.days.includes(TK.day))TK.day=t.days[0];drawSheet()},
  delivSave:async()=>{const dp={};STORES.forEach((x,i)=>{const v=num($('#dp_'+i)?.value);if(v!=null&&v>0)dp[x]=v});const st={...D.settings,deliveryPct:dp};if(await W(A.db.doc('config/settings').set(st))){D.settings=st;toast('Delivery % saved');render()}},
+ fileEdit:d=>fileSheet(d.id,d.m==='1'),
+ fileSave:async d=>{const wasMgr=d.m==='1';const src=wasMgr?(D.mgrFiles||[]):(D.files||[]);const f=src.find(x=>x.id===d.id);if(!f)return;
+   const nf={...f,name:$('#fl_name').value.trim()||f.name,cat:$('#fl_cat').value.trim(),loc:$('#fl_loc').value};delete nf.mgr;const toMgr=$('#fl_mgr').checked;
+   let pub=(D.files||[]).filter(x=>x.id!==d.id),mg=(D.mgrFiles||[]).filter(x=>x.id!==d.id);if(toMgr)mg=wasMgr?(D.mgrFiles||[]).map(x=>x.id===d.id?nf:x):[...mg,nf];else pub=wasMgr?[...pub,nf]:(D.files||[]).map(x=>x.id===d.id?nf:x);
+   if(await saveFileLists(pub,mg)){toast('Saved');closeSheet();render()}},
+ fileDel:async d=>{if(SH.confirmDel!==d.id){SH.confirmDel=d.id;drawSheet();return}const isM=d.m==='1';const pub=isM?null:(D.files||[]).filter(x=>x.id!==d.id);const mg=isM?(D.mgrFiles||[]).filter(x=>x.id!==d.id):null;
+   if(await saveFileLists(pub,mg)){toast('Deleted');closeSheet();render()}},
  tkDT:(d,el)=>{tkGrab();const t=TK.E[TK.cur];if(el.checked)t.dayTimes=t.dayTimes||{};else delete t.dayTimes;drawSheet()},
  tkDup:()=>{tkGrab();const t=TK.E[TK.cur];if(!t)return;const c=JSON.parse(JSON.stringify(t));c.id='task-'+uidGen().slice(-6);c.name=(t.name||'Task')+' (copy)';
    c.items=(c.items||[]).map(x=>({...x,id:slug(x.name||'item')+'-'+uidGen().slice(-3)}));TK.E.splice(TK.cur+1,0,c);TK.cur=TK.cur+1;TK.del=null;drawSheet();toast('Task copied. Rename it, change the time, then Save.');setTimeout(()=>{const el=$('#tk_name');el&&(el.focus(),el.select())},0)},
@@ -1435,7 +1476,7 @@ function redrawAvail(){const note=$('#av_note')?.value;drawSheet();if(note!=null
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const f=ACT[el.dataset.act];if(!f)return;
   if(el.tagName!=='INPUT'&&el.tagName!=='LABEL')e.preventDefault();f(el.dataset,el)});
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.li.tap[data-act],.card.tap[data-act]')){e.preventDefault();e.target.click()}if(e.key==='Escape'){if($('#viewer').innerHTML)$('#viewer').innerHTML='';else if(SH)closeSheet()}});
-document.addEventListener('input',e=>{const t=e.target;if(SH_ORDER&&(t.id==='o_fee'||/^ol_[qp]\d+$/.test(t.id))){grabOrderLines();const el=$('#o_totals');if(el)el.innerHTML=orderTotalsHtml(SH_ORDER)}});
+document.addEventListener('input',e=>{const t=e.target;if(t.id==='file_q'){UI.fileQ=t.value;const pos=t.selectionStart;render(true);const n=$('#file_q');if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch{}}return}if(SH_ORDER&&(t.id==='o_fee'||/^ol_[qp]\d+$/.test(t.id))){grabOrderLines();const el=$('#o_totals');if(el)el.innerHTML=orderTotalsHtml(SH_ORDER)}});
 document.addEventListener('change',async e=>{const t=e.target;
   if(t.matches('select[data-act=orderLoc]')){const id=t.dataset.id;if(await W(A.db.doc('orders/'+id).update({loc:t.value}))){toast('Moved to '+locName(t.value));closeSheet()}return}
   if((t.id==='as_from'||t.id==='as_to')&&AS){asGrab();const f=$('#as_from').value,to=$('#as_to').value;if(!f)return;let n=to?diffDays(f,to)+1:AS.n;if(t.id==='as_from'&&to&&to<f)n=AS.n;n=Math.max(1,Math.min(21,n));AS.ws=f;AS.n=n;asLoadDraft();drawSheet();return}
@@ -1453,6 +1494,7 @@ document.addEventListener('change',async e=>{const t=e.target;
   if(t.matches('select[data-act=avMode]')){const r=$('#av_t'+t.dataset.i);if(r)r.hidden=t.value!=='custom';return}
   if(t.type!=='file'||!t.dataset.up)return;const kind=t.dataset.up;
   if(kind==='task'){await onTaskUpload(t)}
+  else if(kind==='files'){await onFilesUpload(t);t.value=''}
   else if(kind==='tref'){const f=t.files?.[0];if(!f||!TK)return;tkGrab();toast('Uploading example…');const id=await uploadImg(f);if(!id)return;const x=tkList()[+t.dataset.i];if(x){x.ref=id;drawSheet()}}
   else if(kind==='selfie'){const f=t.files?.[0];if(!f)return;const t0=new Date();const lab=t.closest('label');if(lab){lab.style.opacity=.6;lab.firstChild&&0}toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(lab)lab.style.opacity='';if(!id)return;await doClockIn(id,t0)}
   else if(kind==='shot'){const fs=[...(t.files||[])];if(!fs.length)return;grabOrderLines();for(const f of fs){const blob=await compress(f);SH_ORDER.shots.push({blob,url:URL.createObjectURL(blob)})}SH_ORDER.msg='';drawSheet()}
@@ -1640,7 +1682,7 @@ async function boot(){
   if(!db){render();return}
   uid=user?await user.id():null;isMgr=user?await user.canEdit():false;isOwner=user?await user.isOwner():false;
   c.use('assets').then(x=>{A.assets=x;rerender()});c.use('sample').then(x=>{A.sample=x;rerender()});c.use('downloads').then(x=>{A.downloads=x;rerender()});
-  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
+  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='files')D.files=v.list||[];if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
   subscribe(db.collection('employees'),s=>{D.employees=mapDocs(s)});
   subscribe(db.collection('links'),s=>{D.links=mapDocs(s)});
   subscribe(db.collection('counts').orderBy('date','desc').limit(120),s=>{D.counts=mapDocs(s)});
@@ -1654,7 +1696,7 @@ async function boot(){
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='sched')D.schedCfg=v})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);

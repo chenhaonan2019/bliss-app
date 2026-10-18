@@ -307,7 +307,7 @@
   const assets = {
     async upload(blob, opts) {
       const type = (opts && opts.type) || blob.type || "image/jpeg";
-      const ext = { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif" }[type] || "bin";
+      const ext = (opts && opts.ext) || { "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp", "image/gif": "gif", "application/pdf": "pdf" }[type] || "bin";
       const path = `${ORG}/${newId()}${newId().slice(0, 6)}.${ext}`;
       const { error } = await SB.storage.from(CFG.photoBucket).upload(path, blob, { contentType: type, upsert: false });
       if (error) throw { code: /size|large/i.test(error.message) ? "too_large" : "upstream_error", message: error.message };
