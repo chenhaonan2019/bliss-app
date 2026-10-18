@@ -1,0 +1,30 @@
+# Copies each store's hourly sales from Menusifu into the app every morning, so the
+# Auto-schedule forecast stays current without a computer. Setup: README → "Menusifu sync".
+name: Menusifu sync
+on:
+  schedule:
+    - cron: "17 9 * * *"   # every day ~5:17am New York time (GitHub may start it a little late)
+  workflow_dispatch: {}    # "Run workflow" button for a manual run
+permissions:
+  contents: read
+concurrency: menusifu-sync
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - run: npm install --no-save --no-audit --no-fund playwright@1.56.0
+      - run: npx playwright install --with-deps chromium
+      - name: Sync hourly sales
+        run: node sync/menusifu-sync.mjs
+        env:
+          MENUSIFU_EMAIL: ${{ secrets.MENUSIFU_EMAIL }}
+          MENUSIFU_PASSWORD: ${{ secrets.MENUSIFU_PASSWORD }}
+          BLISS_SYNC_SECRET: ${{ secrets.BLISS_SYNC_SECRET }}
+          SUPABASE_URL: https://vylynuuzeniqmyorrefl.supabase.co
+          SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5bHludXV6ZW5pcW15b3JyZWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxOTI5NzEsImV4cCI6MjEwNzc2ODk3MX0.J0Avgg9G3YmxuvuOz7SMRSdiMOdxYqIYL2MipTvEeM8
+          MENUSIFU_STORES: M000023561=nh,M000026022=wh
