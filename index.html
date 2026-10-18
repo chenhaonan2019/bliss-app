@@ -812,7 +812,7 @@ function teamPeople(){const es=Object.values(D.employees).filter(e=>locOf(e.id)=
   <div class="card flush list">${es.map(e=>`<div class="li tap" data-act="empEdit" data-id="${e.id}" tabindex="0">${avatar(e.id)}<div class="grow"><div class="t">${esc(e.name)}</div><div class="small muted">${esc(e.role||'Staff')}${e.phone?' · '+esc(e.phone):''}${wageLabel(e.id)?' · '+esc(wageLabel(e.id)):''}${linked[e.id]?' · '+L('app linked','已关联账号'):''}</div></div>${e.active===false?chip('',L('Inactive','停用')):''}${ic('chev')}</div>`).join('')||`<div class="empty">${L('No team members yet.','还没有员工。')}</div>`}</div>
   ${!D.links[uid]&&es.length?`<div class="card stack"><h3>${L('Do you also work shifts?','你自己也上班吗？')}</h3><p class="small muted">${L('Link your own account to your name so you can clock in.','把你的账号关联到你的名字，就能自己打卡。')}</p><div class="row"><select class="in grow" id="lk_self">${es.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select><button class="btn" data-act="linkSelf">${L('This is me','这是我')}</button></div></div>`:''}`}
 function teamTrain(){const es=emps().filter(e=>e.role==='Trainee');
-  return `<div class="legend"><span><i style="background:var(--st2)"></i>${L('Fluent','熟练')}</span><span><i style="background:var(--st1)"></i>${L('Shown','已教过')}</span><span><i style="background:var(--st0)"></i>${L('Not started','未开始')}</span></div>
+  return `<div class="row wrapr"><span class="small muted grow">${D.trainCfg.sections.length} sections · ${D.trainCfg.sections.reduce((a,x)=>a+(x.items||[]).length,0)} items</span><button class="btn sm" data-act="trainEdit">${ic('list')} Edit checklist</button></div><div class="legend"><span><i style="background:var(--st2)"></i>${L('Fluent','熟练')}</span><span><i style="background:var(--st1)"></i>${L('Shown','已教过')}</span><span><i style="background:var(--st0)"></i>${L('Not started','未开始')}</span></div>
   ${es.map(e=>{const S=trainStats(e.id);return `<div class="card stack tap" data-act="trainOpen" data-id="${e.id}" style="cursor:pointer" tabindex="0"><div class="row">${avatar(e.id)}<div class="grow t">${esc(e.name)}</div><b style="font-family:var(--display);font-size:20px">${S.tot?Math.round(S.s2/S.tot*100):0}%</b>${ic('chev')}</div>
    ${D.trainCfg.sections.map((sec,gi)=>{const p=S.per[sec.id];return `<div class="row" style="gap:8px"><span class="small" style="width:42%;color:${GC[gi%GC.length]};font-weight:600">${esc(sec.title)}</span><div class="grow">${barHtml(p.n,p.s1,p.s2)}</div><span class="tiny muted" style="width:36px;text-align:right">${p.s2}/${p.n}</span></div>`}).join('')}</div>`}).join('')||`<div class="empty card"><b>No trainees right now</b>Training progress shows only for people whose role is Trainee. Change the role in People to start someone's training board.</div>`}`}
 function teamEval(){const ev=Object.values(D.evals).filter(x=>locOf(x.empId)===curLoc()).sort((a,b)=>(b.date||'').localeCompare(a.date||''));const by={};ev.forEach(x=>{(by[x.empId]=by[x.empId]||[]).push(x)});
@@ -1952,6 +1952,36 @@ Object.assign(ACT,{
    if(ownerAct()&&p?.status==='published'&&p.snap&&pubDiff(loc,ws).length===1)await pubSave(k,{...p,snap:pubShifts(loc,ws).map(shSnap)});
    toast(`${first(d.e)} has the shift now`);ACT.swapBack()},
 });
+
+/* ---------- edit the training checklist: sections and items ---------- */
+let TR=null;
+function trGrab(){if(!TR)return;const sec=TR.S[TR.cur];if(!sec)return;const t=$('#tr_title');if(t)sec.title=t.value;const dl=$('#tr_done');if(dl)sec.doneLabel=dl.value.trim();
+  document.querySelectorAll('[data-trn]').forEach(el=>{const it=sec.items[+el.dataset.trn];if(it)it.name=el.value});
+  document.querySelectorAll('[data-trs]').forEach(el=>{const x=TR.S[+el.dataset.trs];if(x)x.title=el.value})}
+function trainEditSheet(){TR={S:JSON.parse(JSON.stringify(D.trainCfg.sections||[])),cur:0,del:null};TR.S.forEach(x=>{x.items=x.items||[]});
+  openSheet({title:()=>'Training checklist',body:()=>{const sec=TR.S[TR.cur];const used=k=>Object.values(D.training).filter(t=>t.status?.[k]).length;
+   return `<p class="small muted">Sections and items every trainee works through. Drag ⋮⋮ to reorder. Removing an item hides it; progress already recorded is kept if you add it back with the same name.</p>
+   <div class="chips">${TR.S.map((x,i)=>`<button class="${i===TR.cur?'on':''}" data-act="trPick" data-i="${i}"><span>${x.items.length} item${x.items.length===1?'':'s'}</span><b style="font-size:13px">${esc(x.title||'Section')}</b></button>`).join('')}<button data-act="trSecAdd"><span>New</span><b>${ic('plus')}</b></button></div>
+   ${sec?`<div class="card stack"><div class="g2"><label class="f">Section name<input class="in" id="tr_title" maxlength="40" value="${esc(sec.title||'')}"></label><label class="f">"Done" word<input class="in" id="tr_done" maxlength="20" value="${esc(sec.doneLabel||'')}" placeholder="Fluent"></label></div>
+    <div class="card flush list" data-sortable="tritems">${sec.items.map((it,i)=>`<div class="li" style="gap:8px;padding-left:6px" data-sid="${i}">${DRAG_H}<input class="in grow" data-trn="${i}" maxlength="80" value="${esc(it.name)}" aria-label="Item name">${used(sec.id+'__'+it.id)?`<span class="tiny muted" title="trainees with progress">${used(sec.id+'__'+it.id)}✓</span>`:''}<button class="btn sm" data-act="trItemDel" data-i="${i}" aria-label="Remove item">${ic('x')}</button></div>`).join('')||'<div class="empty">No items yet.</div>'}</div>
+    <div class="row"><input class="in grow" id="tr_new" maxlength="80" placeholder="New item, e.g. Make a strawberry matcha latte"><button class="btn" data-act="trItemAdd">${ic('plus')} Add</button></div>
+    <button class="btn bad sm" data-act="trSecDel">${TR.del===TR.cur?`Tap again to remove "${esc(sec.title||'Section')}" and its ${sec.items.length} items`:'Remove this section'}</button></div>`:'<div class="empty card">No sections. Tap New to add one.</div>'}
+   ${TR.S.length>1?`<details class="card"><summary style="cursor:pointer;font-weight:600">Order of sections</summary><div class="list" data-sortable="trsec" style="margin-top:8px">${TR.S.map((x,i)=>`<div class="li" style="gap:8px;padding-left:6px" data-sid="${i}">${DRAG_H}<input class="in grow" data-trs="${i}" maxlength="40" value="${esc(x.title||'')}" aria-label="Section name"></div>`).join('')}</div></details>`:''}`},
+   foot:()=>`<button class="btn" data-act="closeSheet">Cancel</button><button class="btn pri" data-act="trSave">Save checklist</button>`})}
+Object.assign(ACT,{
+ trainEdit:()=>trainEditSheet(),
+ trPick:d=>{trGrab();TR.cur=+d.i;TR.del=null;drawSheet()},
+ trSecAdd:()=>{trGrab();const n=prompt('New section name (e.g. Drinks, Register, Closing)');if(!n?.trim())return;TR.S.push({id:slug(n)+'-'+Math.random().toString(36).slice(2,5),title:n.trim(),items:[]});TR.cur=TR.S.length-1;drawSheet()},
+ trSecDel:()=>{trGrab();if(TR.del!==TR.cur){TR.del=TR.cur;drawSheet();return}TR.S.splice(TR.cur,1);TR.cur=Math.max(0,TR.cur-1);TR.del=null;drawSheet()},
+ trItemAdd:()=>{trGrab();const n=$('#tr_new').value.trim();if(!n){$('#tr_new').focus();return}const sec=TR.S[TR.cur];const base=slug(n);const old=(D.trainCfg.sections.find(x=>x.id===sec.id)?.items||[]).find(x=>x.id===base);
+   sec.items.push({id:old||!sec.items.some(x=>x.id===base)?base:base+'-'+Math.random().toString(36).slice(2,5),name:n});drawSheet();setTimeout(()=>$('#tr_new')?.focus(),30)},
+ trItemDel:d=>{trGrab();TR.S[TR.cur].items.splice(+d.i,1);drawSheet()},
+ trSave:async()=>{trGrab();const S=TR.S.map(x=>({...x,title:(x.title||'').trim()||'Section',items:x.items.map(i=>({...i,name:(i.name||'').trim()})).filter(i=>i.name)}));if(!S.some(x=>x.doneLabel))S.forEach(x=>{if(!x.doneLabel)delete x.doneLabel});
+   const cfg={...D.trainCfg,sections:S};delete cfg.id;if(await W(A.db.doc('config/training').set(cfg))){D.trainCfg=cfg;TR=null;toast('Training checklist saved');closeSheet()}},
+});
+Object.assign(SORT,{
+ tritems:ids=>{if(!TR)return;trGrab();const L0=TR.S[TR.cur].items;TR.S[TR.cur].items=ids.map(i=>L0[+i]);drawSheet()},
+ trsec:ids=>{if(!TR)return;trGrab();const cur=TR.S[TR.cur];const L0=TR.S;TR.S=ids.map(i=>L0[+i]);TR.cur=Math.max(0,TR.S.indexOf(cur));drawSheet()}});
 
 Object.assign(SORT,{
   fixed:ids=>ACT.fixedOrder(ids),
