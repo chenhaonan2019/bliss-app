@@ -158,6 +158,15 @@ input.in:focus,select.in:focus,textarea.in:focus{outline:2px solid var(--matcha)
 .pindots{display:flex;gap:12px;justify-content:center;margin:12px 0 20px}
 .pindots i{width:14px;height:14px;border-radius:50%;border:2px solid var(--brand)}
 .pindots i.f{background:var(--brand)}
+.cele{position:fixed;inset:0;z-index:200;display:grid;place-items:center;background:rgb(0 0 0/.28);overflow:hidden;animation:cfade .2s ease-out;cursor:pointer}
+.cele-box{position:relative;background:var(--surface);color:var(--ink);border-radius:22px;padding:26px 30px;text-align:center;display:grid;gap:6px;justify-items:center;max-width:300px;box-shadow:0 20px 50px rgb(0 0 0/.25);animation:cpop .45s cubic-bezier(.2,1.5,.4,1)}
+.cele-box b{font-family:var(--display);font-size:22px}.cele-box span{color:var(--muted);font-size:14px}
+.cele-check svg{width:76px;height:76px}.cele-check circle{fill:var(--ok-bg);stroke:var(--ok);stroke-width:3}
+.cele-check path{fill:none;stroke:var(--ok);stroke-width:5;stroke-linecap:round;stroke-linejoin:round;stroke-dasharray:44;stroke-dashoffset:44;animation:cdraw .45s .25s ease-out forwards}
+.cele i{position:absolute;top:-16px;width:9px;height:15px;border-radius:2px;animation:cfall 2s ease-in forwards}
+.cele.small{background:transparent;pointer-events:none}.cele.small .cele-box{padding:18px 22px}.cele.small .cele-check svg{width:56px;height:56px}.cele.small b{font-size:18px}
+@keyframes cfade{from{opacity:0}}@keyframes cpop{from{transform:scale(.6);opacity:0}}@keyframes cdraw{to{stroke-dashoffset:0}}@keyframes cfall{to{transform:translateY(112vh) rotate(620deg)}}
+@media (prefers-reduced-motion: reduce){.cele,.cele *{animation:none!important}.cele-check path{stroke-dashoffset:0}.cele i{display:none}}
 .toast{position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:80;background:var(--ink);color:var(--bg);border-radius:12px;padding:10px 16px;font-weight:600;max-width:calc(100% - 32px);box-shadow:0 6px 24px rgb(0 0 0/.25)}
 .viewer{position:fixed;inset:0;z-index:70;background:rgb(0 0 0/.92);display:flex;flex-direction:column;padding:env(safe-area-inset-top,0px) 0 env(safe-area-inset-bottom,0px)}
 .viewer img{flex:1;min-height:0;object-fit:contain;width:100%}
@@ -289,6 +298,14 @@ const chip=(k,t)=>`<span class="chip ${k}">${t}</span>`;
 
 /* ---------- toast / sheet / viewer ---------- */
 let toastT;
+// Check-mark celebration. big = confetti for "all done"; small = quick check for one task.
+function celebrate(title,sub,big){document.querySelectorAll('.cele').forEach(x=>x.remove());const el=document.createElement('div');el.className='cele'+(big?'':' small');el.setAttribute('role','status');
+  const cols=['#4E6B45','#E8B04B','#D9725B','#7FA06F','#5B8BD9','#C27BA0'];
+  const bits=big?[...Array(44)].map((_,i)=>`<i style="left:${(Math.random()*100).toFixed(1)}%;background:${cols[i%cols.length]};animation-delay:${(Math.random()*.5).toFixed(2)}s;animation-duration:${(1.6+Math.random()*1.2).toFixed(2)}s"></i>`).join(''):'';
+  el.innerHTML=`${bits}<div class="cele-box"><div class="cele-check"><svg viewBox="0 0 52 52" aria-hidden="true"><circle cx="26" cy="26" r="24"/><path d="M15 27l7.5 7.5L38 19"/></svg></div><b>${esc(title)}</b>${sub?`<span>${esc(sub)}</span>`:''}</div>`;
+  document.body.appendChild(el);el.addEventListener('click',()=>el.remove());setTimeout(()=>el.remove(),big?3200:1500)}
+const allTasksDone=d=>{const ts=tasksOn(d);return ts.length>0&&ts.every(T=>['ontime','late'].includes(taskState(d,T.type).st))};
+function afterTaskDone(type,date,justDone){if(!justDone)return;if(date===bizDate()&&allTasksDone(date))celebrate("All of today's tasks are done!",'Great work 🎉',true);else celebrate('Task complete',taskName(type))}
 function toast(m){const t=$('#toast');t.innerHTML=`<div class="toast" role="status">${esc(m)}</div>`;clearTimeout(toastT);toastT=setTimeout(()=>t.innerHTML='',String(m).length>80?7000:2600)}
 function errMsg(e){const c=e?.code||'';if(/^Only an owner/.test(e?.message||''))return e.message;if(c==='invalid_argument')return L('You do not have permission to change this.','你没有权限修改这一项。')+(e?.message?` (${String(e.message).slice(0,140)})`:'');if(c==='quota_exceeded')return L('Storage is full. Delete old records first.','存储已满，请先删除旧记录。');if(c==='too_large')return L('Photo is too large.','照片太大。');if(c==='rate_limited'||c==='resource_exhausted')return L('Too many requests. Try again in a moment.','操作太频繁，请稍后再试。');return L('Could not save. Check your connection and try again.','保存失败，请检查网络后重试。')}
 async function W(p){try{await p;return true}catch(e){console.warn(e);toast(errMsg(e));if(e?.code==='invalid_argument')window.blissAccount?.recheck?.();return false}}
@@ -298,7 +315,7 @@ function drawSheet(){if(!SH){$('#sheet').innerHTML='';return}
   const sb=$('#sheet .sb');const top=sb?sb.scrollTop:0;
   $('#sheet').innerHTML=`<div class="sheet" role="dialog" aria-modal="true"><div class="sh"><h2>${SH.title()}</h2><button class="x" data-act="closeSheet" aria-label="${L('Close','关闭')}">${ic('x')}</button></div><div class="sb"><div class="wrap stack">${SH.body()}</div></div>${SH.foot?`<div class="sf">${SH.foot()}</div>`:''}</div>`;
   const nb=$('#sheet .sb');if(nb)nb.scrollTop=top;SH.mount&&SH.mount()}
-function closeSheet(){RQ=null;SH=null;$('#sheet').innerHTML='';document.body.style.overflow='';render()}
+function closeSheet(){RQ=null;SQ=null;SH=null;$('#sheet').innerHTML='';document.body.style.overflow='';render()}
 function typing(root){const a=document.activeElement;return a&&root&&root.contains(a)&&/INPUT|TEXTAREA|SELECT/.test(a.tagName)&&a.type!=='file'}
 function viewPhoto(id,extra=''){ $('#viewer').innerHTML=`<div class="viewer" data-act="closeViewer"><img src="${BLOB}${esc(id)}" alt=""><div class="vb">${extra}<span class="grow"></span><button class="btn sm">${L('Close','关闭')}</button></div></div>`}
 
@@ -453,6 +470,24 @@ function badgeCount(){if(mode()!=='mgr')return 0;return attention().length}
 // Tasks from the last 7 days that staff finished (or ran out of time on) and no manager has reviewed yet.
 function toReview(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.filled&&['ontime','late','missed'].includes(s.st)&&!s.doc?.review)r.push({d,type:T.type,st:s.st})})}return r.sort((a,b)=>a.d.localeCompare(b.d))}
 function missedTasks(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.st==='missed'&&!s.filled)r.push({d,type:T.type})})}return r}
+function reviewStats(l){return withLoc(l,()=>{const t=bizDate();let done=0,reviewed=0,issues=0,missed=0,audited=0,disagree=0,last=null;
+  for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.st==='missed'&&!s.filled){missed++;return}if(!s.filled||!['ontime','late','missed'].includes(s.st))return;done++;const rv=s.doc?.review;
+    if(rv){reviewed++;if(rv.status==='issue')issues++;if(!last||rv.at>last.at)last=rv}if(s.doc?.audit){audited++;if(s.doc.audit.status!=='agree')disagree++}})}
+  return{done,reviewed,waiting:done-reviewed,issues,missed,audited,disagree,last}})}
+// Owner spot check: a random handful of reviewed tasks from the last 14 days (not yet spot-checked first).
+let SQ=null;
+function spotStart(l){const list=withLoc(l,()=>{const t=bizDate();const r=[];for(let i=0;i<14;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const doc=photoDoc(d,T.type);if(doc?.review)r.push({d,type:T.type,a:!!doc.audit})})}return r});
+  if(!list.length){toast('No reviewed tasks to spot check yet');return}
+  const pick=[...list.filter(x=>!x.a).sort(()=>Math.random()-.5),...list.filter(x=>x.a).sort(()=>Math.random()-.5)].slice(0,5);SQ={l,list:pick,i:0,n:0};spotNext()}
+function spotNext(){if(!SQ)return;const x=SQ.list[SQ.i];if(!x){const n=SQ.n;SQ=null;closeSheet();render();toast(n?`Spot check done · ${n} checked`:'Spot check finished');return}
+  const l=SQ.l;openSheet({title:()=>`Spot check · ${esc(locName(l))}`,body:()=>withLoc(l,()=>{const doc=photoDoc(x.d,x.type)||{};const slots=slotsOf(x.type,x.d);const rv=doc.review||{};
+    return `<div class="row"><span class="eyebrow grow">${SQ.i+1} of ${SQ.list.length}</span><button class="btn sm" data-act="spotSkip">Skip</button></div>
+    <div><b>${esc(taskName(x.type))}</b> · ${fmtD(x.d)}<div class="small muted">${doc.completedBy?'Done by '+esc(empName(doc.completedBy))+' · ':''}${chip(stChip(taskState(x.d,x.type).st),taskState(x.d,x.type).label)}</div></div>
+    <div class="hint ${rv.status==='ok'?'':'warn'}"><b>Manager review:</b> ${rv.status==='ok'?'Passed':'Has issues'}${rv.by&&D.employees[rv.by]?' · '+esc(empName(rv.by)):''}${rv.at?' · '+fmtDT(rv.at):''}${rv.note?`<br>“${esc(rv.note)}”`:''}</div>
+    <div class="tiles">${slots.map(sl=>{const p=doc.photos?.[sl.id];const fl=doc.flags?.[sl.id];return p?`<div class="tile has" style="cursor:default"><img src="${BLOB}${esc(p.id)}" alt="" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)}" style="cursor:zoom-in"><span class="cap"><b>${esc(sl.name)}</b></span>${fl?`<span class="flag">${chip('bad','Flagged')}</span>`:''}</div>`
+      :doc.checks?.[sl.id]?`<div class="tile has" style="display:grid;place-items:center;text-align:center;padding:10px"><div><div style="font-size:26px;color:var(--ok)">✓</div><b>${esc(sl.name)}</b></div></div>`:`<div class="tile">${esc(sl.name)}<br>missing</div>`}).join('')}</div>
+    <label class="f">Note to the manager (optional)<textarea class="in" id="sp_note" placeholder="e.g. this should not have passed, the drain is dirty">${esc(doc.audit?.note||'')}</textarea></label>`}),
+   foot:()=>`<button class="btn bad" data-act="spotSave" data-st="disagree">Disagree</button><button class="btn pri" data-act="spotSave" data-st="agree">${ic('check')} Agree${SQ&&SQ.i<SQ.list.length-1?' · next':''}</button>`})}
 function reviewCard(){const q=toReview(),m=missedTasks();if(!q.length&&!m.length)return `<div class="card row" style="gap:12px;border-left:4px solid var(--ok)"><span style="font-size:22px;color:var(--ok)">✓</span><div class="grow"><div class="t">All photo tasks reviewed</div><div class="small muted">Nothing waiting from the last 7 days.</div></div></div>`;
   return `<div class="card stack" style="gap:10px;border:2px solid ${q.length?'var(--brand)':'var(--warn)'}">
    <div class="row" style="gap:12px">${ic('cam')}<div class="grow"><div style="font-weight:700;font-size:17px">Review photos & tasks</div><div class="small muted">${q.length?`${q.length} task${q.length>1?'s':''} waiting for your review`:'Nothing to review'}${m.length?` · ${m.length} not done`:''}</div></div>${q.length?chip('info',String(q.length)):''}</div>
@@ -501,6 +536,7 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
   </div>
   ${availCard(me)}
   <h3>${L('Today’s tasks','今日任务')}</h3>
+  ${allTasksDone(d)?`<div class="card row" style="gap:12px;border-left:4px solid var(--ok);background:var(--ok-bg)"><span style="font-size:24px;color:var(--ok)">✓</span><div class="grow"><div class="t">All of today's tasks are done</div><div class="small muted">Thank you!</div></div></div>`:''}
   <div class="card flush list">
     ${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time())}</div><div class="small muted">${s.filled}/${s.total} done</div></div>${chip(stChip(s.st),s.label)}${ic('chev')}</div>`}).join('')}
     ${dueD.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · take photos when it arrives</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}
@@ -633,7 +669,8 @@ function vPhotos(){const d=UI.pDate||bizDate();const days=[...Array(7)].map((_,i
   ${tasksOn(d).map(T=>{const s=taskState(d,T.type);const slots=slotsOf(T.type,d);const doc=s.doc;const rv=doc?.review;
     return `<div class="card stack"><div class="row wrapr"><div class="grow"><h3>${T.name()} · ${fmtT(T.time())} <button class="btn sm" style="min-height:26px;padding:2px 8px;font-size:12px;vertical-align:2px" data-act="slotEdit" data-k="${T.type}">Edit</button></h3><div class="small muted">${doc?.completedBy?L('By ','上传人：')+esc(empName(doc.completedBy))+' · '+fmtDT(doc.completedAt):s.filled?L('In progress','进行中'):''}</div></div>${chip(stChip(s.st),s.label)}</div>
     ${s.filled?`<div class="thumbs">${slots.map(sl=>{const p=doc?.photos?.[sl.id];return !p&&doc?.checks?.[sl.id]?`<div class="ph" title="${esc(sl.name)}" style="display:grid;place-items:center;color:var(--ok);font-weight:700">✓</div>`:p?`<img src="${BLOB}${esc(p.id)}" alt="${esc(sl.name)}" title="${esc(sl.name)}" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)} · ${esc(empName(p.by))} · ${esc(fmtDT(p.at))}" style="${doc?.flags?.[sl.id]?'outline:3px solid var(--bad);outline-offset:-3px':''}">`:`<div class="ph" title="${esc(sl.name)}"></div>`}).join('')}</div>
-      <div class="row wrapr">${rv?`${chip(rv.status==='ok'?'ok':'bad',rv.status==='ok'?L('Passed','合格'):L('Issue','有问题'))}<span class="small muted grow">${esc(rv.note||'')}</span>`:'<span class="grow"></span>'}<button class="btn sm" data-act="photoTask" data-type="${T.type}" data-d="${d}">${ic('cam')} Upload</button><button class="btn sm pri" data-act="reviewSheet" data-d="${d}" data-type="${T.type}">${rv?L('Edit review','修改检查'):L('Review','检查')}</button></div>`:`<div class="row"><span class="muted small grow">${L('No photos uploaded.','还没有上传照片。')}</span><button class="btn sm pri" data-act="photoTask" data-type="${T.type}" data-d="${d}">${ic('cam')} Upload photos</button></div>`}</div>`}).join('')}
+      ${doc?.audit?`<div class="hint ${doc.audit.status==='agree'?'':'warn'}"><b>Owner spot check:</b> ${doc.audit.status==='agree'?'agrees with the review':'does not agree with the review'}${doc.audit.note?' · '+esc(doc.audit.note):''}</div>`:''}
+      <div class="row wrapr">${rv?`${chip(rv.status==='ok'?'ok':'bad',rv.status==='ok'?L('Passed','合格'):L('Issue','有问题'))}<span class="small muted grow">${esc(rv.note||'')}${rv.by&&D.employees[rv.by]?' · '+esc(empName(rv.by)):''}</span>`:'<span class="grow"></span>'}<button class="btn sm" data-act="photoTask" data-type="${T.type}" data-d="${d}">${ic('cam')} Upload</button><button class="btn sm pri" data-act="reviewSheet" data-d="${d}" data-type="${T.type}">${rv?L('Edit review','修改检查'):L('Review','检查')}</button></div>`:`<div class="row"><span class="muted small grow">${L('No photos uploaded.','还没有上传照片。')}</span><button class="btn sm pri" data-act="photoTask" data-type="${T.type}" data-d="${d}">${ic('cam')} Upload photos</button></div>`}</div>`}).join('')}
   ${tasksOn(d).length?'':`<div class="empty card">No tasks on this day.</div>`}<button class="btn" data-act="slotEdit">${ic('list')} Edit tasks, items & times</button></div>`}
 
 function vSched(){const s=curSub('sched','plan');
@@ -735,7 +772,12 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
       <div class="small"><b>${t.on}</b> clocked in · <b>${t.sh.length}</b> shifts${t.late?` · <span style="color:var(--warn)">${t.late} late</span>`:''}</div>
       <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
       <div class="small muted">${t.low==null?'No count yet':`${t.low} low / out`} · ${t.arriving} deliveries due</div></div>`}).join('')}</div>
-      <p class="tiny muted">Tap a store to open it.</p>`}
+      <p class="tiny muted">Tap a store to open it.</p>
+      <h3>Photo reviews · last 7 days</h3>
+      <div class="g2">${L2.map(l=>{const r=reviewStats(l.id);return `<div class="card stack" style="min-width:0;gap:8px"><div class="row"><b class="grow">${esc(l.name)}</b>${r.waiting?chip('warn',`${r.waiting} waiting`):r.done?chip('ok','All reviewed'):''}</div>
+        <div class="small"><b>${r.reviewed}</b> of <b>${r.done}</b> finished tasks reviewed${r.issues?` · <span style="color:var(--bad)">${r.issues} with issues</span>`:''}${r.missed?` · ${r.missed} not done`:''}</div>
+        <div class="small muted">${r.last?`Last review ${fmtDT(r.last.at)}${r.last.by&&D.employees[r.last.by]?' by '+esc(empName(r.last.by)):''}`:'No reviews yet'}${r.audited?` · you spot-checked ${r.audited}${r.disagree?` (${r.disagree} disagreed)`:''}`:''}</div>
+        <button class="btn sm" data-act="spotStart" data-l="${l.id}" ${r.reviewed?'':'disabled'}>${ic('check')} Spot check reviews</button></div>`}).join('')}</div>`}
   else if(sub==='labor'){const lab=L2.map(l=>withLoc(l.id,()=>({l,...laborSum(payroll(ws,PN))})));const TT=laborSum(Object.assign({},...L2.map(l=>withLoc(l.id,()=>payroll(ws,PN)))));const tr=taxRates();
     const trend=pers.map(p=>L2.map(l=>withLoc(l.id,()=>laborSum(payroll(p.s,p.n)).cost)));
     body=perBar+`<div class="tbl"><table><thead><tr><th>Store</th><th>Hours</th><th>Payroll gross</th><th>Employer tax</th><th>Cash</th><th>Labor cost</th></tr></thead><tbody>${lab.map((x,j)=>`<tr><td>${dot(j)}${esc(x.l.name)}</td><td>${fmtH(x.hrs)}${x.ot?`<div class="tiny muted">OT ${fmtH(x.ot)}</div>`:''}</td><td>${money(x.payroll)}</td><td>${money(x.tax)}</td><td>${money(x.cash)}</td><td><b>${money(x.cost)}</b></td></tr>`).join('')}
@@ -850,14 +892,14 @@ async function onTaskUpload(inp){const f=inp.files?.[0];if(!f)return;const{type,
   const body={loc,date,type,photos:{[slot]:p},flags:{[slot]:false},updatedAt:now};
   if(slots.every(s=>photos[s.id]||cur?.checks?.[s.id])&&!cur?.completedAt){body.completedAt=now;body.completedBy=me}
   const wr=cur?ref.update(body):ref.set({...body,photos});
-  if(await W(wr)){D.photos[`${loc}_${date}_${type}`]={...(cur||{}),...body,photos,flags:{...(cur?.flags||{}),[slot]:false}};toast(L('Photo saved','照片已保存'));drawSheet();render()}}
+  if(await W(wr)){D.photos[`${loc}_${date}_${type}`]={...(cur||{}),...body,photos,flags:{...(cur?.flags||{}),[slot]:false}};if(!body.completedAt)toast(L('Photo saved','照片已保存'));drawSheet();render();afterTaskDone(type,date,!!body.completedAt)}}
 
 async function onTaskCheck(type,slot,date){const loc=curLoc();const ref=A.db.doc(`photoLogs/${loc}_${date}_${type}`);const me=actor()||'manager';const now=new Date().toISOString();const cur=photoDoc(date,type);
   const was=!!cur?.checks?.[slot];const checks={...(cur?.checks||{}),[slot]:was?null:{by:me,at:now}};const slots=slotsOf(type,date);
   const all=slots.every(s=>cur?.photos?.[s.id]||checks[s.id]);const body={loc,date,type,checks:{[slot]:was?null:{by:me,at:now}},updatedAt:now};
   if(all&&!cur?.completedAt){body.completedAt=now;body.completedBy=me}if(!all&&cur?.completedAt){body.completedAt=null;body.completedBy=null}
   const wr=cur?ref.update(body):ref.set({...body,photos:{},checks});
-  if(await W(wr)){D.photos[`${loc}_${date}_${type}`]={...(cur||{}),...body,photos:cur?.photos||{},checks};drawSheet();render()}}
+  if(await W(wr)){D.photos[`${loc}_${date}_${type}`]={...(cur||{}),...body,photos:cur?.photos||{},checks};drawSheet();render();afterTaskDone(type,date,!!body.completedAt)}}
 function countSheet(f){f=f||'daily';const d=bizDate();const CC=C();const ex=CC[d];const its=itemsOf(f);const cats=[...new Set(its.map(i=>i.cat||'Other'))];
   const title=f==='daily'?'Night inventory count':`${freqName(f)} inventory count`;
   openSheet({title:()=>title,body:()=>`<div class="small muted">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${f==='daily'?'Count what is left after closing.':`These ${its.length} items are counted ${freqName(f).toLowerCase()}.`} Grey number = last count.</div>
@@ -997,7 +1039,7 @@ async function receiveSave(){const st=SH_RECV,o=D.orders[st.id];if(!st.photos.le
   if(await W(A.db.doc('orders/'+st.id).set(body))){toast(diffs?'Saved. Your count was sent to the manager to check.':'Delivery received');SH_RECV=null;closeSheet()}}
 
 let RQ=null;
-function reviewNext(){if(!RQ)return;const x=RQ.list[RQ.i];if(!x){const n=RQ.done;RQ=null;closeSheet();toast(n?`Done. ${n} task${n>1?'s':''} reviewed.`:'Review finished');render();return}reviewSheet(x.d,x.type)}
+function reviewNext(){if(!RQ)return;const x=RQ.list[RQ.i];if(!x){const n=RQ.done;RQ=null;closeSheet();render();if(!toReview().length&&n)celebrate('All reviews done!',`${n} task${n>1?'s':''} checked`,true);else toast(n?`Done. ${n} task${n>1?'s':''} reviewed.`:'Review finished');return}reviewSheet(x.d,x.type)}
 function reviewSheet(date,type){const doc=photoDoc(date,type);if(!doc)return;const slots=slotsOf(type,date);const T=TASKS().find(t=>t.type===type)||{name:()=>'Task'};const flags={...(doc.flags||{})};
   openSheet({title:()=>`${L('Review','检查')} · ${T.name()}`,body:()=>`${RQ?`<div class="row"><span class="eyebrow grow">Review ${RQ.i+1} of ${RQ.list.length}</span><button class="btn sm" data-act="reviewSkip">Skip</button></div>`:''}<div class="small muted">${fmtD(date)} · ${doc.completedBy?'By '+esc(empName(doc.completedBy))+' · ':''}${chip(stChip(taskState(date,type).st),taskState(date,type).label)} ${L('Tap a photo to view it full size. Flag photos that need to be redone.','点照片放大查看。需要重做的照片请标记。')}</div>
    <div class="tiles">${slots.map(sl=>{const p=doc.photos?.[sl.id];return p?`<div class="tile has" style="cursor:default"><img src="${BLOB}${esc(p.id)}" alt="" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)}" style="cursor:zoom-in"><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}</span><span class="flag"><button class="chip ${flags[sl.id]?'bad':''}" style="border:0;cursor:pointer" data-act="flagPh" data-slot="${sl.id}">${flags[sl.id]?L('Flagged','已标记'):L('Flag','标记')}</button></span></div>`:doc.checks?.[sl.id]?`<div class="tile has" style="cursor:default;display:grid;place-items:center;text-align:center;padding:10px"><div><div style="font-size:28px;color:var(--ok)">✓</div><b>${esc(sl.name)}</b><div class="tiny muted">${esc(empName(doc.checks[sl.id].by))} · ${fmtT(hm(new Date(doc.checks[sl.id].at)))}</div></div></div>`:`<div class="tile">${esc(sl.name)}<br>${L('missing','缺')}</div>`}).join('')}</div>
@@ -1241,6 +1283,9 @@ const ACT={
  reviewSave:async d=>{const flags=SH.flags,date=SH.date,type=SH.type;const status=d.st==='ok'&&Object.values(flags).some(Boolean)?'issue':d.st;
    const cur={...photoDoc(date,type)};delete cur.id;const review={status,note:$('#rv_note').value.trim(),at:new Date().toISOString(),by:actor()||uid||'manager'};const ok=await W(A.db.doc(`photoLogs/${curLoc()}_${date}_${type}`).set({...cur,loc:curLoc(),date,type,flags,review}));
    if(ok){const k=`${curLoc()}_${date}_${type}`;D.photos[k]={...(D.photos[k]||{}),flags,review};if(RQ){RQ.done++;RQ.i++;reviewNext()}else closeSheet()}},
+ spotStart:d=>spotStart(d.l),spotSkip:()=>{if(SQ){SQ.i++;spotNext()}},
+ spotSave:async d=>{if(!SQ)return;const x=SQ.list[SQ.i],l=SQ.l;const cur={...(withLoc(l,()=>photoDoc(x.d,x.type))||{})};delete cur.id;const audit={status:d.st,note:($('#sp_note')?.value||'').trim(),at:new Date().toISOString(),by:uid||'owner'};
+   if(await W(A.db.doc(`photoLogs/${l}_${x.d}_${x.type}`).set({...cur,loc:l,date:x.d,type:x.type,audit}))){const k=`${l}_${x.d}_${x.type}`;D.photos[k]={...(D.photos[k]||{}),audit};SQ.n++;SQ.i++;spotNext()}},
  reviewStart:()=>{const list=toReview();if(!list.length){toast('Nothing to review');return}RQ={list,i:0,done:0};reviewNext()},
  reviewSkip:()=>{if(!RQ)return;RQ.i++;reviewNext()},
  slotEdit:d=>tasksSheet(d.k),
