@@ -462,7 +462,7 @@ function itemUnitCost(it){if(!it)return null;const rows=unitCostRows(it);const U
   const o=buyOpts(it).find(x=>num(x.price)>0);if(o)return num(o.price)*(1+delivPct(o.store)/100)/num(o.per);if(num(it.cost)!=null)return num(it.cost)/(num(it.packSize)||1);return null}
 function unitCostRows(it){return Object.values(D.orders).flatMap(o=>(o.lines||[]).filter(l=>l.itemId===it.id&&num(l.price)>0&&num(l.qty)>0).map(l=>({d:o.receivedDate||o.date||'',p:num(l.price)*orderFactor(o),u:num(l.qty)*lineMult(l),store:o.store}))).sort((a,b)=>b.d.localeCompare(a.d)).slice(0,5)}
 // Delivery cost: an order's actual fee + tip if entered, else the store's usual delivery % (Settings in Orders).
-const delivPct=store=>num(D.settings.deliveryPct?.[store||'Other'])||0;
+const delivPct=store=>0; // per-store delivery % turned off for now; the fee typed on each order still counts
 const orderSub=o=>(o.lines||[]).reduce((a,l)=>a+(num(l.price)||0),0);
 const orderFee=o=>{const sub=orderSub(o);if(num(o.fee)!=null)return num(o.fee);if(num(o.feePct)!=null)return sub*num(o.feePct)/100;return sub*delivPct(o.store)/100};
 const orderFactor=o=>{const sub=orderSub(o);return sub>0?1+orderFee(o)/sub:1};
@@ -707,13 +707,13 @@ function stockOrders(){const os=ORD().sort((a,b)=>(b.createdAt||'').localeCompar
   const stc=o=>o.kind==='stockin'?chip('ok','Added to stock'):o.status==='received'?chip('ok',L('Received','已到货')):o.status==='issue'?chip('bad',L('Problem','有问题')):chip('info',L('Ordered','已下单'));
   return `<div class="g2"><button class="btn pri" data-act="orderNew">${ic('spark')} ${L('Add order from screenshot','截图录入订单')}</button><button class="btn" data-act="orderList">${ic('list')} ${L('Order list','订货清单')}</button></div>
   <button class="btn" data-act="stockIn">${ic('box')} Add stock (already here, e.g. wholesale cases)</button>
-  ${delivCard()}
+  
   ${os.length?`<div class="card flush list">${os.map(o=>`<div class="li tap" data-act="orderView" data-id="${o.id}" tabindex="0">${o.screenshot?`<img src="${BLOB}${esc(o.screenshot)}" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:8px">`:`<span class="av" style="background:var(--sunk);color:var(--muted)">${ic('box')}</span>`}<div class="grow"><div class="t">${esc(o.store||'')} · ${(o.lines||[]).length} ${L('items','项')}${orderTotal(o)?' · '+money(orderTotal(o)):''}</div><div class="small muted">${o.kind==='stockin'?'Added '+fmtD(o.receivedDate,{month:'short',day:'numeric'})+' · '+esc(empName(o.receivedBy)):`${L('Ordered','下单')} ${o.date?fmtD(o.date,{month:'short',day:'numeric'}):''}`}${o.kind==='stockin'?'':o.receivedAt?' · '+L('received','收货')+' '+fmtDT(o.receivedAt)+' · '+esc(empName(o.receivedBy)):o.expected?' · '+L('due','预计')+' '+fmtD(o.expected,{month:'short',day:'numeric'})+(o.window?' '+esc(o.window):''):''}</div></div>${stc(o)}</div>`).join('')}</div>`
    :`<div class="empty card"><b>${L('No orders yet','还没有订单')}</b>${L('After you order on BJ’s or Walmart, upload the order screenshot here.','在 BJ’s 或 Walmart 下单后，把订单截图上传到这里。')}</div>`}`}
 function stockItems(){const row=it=>`<div class="li tap" data-act="itemEdit" data-id="${it.id}" tabindex="0"><div class="grow"><div class="t">${esc(it.name)}</div><div class="small muted">${typeName(itemType(it))} · ${esc(it.cat||'')} · ${esc(it.unit||'')} · reorder ${it.min??'—'} / target ${it.par??'—'}${buyOpts(it).length?' · '+buyOpts(it).map(o=>`${esc(o.label)} = ${o.per}`).join(', '):''}${itemUnitCost(it)!=null?` · ${money(itemUnitCost(it))}/${esc(it.unit||'unit')}`:''}</div></div>${buyOpts(it)[0]?.store?chip('',esc(buyOpts(it)[0].store)):''}${ic('chev')}</div>`;
   return `<p class="small muted">Items are grouped by how often staff count them. Tap an item to change it. Reorder at = when to buy; Target = how much to have after restocking.</p>
   <div class="g2"><button class="btn pri" data-act="itemEdit">${ic('plus')} Add item</button><button class="btn" data-act="freqEdit">${ic('cal')} Change count schedule</button></div>
-  ${delivCard()}
+  
   <button class="btn" data-act="typesEdit">${ic('list')} Edit sections (${typeList().map(t=>esc(t.name)).join(', ')})</button>
   ${FREQS.map(([f,n])=>{const its=itemsOf(f);return its.length?`<div class="card flush"><div class="li" style="min-height:0;padding-block:10px;background:var(--sunk)"><span class="eyebrow grow">${n} count · ${its.length}</span></div><div class="list">${its.map(row).join('')}</div></div>`:''}).join('')}`}
 
@@ -887,7 +887,7 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
     const itr=pers.map(p=>L2.map(l=>withLoc(l.id,()=>invCost(p.s,p.e).used)));
     const top={};IC.forEach(x=>Object.entries(x.byItem).forEach(([id,v])=>top[id]=(top[id]||0)+v));const topL=Object.entries(top).sort((a,b)=>b[1]-a[1]).slice(0,8);
     const miss=D.items.filter(it=>itemUnitCost(it)==null).length;
-    body=perBar+`${delivCard(true)}${miss?`<div class="hint warn">${miss} of ${D.items.length} items have no cost yet, so they are left out. Add a size with a price in Stock → Items (How you buy it), or enter line prices when you save an order.</div>`:''}
+    body=perBar+`${miss?`<div class="hint warn">${miss} of ${D.items.length} items have no cost yet, so they are left out. Add a size with a price in Stock → Items (How you buy it), or enter line prices when you save an order.</div>`:''}
     <div class="tbl"><table><thead><tr><th>Store</th><th>Purchases</th><th>Inventory used</th><th>Stock on hand</th></tr></thead><tbody>${IC.map((x,j)=>`<tr><td>${dot(j)}${esc(x.l.name)}</td><td>${money(x.buy)}</td><td><b>${x.hasCounts?money(x.used):'—'}</b></td><td>${money(x.onHand)}</td></tr>`).join('')}
      <tr><td><b>Total</b></td><td><b>${money(T.buy)}</b></td><td><b>${money(T.used)}</b></td><td><b>${money(T.onHand)}</b></td></tr></tbody></table></div>
     <div class="card stack"><div class="row wrapr"><span class="eyebrow grow">${perName()} inventory used, ${perLast()}</span>${legend}</div>${barChart(itr,L2,labels,SC,'Inventory used by store')}</div>
