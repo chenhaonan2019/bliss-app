@@ -263,7 +263,7 @@ const seePay=()=>isOwner&&UI.pv!=='mgr'&&UI.pv!=='emp';
 const wageOf=e=>({pay:num(D.wages[e])||0,cash:num(D.cashRates?.[e])||0,cap:num(D.payCaps?.[e]),ccap:null});
 function splitHrs(h,W_){if(!W_.cash)return[h,0];if(!W_.pay)return[0,h];let ph,ch;if(W_.cap!=null&&W_.ccap!=null){ph=Math.min(h,W_.cap);ch=Math.min(h-ph,W_.ccap);ph=h-ch}else if(W_.cap!=null){ph=Math.min(h,W_.cap);ch=h-ph}else if(W_.ccap!=null){ch=Math.min(h,W_.ccap);ph=h-ch}else{ph=h;ch=0}return[ph,ch]}
 const payType=e=>{const w=wageOf(e);return w.pay&&w.cash?'split':w.cash?'cash':'payroll'};
-const wageLabel=e=>{const w=wageOf(e);const a=[];if(w.pay)a.push(money(w.pay)+'/h payroll'+(w.cash&&w.cap!=null?` (first ${w.cap} h/wk)`:''));if(w.cash)a.push(money(w.cash)+'/h cash');return a.join(' + ')};
+const wageLabel=e=>{if(!seePay())return'';const w=wageOf(e);const a=[];if(w.pay)a.push(money(w.pay)+'/h payroll'+(w.cash&&w.cap!=null?` (first ${w.cap} h/wk)`:''));if(w.cash)a.push(money(w.cash)+'/h cash');return a.join(' + ')};
 function empTax(g){const t=taxRates();const fica=g*t.fica/100,futa=g*t.futa/100,suta=g*t.suta/100;return{fica,futa,suta,total:fica+futa+suta}}
 function laborSum(R){const o={payroll:0,cash:0,hrs:0,ot:0,sched:0,late:0,fica:0,futa:0,suta:0,tax:0};Object.values(R).forEach(r=>{o.hrs+=r.hrs;o.ot+=r.ot;o.sched+=r.sched;o.late+=r.late;o.cash+=r.cashPay;o.payroll+=r.payPay});const t=empTax(o.payroll);o.fica=t.fica;o.futa=t.futa;o.suta=t.suta;o.tax=t.total;o.cost=o.payroll+o.tax+o.cash;return o}
 const empName=id=>id==='manager'?'Manager':D.employees[id]?.name||D.former?.[id]||L('Unknown','未知');
