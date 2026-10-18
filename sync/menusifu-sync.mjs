@@ -12,7 +12,8 @@ const BUSINESS = env("MENUSIFU_BUSINESS", "Bliss");
 // Menusifu branch id → app store id
 const STORES = Object.fromEntries(env("MENUSIFU_STORES", "M000023561=nh,M000026022=wh").split(",").map((p) => p.trim().split("=")));
 const BACKFILL_DAYS = +env("BACKFILL_DAYS", "400");
-const REFETCH_DAYS = +env("REFETCH_DAYS", "3"); // re-read the last few days in case late orders were added
+const REFETCH_DAYS = +env("REFETCH_DAYS", "3");
+const FULL = env("FULL_REFETCH", "") === "true"; // re-read all history (e.g. after adding new columns) // re-read the last few days in case late orders were added
 const ORIGIN = "https://cloud.menusifucloud.com";
 const ORDER_TYPES = ["DINE_IN", "DOORDASH_D_DELIVERY", "DOORDASH_D_PICKUP", "GRUBHUB_D_DELIVERY", "ONLINE_PICKUP", "TOGO", "UBER_EATS_D_DELIVERY", "UBER_EATS_D_PICKUP"];
 
@@ -105,8 +106,11 @@ async function fetchDay(page, hdr, merchant, date) {
     // headers were verified on a real hourly report, so a day without the table simply had no sales;
     // only a reply with no report data at all is an error
     if (!t) return Array.isArray(j?.reportData?.serviceData) ? { out: {} } : { err: "no report data" };
-    const labels = t.data.labels.slice(1), names = t.data.dataSets[0].data, iN = names.indexOf("Net Sales"), iO = names.indexOf("Orders"), out = {};
-    labels.forEach((l, j2) => { const col = t.data.dataSets[j2 + 1]?.data || []; const m = /^(\d\d)(AM|PM)$/.exec(l); if (!m) return; const hh = (+m[1] % 12) + (m[2] === "PM" ? 12 : 0); out[hh] = [+String(col[iN]).replace(/[$,]/g, "") || 0, +col[iO] || 0]; });
+    // per hour: [net sales, orders, tips, tax, account receivable]
+    const labels = t.data.labels.slice(1), names = t.data.dataSets[0].data, out = {};
+    const at = (col, name) => { const i = names.indexOf(name); return i < 0 ? 0 : +String(col[i]).replace(/[$,]/g, "") || 0; };
+    labels.forEach((l, j2) => { const col = t.data.dataSets[j2 + 1]?.data || []; const m = /^(\d\d)(AM|PM)$/.exec(l); if (!m) return; const hh = (+m[1] % 12) + (m[2] === "PM" ? 12 : 0);
+      out[hh] = [at(col, "Net Sales"), Math.round(at(col, "Orders")), at(col, "Total Tips"), at(col, "Tax"), at(col, "Account Receivable")]; });
     return { out };
   }, { hdr, merchant, date, end: addDays(date, 1), types: ORDER_TYPES });
 }
@@ -121,7 +125,7 @@ async function main() {
     await signIn(page);
     const hdr = await captureHeaders(page);
     for (const [merchant, loc] of Object.entries(STORES)) {
-      const from = last[loc] ? addDays(last[loc], -REFETCH_DAYS + 1) : addDays(yesterday, -BACKFILL_DAYS + 1);
+      const from = last[loc] && !FULL ? addDays(last[loc], -REFETCH_DAYS + 1) : addDays(yesterday, -BACKFILL_DAYS + 1);
       const days = {}; let errs = 0;
       for (let d = from; d <= yesterday; d = addDays(d, 1)) {
         let r = null;

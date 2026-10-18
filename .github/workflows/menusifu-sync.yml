@@ -4,7 +4,12 @@ name: Menusifu sync
 on:
   schedule:
     - cron: "17 9 * * *"   # every day ~5:17am New York time (GitHub may start it a little late)
-  workflow_dispatch: {}    # "Run workflow" button for a manual run
+  workflow_dispatch:       # "Run workflow" button for a manual run
+    inputs:
+      full:
+        description: Re-read all history (about a year)
+        type: boolean
+        default: false
 permissions:
   contents: read
 concurrency: menusifu-sync
@@ -28,3 +33,4 @@ jobs:
           SUPABASE_URL: https://vylynuuzeniqmyorrefl.supabase.co
           SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5bHludXV6ZW5pcW15b3JyZWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxOTI5NzEsImV4cCI6MjEwNzc2ODk3MX0.J0Avgg9G3YmxuvuOz7SMRSdiMOdxYqIYL2MipTvEeM8
           MENUSIFU_STORES: M000023561=nh,M000026022=wh
+          FULL_REFETCH: ${{ inputs.full }}

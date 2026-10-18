@@ -1026,11 +1026,14 @@ async function aiCheckPhoto({type,slot,date,loc,id,blob,hash}){
     const refB=sl.ref?await blobOf(sl.ref):null;
     const prompt=`You check checklist photos for a matcha / bubble tea shop. Task: "${T?T.name():type}". Item: "${sl.name}".
 Image 1 is the photo a staff member just took for this item.${refB?' Image 2 is the manager\'s example of how it should look when done properly.':''}
-Decide if image 1 shows this item clearly and done to a reasonable shop standard${refB?' (compare with the example)':''}.
-Flag only real problems a manager would care about: the photo doesn't show this item, it's too dark/blurry/close to judge, visible dirt, spills, sticky residue, trash, food or cups left out, items not put away, overflowing bins, wrong setup compared with the example.
-Do not flag normal wear, lighting colour, or angle if the item is still clearly visible and clean.
-Return JSON only: {"ok": true|false, "issue": "if not ok, what is wrong in at most 12 plain words, else empty", "sure": true|false}`;
-    const r=await A.sample.json(prompt,{images:refB?[blob,refB]:[blob],modelTier:'quick'});
+Read the item name literally and check every part of it:
+- If it says replenished / restocked / refilled / stocked / topped up / filled, each thing it names must look well stocked. Look at every container, holder and cup: flag any that is empty, nearly empty or clearly much lower than the others (for example a straw cup with only a few straws left).
+- Every thing the item names (e.g. napkins, straws, spoons, lids, cups) should be visible in the photo; flag what is missing.
+- If it is a cleaning item, flag visible dirt, spills, sticky residue, crumbs, trash, overflowing bins, food or cups left out, items not put away.
+- Flag a photo that doesn't show this item or is too dark, blurry or close to judge.${refB?'\n- Compare with the example and flag clear differences in setup or fill level.':''}
+Do not flag lighting colour, angle, normal wear, or things the item doesn't ask about.
+Return JSON only: {"ok": true|false, "issue": "if not ok, what to fix in at most 12 plain words, e.g. 'White straw cup almost empty — refill straws', else empty", "sure": true|false}`;
+    const r=await A.sample.json(prompt,{images:refB?[blob,refB]:[blob],modelTier:'default'});
     const dup=photoDup(hash,type,slot,date,id);
     const res={photo:id,ok:r?.ok!==false&&!dup,issue:dup?`Looks like the same photo as ${fmtD(dup,{month:'short',day:'numeric'})}`:String(r?.issue||'').slice(0,120),sure:r?.sure!==false,at:new Date().toISOString(),...(dup?{dup}:{})};
     const k=`${loc}_${date}_${type}`;const cur=D.photos[k];if(cur?.photos?.[slot]?.id!==id)return;   // replaced meanwhile
@@ -1612,6 +1615,10 @@ const fcCfg=()=>({...FC_DEF,...(D.schedCfg?.forecast||{})});
 const fcGeo=loc=>fcCfg().geo?.[loc]||DEF_GEO[loc]||null;
 const hourlyOf=loc=>(D.hourly||{})[loc]||{};
 const dayTot=v=>Object.values(v||{}).reduce((a,x)=>a+(+x?.[0]||0),0);
+// hour values are [net sales, orders, tips, tax, account receivable]; older data may only have the first two
+const daySum=(v,i)=>Object.values(v||{}).reduce((a,x)=>a+(+x?.[i]||0),0);
+const hasExtra=v=>Object.values(v||{}).some(x=>Array.isArray(x)&&x.length>=5);
+function dayMoney(v){return{net:dayTot(v),tips:daySum(v,2),tax:daySum(v,3),recv:daySum(v,4),full:hasExtra(v)}}
 const fcHas=loc=>Object.values(hourlyOf(loc)).filter(v=>dayTot(v)>=30).length>=21;
 function fcPeople(s,c){c=c||fcCfg();if(!(s>0))return 0;const step=Math.max(1,+c.cap||100),one=Math.max(step,+c.max1||150);return s<=one?1:Math.ceil((s-(one-step))/step)}
 /* weather */
@@ -1659,7 +1666,11 @@ function fcDay(loc,date){const H=hourlyOf(loc),c=fcCfg();const days=fcSamples(H,
   const hs=new Set();days.forEach(x=>Object.entries(H[x.d]).forEach(([h,v])=>{if(+v[0]>0)hs.add(+h)}));
   const hours={};let tot=0;[...hs].sort((a,b)=>a-b).forEach(h=>{const xs=fcSamples(H,date,h,c.weeks);if(xs.filter(x=>x.v>0).length/xs.length<0.3)return;const s=wstat(xs);if(!s)return;
     const m=s.m*f,sd=s.sd*f,staffS=m+(+c.buffer||0)*sd;hours[h]={m,sd,staffS,need:Math.max(+c.minStaff||0,fcPeople(staffS,c))};tot+=m});
-  return{ok:true,hours,tot,f,tdiff,wx:w||null,n:days.length}}
+  // tips, tax and total receivable: this store's recent ratio to net sales on the same sample days
+  const ex=days.filter(x=>hasExtra(H[x.d]));let extra=null;
+  if(ex.length>=2){const S=ex.reduce((a,x)=>{const m=dayMoney(H[x.d]);a.net+=m.net;a.tips+=m.tips;a.tax+=m.tax;a.recv+=m.recv;return a},{net:0,tips:0,tax:0,recv:0});
+    if(S.net>0)extra={tips:tot*S.tips/S.net,tax:tot*S.tax/S.net,recv:tot*S.recv/S.net,tipRate:S.tips/S.net}}
+  return{ok:true,hours,tot,f,tdiff,wx:w||null,n:days.length,...(extra||{})}}
 /* turn hourly people into shift "needs" layers inside the store's open window (from Shifts needed) */
 function fcNeeds(loc,date){const man=needsFor(loc,parseYmd(date).getDay());if(!man.length)return{needs:[],fc:null};const F=fcDay(loc,date);if(!F.ok)return{needs:man,fc:F};
   const c=fcCfg(),lo=Math.min(...man.map(n=>toMin(n.start))),hi=Math.max(...man.map(n=>toMin(n.end)));const minS=Math.max(0,+c.minStaff||0);
@@ -1678,11 +1689,11 @@ function needsCurve(nds){const ts=[...new Set(nds.flatMap(n=>[toMin(n.start),toM
 /* hourly sales import (CSV: date,hour,net_sales,orders — one store per file, or a store column) */
 function parseHourlyCsv(text){const lines=text.replace(/\r/g,'').split('\n').filter(l=>l.trim());if(!lines.length)return{rows:[],err:'The file is empty.'};
   const sp=l=>{const o=[];let cur='',q=false;for(const ch of l){if(ch==='"')q=!q;else if(ch===','&&!q){o.push(cur);cur=''}else cur+=ch}o.push(cur);return o.map(x=>x.trim())};
-  const hd=sp(lines[0]).map(x=>x.toLowerCase());const ix=re=>hd.findIndex(x=>re.test(x));const iD=ix(/date/),iH=ix(/hour|time/),iN=ix(/net/),iO=ix(/order|count/),iS=ix(/store|branch|loc/);
+  const hd=sp(lines[0]).map(x=>x.toLowerCase());const ix=re=>hd.findIndex(x=>re.test(x));const iD=ix(/date/),iH=ix(/hour|time/),iN=ix(/net/),iO=ix(/order|count/),iS=ix(/store|branch|loc/),iT=ix(/tip/),iX=ix(/tax/),iR=ix(/receiv/);
   if(iD<0||iH<0||iN<0)return{rows:[],err:'Need columns: date, hour, net_sales (orders optional).'};
   const rows=[];lines.slice(1).forEach(l=>{const c=sp(l);let d=c[iD];const m=/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(d);if(m)d=`${m[3]}-${pad(m[1])}-${pad(m[2])}`;if(!/^\d{4}-\d\d-\d\d$/.test(d))return;
     let h=c[iH];const hm_=/^(\d{1,2})(?::\d\d)?\s*(am|pm)?$/i.exec(h);if(!hm_)return;h=+hm_[1];if(hm_[2]){h=h%12+(/pm/i.test(hm_[2])?12:0)}if(h<0||h>23)return;
-    rows.push({store:iS>=0?c[iS]:'',date:d,hour:h,net:+String(c[iN]).replace(/[$,]/g,'')||0,orders:iO>=0?(+c[iO]||0):0})});
+    const m$=i=>i>=0?(+String(c[i]).replace(/[$,]/g,'')||0):null;rows.push({store:iS>=0?c[iS]:'',date:d,hour:h,net:m$(iN)||0,orders:iO>=0?(+c[iO]||0):0,tips:m$(iT),tax:m$(iX),recv:m$(iR)})});
   return{rows,err:rows.length?'':'No valid rows found.'}}
 async function hourlySave(loc,days){const doc={days,updatedAt:new Date().toISOString()};if(!await W(A.db.doc('mgr/hourly_'+loc).set(doc)))return false;D.hourly={...(D.hourly||{}),[loc]:days};FCM={};return true}
 function availWin(emp,date){const a=D.avail[emp];if(!a)return'unknown';if((a.off||[]).includes(date))return'none';const w=(a.snap?.[weekStart(date)]?.weekly||a.weekly)?.[parseYmd(date).getDay()];if(!w||w.mode==='no')return'none';if(w.mode==='all')return'any';return `${w.from}-${w.to}`}
@@ -1816,7 +1827,8 @@ function fcDetailSheet(ws0,n0){const loc=curLoc(),ws=ws0||AS?.ws||nextWk(),n=n0|
     return `<div class="tiny muted">Based on the last ${c.weeks} same weekdays (newer weeks count more), adjusted for the weather forecast. People = 1 up to ${kmoney(c.max1)}/hour, then one more for every ${kmoney(c.cap)}. Staffing adds a ${FC_BUF.find(b=>b[0]===+c.buffer)?.[1]?.toLowerCase()||'custom'} cushion for hours that swing a lot.</div>
     ${M?`<div class="hint">${fcModelTxt(M)}</div>`:''}
     ${[...Array(n)].map((_,i)=>{const d=addDays(ws,i);const F=fcDay(loc,d);const man=needsFor(loc,parseYmd(d).getDay());
-      return `<div class="card stack" style="gap:6px"><div class="row"><b class="grow">${fmtD(d,{weekday:'short',month:'short',day:'numeric'})}</b>${F.ok?`<span class="small">${kmoney(F.tot)}</span>`:''}</div>
+      return `<div class="card stack" style="gap:6px"><div class="row"><b class="grow">${fmtD(d,{weekday:'short',month:'short',day:'numeric'})}</b>${F.ok?`<span class="small">${kmoney(F.tot)} net</span>`:''}</div>
+       ${F.ok&&F.recv!=null?`<span class="tiny muted">Tax ${kmoney(F.tax)} · tips ${kmoney(F.tips)} · total receivable <b>${kmoney(F.recv)}</b></span>`:''}
        ${!man.length?'<span class="small muted">Closed</span>':!F.ok?`<span class="small muted">${esc(F.why)}</span>`:`${F.wx?`<span class="tiny muted">${esc(wxLabel(F.wx))}${F.tdiff!=null?` · ${Math.abs(Math.round(F.tdiff))}°F ${F.tdiff<0?'colder':'warmer'} than recent ${DOW[parseYmd(d).getDay()]}s`:''} → sales ${F.f>=1?'+':'−'}${Math.round(Math.abs(F.f-1)*100)}%</span>`:'<span class="tiny muted">No weather forecast yet for this date</span>'}
        <div class="tbl"><table><thead><tr><th>Hour</th><th>Forecast</th><th>Busy hour</th><th>People</th></tr></thead><tbody>${Object.entries(F.hours).map(([h,x])=>`<tr><td>${LANG_HOUR(+h)}</td><td>${kmoney(x.m)}</td><td class="muted">${kmoney(x.m+x.sd)}</td><td><b>${x.need}</b></td></tr>`).join('')}</tbody></table></div>`}</div>`}).join('')}`}});
   if(!wxNow(loc))wxAll().then(()=>{if(SH)drawSheet()})}
@@ -1836,12 +1848,13 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr||!fcHas(loc))return '';
   return `<div class="card stack" style="gap:10px">
    <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><div class="eyebrow">Sales forecast · today</div>
      <div style="font-family:var(--display);font-weight:800;font-size:34px;line-height:1.1">${kmoney(F.tot)}</div>
-     <div class="small muted">${wd}${F.wx?` · ${esc(wxLabel(F.wx))}`:''}</div></div>
+     <div class="small muted">Net sales · ${wd}${F.wx?` · ${esc(wxLabel(F.wx))}`:''}</div></div>
     <button class="btn sm" data-act="fcWeek">Next 7 days</button></div>
+   ${F.recv!=null?`<div class="row" style="gap:6px;flex-wrap:wrap">${[['Tax',F.tax],['Tips',F.tips],['Total receivable',F.recv]].map(([n,v],i)=>`<div style="flex:1;min-width:92px;padding:8px 10px;border-radius:10px;background:${i===2?'color-mix(in srgb,var(--brand) 14%,transparent)':'var(--sunk)'}"><div class="tiny muted">${n}</div><div style="font-weight:${i===2?800:700};font-size:${i===2?18:16}px">${kmoney(v)}</div></div>`).join('')}</div>`:`<div class="tiny muted">Tax, tips and total receivable appear after the next full sync.</div>`}
    <div class="small" style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px">
     ${avg?`<span class="muted">${wd}s</span><span>usually ${kmoney(base)} — ${pct(base/avg-1)} vs an average day (${kmoney(avg)})</span>`:`<span class="muted">${wd}s</span><span>usually ${kmoney(base)}</span>`}
     <span class="muted">Weather</span><span>${F.wx?(Math.abs(F.f-1)<0.02?'no real effect today':`${pct(F.f-1)}${F.tdiff!=null?` (${Math.abs(Math.round(F.tdiff))}°F ${F.tdiff<0?'colder':'warmer'} than recent ${wd}s${wxSnow(F.wx)?', snow':wxWet(F.wx)?', rain':''})`:''}`):'loading…'}</span>
-    ${Fy?.ok?`<span class="muted">Yesterday</span><span>forecast ${kmoney(Fy.tot)} · actual ${kmoney(ay)} (${pct(ay/Fy.tot-1)})</span>`:''}
+    ${Fy?.ok?`<span class="muted">Yesterday</span><span>forecast ${kmoney(Fy.tot)} · actual ${kmoney(ay)} (${pct(ay/Fy.tot-1)})${(()=>{const m=dayMoney(Hy);return m.full?`<br><span class="muted">tax ${kmoney(m.tax)} · tips ${kmoney(m.tips)} · receivable ${kmoney(m.recv)}</span>`:''})()}</span>`:''}
    </div>
    <div style="display:flex;align-items:flex-end;gap:3px;height:92px;padding-top:14px" role="img" aria-label="Forecast sales by hour">
     ${hrs.map(([h,x])=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0" title="${LANG_HOUR(h)}: ${kmoney(x.m)} · ${x.need} ${x.need>1?'people':'person'}">
@@ -1850,7 +1863,7 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr||!fcHas(loc))return '';
       <span class="tiny muted">${LANG_HOUR(h)}</span></div>`).join('')}
    </div>
    <div class="tiny muted">Bars = forecast sales per hour; number on top = people needed. Updated each morning from Menusifu.</div>
-   <div class="row" style="gap:4px;overflow-x:auto">${week.map(w=>`<div style="flex:1;min-width:46px;text-align:center;padding:6px 2px;border-radius:10px;background:var(--sunk)"><div class="tiny muted">${WD()[parseYmd(w.d).getDay()]}</div><div class="small" style="font-weight:700">${!w.open?'—':w.F.ok?kmoney(w.F.tot):'?'}</div><div class="tiny muted">${w.F.ok&&w.F.wx?Math.round(w.F.wx.tmax)+'°'+(wxSnow(w.F.wx)?'❄':wxWet(w.F.wx)?'☂':''):''}</div></div>`).join('')}</div>
+   <div class="row" style="gap:4px;overflow-x:auto">${week.map(w=>`<div style="flex:1;min-width:46px;text-align:center;padding:6px 2px;border-radius:10px;background:var(--sunk)"><div class="tiny muted">${WD()[parseYmd(w.d).getDay()]}</div><div class="small" style="font-weight:700">${!w.open?'—':w.F.ok?kmoney(w.F.tot):'?'}</div>${w.open&&w.F.ok&&w.F.tips!=null?`<div class="tiny muted">+${kmoney(w.F.tips)} tips</div>`:''}<div class="tiny muted">${w.F.ok&&w.F.wx?Math.round(w.F.wx.tmax)+'°'+(wxSnow(w.F.wx)?'❄':wxWet(w.F.wx)?'☂':''):''}</div></div>`).join('')}</div>
    ${hsyncLine()}
   </div>`}
 ACT.fcWeek=()=>fcDetailSheet(addDays(bizDate(),0),8);
@@ -1871,7 +1884,7 @@ function fcSettingsSheet(){const c=fcCfg();FCS={geo:{...(c.geo||{})},msg:''};
          <label class="btn sm" style="width:max-content">${ic('plus')} Import CSV<input type="file" accept=".csv,text/csv" data-fcimp="${esc(l.id)}" hidden></label>
          <div class="row" style="gap:6px"><input class="in grow" id="fc_geo_${esc(l.id)}" placeholder="City for weather, e.g. West Hartford" value="${esc(g?.name||'')}"><button class="btn sm" data-act="fcGeo" data-l="${esc(l.id)}">Find</button></div>
          ${g?`<span class="tiny muted">Weather from ${esc(g.name||'')} (${(+g.lat).toFixed(2)}, ${(+g.lon).toFixed(2)})</span>`:'<span class="tiny" style="color:var(--bad)">Set a city to use the weather.</span>'}</div>`}).join('')}
-      <div class="tiny muted">CSV columns: <b>date, hour, net_sales, orders</b> — one row per hour (hour 0–23 or like 1PM). Importing adds to or replaces those dates; other dates are kept.</div>
+      <div class="tiny muted">CSV columns: <b>date, hour, net_sales, orders</b> (optional: tips, tax, receivable) — one row per hour (hour 0–23 or like 1PM). Importing adds to or replaces those dates; other dates are kept.</div>
       ${FCS.msg?`<div class="hint">${esc(FCS.msg)}</div>`:''}</div>`},
    foot:()=>`<button class="btn pri big" data-act="fcSave">Save</button>`})}
 function fcGrab(){const c=fcCfg();const v=(id,d)=>{const x=num($(id)?.value);return x==null?d:x};
@@ -1892,7 +1905,7 @@ function hsGuess(name){const n=String(name||'').toLowerCase();const L2=LOCS();
   const hit=L2.find(l=>n.includes(String(l.name).toLowerCase()))||L2.find(l=>String(l.name).toLowerCase().split(/\s+/).some(w=>w.length>3&&n.includes(w)))||(/new haven/.test(n)?L2.find(l=>/^nh\b|new haven/i.test(l.name)||l.id==='nh'):null)||(/west hartford/.test(n)?L2.find(l=>/west hartford/i.test(l.name)||l.id==='wh'):null);return hit?.id||''}
 function hsReady(){if(location.hash!=='#import-hourly'||!window.opener)return;let n=0;clearInterval(HS_T);HS_T=setInterval(()=>{if(HS_IN||++n>30){clearInterval(HS_T);return}try{window.opener.postMessage({type:'bliss-ready'},MS_ORIGIN)}catch(e){clearInterval(HS_T)}},1000)}
 window.addEventListener('message',e=>{if(e.origin!==MS_ORIGIN||e.data?.type!=='bliss-hourly'||!Array.isArray(e.data.stores))return;if(!isMgr){toast('Only managers and owners can import sales');return}
-  HS_IN={src:e.source,stores:e.data.stores.slice(0,10).map(x=>{const days={};Object.entries(x.days||{}).forEach(([d,v])=>{if(!/^\d{4}-\d\d-\d\d$/.test(d)||!v||typeof v!=='object')return;const o={};Object.entries(v).forEach(([h,a])=>{h=+h;if(h>=0&&h<24&&Array.isArray(a))o[h]=[Math.round((+a[0]||0)*100)/100,Math.round(+a[1]||0)]});days[d]=o});const ds=Object.keys(days).sort();return{name:String(x.name||'').slice(0,120),days,from:ds[0],to:ds[ds.length-1],n:ds.length,loc:hsGuess(x.name)}})};
+  HS_IN={src:e.source,stores:e.data.stores.slice(0,10).map(x=>{const days={};Object.entries(x.days||{}).forEach(([d,v])=>{if(!/^\d{4}-\d\d-\d\d$/.test(d)||!v||typeof v!=='object')return;const o={};Object.entries(v).forEach(([h,a])=>{h=+h;if(h>=0&&h<24&&Array.isArray(a))o[h]=a.length>=5?[Math.round((+a[0]||0)*100)/100,Math.round(+a[1]||0),+a[2]||0,+a[3]||0,+a[4]||0]:[Math.round((+a[0]||0)*100)/100,Math.round(+a[1]||0)]});days[d]=o});const ds=Object.keys(days).sort();return{name:String(x.name||'').slice(0,120),days,from:ds[0],to:ds[ds.length-1],n:ds.length,loc:hsGuess(x.name)}})};
   clearInterval(HS_T);hsImportSheet()});
 function hsImportSheet(){openSheet({title:()=>'Import hourly sales',body:()=>`<p class="small muted">Hourly sales sent from Menusifu. Check which store each one goes to. Days you import replace the same days already saved; other days are kept.</p>
    ${HS_IN.stores.map((x,i)=>`<div class="card stack" style="gap:6px"><b>${esc(x.name||'Store '+(i+1))}</b><span class="small muted">${x.n} days${x.n?` · ${fmtD(x.from,{month:'short',day:'numeric',year:'numeric'})} – ${fmtD(x.to,{month:'short',day:'numeric',year:'numeric'})} · ${kmoney(Object.values(x.days).reduce((a,v)=>a+dayTot(v),0))} net sales`:''}</span>
@@ -1904,7 +1917,7 @@ ACT.hsDo=async()=>{if(!HS_IN||HS_IN.busy)return;const pick=HS_IN.stores.map((x,i
   closeSheet();if(done.length){toast('Imported · '+done.join(', '));wxAll()}};
 document.addEventListener('change',async e=>{const t=e.target;if(!t.matches('input[data-fcimp]'))return;const loc=t.dataset.fcimp;const f=t.files?.[0];if(!f)return;
   const{rows,err}=parseHourlyCsv(await f.text());if(err){FCS.msg=err;drawSheet();return}
-  const days={...hourlyOf(loc)};const seen=new Set();rows.forEach(r=>{if(!seen.has(r.date)){seen.add(r.date);days[r.date]={}}days[r.date][r.hour]=[Math.round(r.net*100)/100,r.orders]});
+  const days={...hourlyOf(loc)};const seen=new Set();rows.forEach(r=>{if(!seen.has(r.date)){seen.add(r.date);days[r.date]={}}days[r.date][r.hour]=r.recv!=null?[Math.round(r.net*100)/100,r.orders,r.tips||0,r.tax||0,r.recv]:[Math.round(r.net*100)/100,r.orders]});
   const keep=fcGrab();D.schedCfg={...(D.schedCfg||{}),forecast:keep};
   if(await hourlySave(loc,days)){FCS.msg=`Imported ${seen.size} days for ${locName(loc)}.`;wxFor(loc)}drawSheet()});
 
