@@ -1682,8 +1682,11 @@ function fcNeeds(loc,date){const man=needsFor(loc,parseYmd(date).getDay());if(!m
     iv.forEach(([a,b])=>out.push({start:hhmm(a),end:hhmm(b),n:1}))}
   const needs=[];out.forEach(x=>{const e=needs.find(y=>y.start===x.start&&y.end===x.end);if(e)e.n++;else needs.push(x)});
   return{needs,fc:F}}
-const fcUse=loc=>fcCfg().on!==false&&fcHas(loc);
-function needsAt(loc,date){return fcUse(loc)?fcNeeds(loc,date).needs:needsFor(loc,parseYmd(date).getDay())}
+/* Sales are owner-only (owner/hourly_*). Managers get people-per-hour computed by the daily sync (mgr/fcneeds_*), never amounts. */
+const fcNeedsOf=(loc,date)=>(D.fcneeds||{})[loc]?.[date]||null;
+const fcUse=loc=>fcCfg().on!==false&&(isOwner?fcHas(loc):!!Object.keys((D.fcneeds||{})[loc]||{}).length);
+function needsAt(loc,date){if(!fcUse(loc))return needsFor(loc,parseYmd(date).getDay());if(isOwner)return fcNeeds(loc,date).needs;
+  const x=fcNeedsOf(loc,date);return x&&!needsFor(loc,parseYmd(date).getDay()).length?[]:x?.needs||needsFor(loc,parseYmd(date).getDay())}
 /* people needed at each hour, for the summary line */
 function needsCurve(nds){const ts=[...new Set(nds.flatMap(n=>[toMin(n.start),toMin(n.end)]))].sort((a,b)=>a-b);const seg=[];for(let i=0;i<ts.length-1;i++){const t=ts[i];const c=nds.filter(n=>toMin(n.start)<=t&&t<toMin(n.end)).reduce((a,n)=>a+(n.n||1),0);const l=seg[seg.length-1];if(l&&l.c===c&&l.e===t)l.e=ts[i+1];else seg.push({s:t,e:ts[i+1],c})}return seg.filter(x=>x.c>0)}
 /* hourly sales import (CSV: date,hour,net_sales,orders — one store per file, or a store column) */
@@ -1695,7 +1698,7 @@ function parseHourlyCsv(text){const lines=text.replace(/\r/g,'').split('\n').fil
     let h=c[iH];const hm_=/^(\d{1,2})(?::\d\d)?\s*(am|pm)?$/i.exec(h);if(!hm_)return;h=+hm_[1];if(hm_[2]){h=h%12+(/pm/i.test(hm_[2])?12:0)}if(h<0||h>23)return;
     const m$=i=>i>=0?(+String(c[i]).replace(/[$,]/g,'')||0):null;rows.push({store:iS>=0?c[iS]:'',date:d,hour:h,net:m$(iN)||0,orders:iO>=0?(+c[iO]||0):0,tips:m$(iT),tax:m$(iX),recv:m$(iR)})});
   return{rows,err:rows.length?'':'No valid rows found.'}}
-async function hourlySave(loc,days){const doc={days,updatedAt:new Date().toISOString()};if(!await W(A.db.doc('mgr/hourly_'+loc).set(doc)))return false;D.hourly={...(D.hourly||{}),[loc]:days};FCM={};return true}
+async function hourlySave(loc,days){const doc={days,updatedAt:new Date().toISOString()};if(!await W(A.db.doc('owner/hourly_'+loc).set(doc)))return false;D.hourly={...(D.hourly||{}),[loc]:days};FCM={};return true}
 function availWin(emp,date){const a=D.avail[emp];if(!a)return'unknown';if((a.off||[]).includes(date))return'none';const w=(a.snap?.[weekStart(date)]?.weekly||a.weekly)?.[parseYmd(date).getDay()];if(!w||w.mode==='no')return'none';if(w.mode==='all')return'any';return `${w.from}-${w.to}`}
 const sPrio=e=>D.schedCfg?.prio?.[e]||'normal';const sMax=e=>num(D.schedCfg?.maxHrs?.[e]);
 const ovl=(a,b)=>a.date===b.date&&toMin(a.start)<toMin(b.end)&&toMin(b.start)<toMin(a.end);
@@ -1768,7 +1771,7 @@ async function asGenerate(){const cfg=asGrab();A.db.doc('mgr/sched').set({...D.s
   AS.busy=true;AS.msg='';AS.err=false;AS.summary='';drawSheet();
   if(fcUse(curLoc())&&!wxNow(curLoc()))await Promise.race([wxAll(),new Promise(r=>setTimeout(r,6000))]);
   if(!A.sample){AS.plan=greedySchedule(ws,ems,keep,NN);AS.summary='Filled automatically by priority and fewest hours.';AS.busy=false;AS.draftAt=new Date().toISOString();AS.appliedAt=null;asSaveDraft();drawSheet();return}
-  const week=[...Array(NN)].map((_,i)=>{const date=addDays(ws,i);return{date,weekday:DOW[parseYmd(date).getDay()],needs:needsAt(curLoc(),date).map(x=>({start:x.start,end:x.end,count:x.n||1})),...(fcUse(curLoc())&&fcDay(curLoc(),date).ok?{salesForecast:Math.round(fcDay(curLoc(),date).tot)}:{})}});
+  const week=[...Array(NN)].map((_,i)=>{const date=addDays(ws,i);return{date,weekday:DOW[parseYmd(date).getDay()],needs:needsAt(curLoc(),date).map(x=>({start:x.start,end:x.end,count:x.n||1})),...(fcUse(curLoc())&&fcDay(curLoc(),date).ok?{salesForecast:isOwner?Math.round(fcDay(curLoc(),date).tot):undefined}:{})}});
   const staff=ems.map(e=>({id:e.id,name:e.name,role:e.role||'Staff',priority:sPrio(e.id),maxHoursPerWeek:sMax(e.id),availabilityNote:D.avail[e.id]?.note||'',availability:Object.fromEntries(week.map(w=>[w.date,availWin(e.id,w.date)]))}));
   const prompt=`You are scheduling shifts for a bubble tea shop (BLISS, ${locName(curLoc())}) for the dates ${ws} to ${addDays(ws,NN-1)} (${NN} days).
 Data (JSON):
@@ -1810,7 +1813,7 @@ function hsyncLine(){const v=D.hsync;if(!v?.at)return'';const ago=Math.max(0,Mat
   if(v.ok===false)return `<div class="tiny" style="color:var(--bad)">Menusifu sync failed ${when}: ${esc(v.error||'')}</div>`;
   return `<div class="tiny ${ago>48?'':'muted'}" style="${ago>48?'color:var(--bad)':''}">Sales synced from Menusifu ${when}${v.through?` · through ${fmtD(v.through,{month:'short',day:'numeric'})}`:''}${ago>48?' — check the sync':''}</div>`}
 const curveTxt=nds=>needsCurve(nds).map(x=>{const h=m=>`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;return `${fmtT(h(x.s))}–${fmtT(h(x.e))} <b>${x.c}</b>`}).join(' · ');
-function asNeedsCard(ws,n){const loc=curLoc(),has=fcHas(loc),use=fcUse(loc),wxReady=!!wxNow(loc);
+function asNeedsCard(ws,n){if(!isOwner)return asNeedsCardMgr(ws,n);const loc=curLoc(),has=fcHas(loc),use=fcUse(loc),wxReady=!!wxNow(loc);
   const usual=[1,2,3,4,5,6,0].map(i=>{const l=needsFor(loc,i);return `<div class="row small"><b style="width:44px">${WD()[i]}</b><span class="grow">${l.length?l.map(x=>`${fmtT(x.start)}–${fmtT(x.end)} × ${x.n}`).join(' · '):'<span class="muted">Closed</span>'}</span></div>`}).join('');
   if(!has)return `<div class="card stack"><div class="row"><h3 class="grow">Shifts needed</h3><button class="btn sm" data-act="needsEdit">Edit</button></div>${usual}
     <div class="hint">Add hourly sales and the app will decide how many people each hour needs from your sales forecast and the weather. <button class="btn sm" data-act="fcSettings" style="margin-top:6px">${ic('spark')} Set up sales forecast</button></div></div>`;
@@ -1822,6 +1825,15 @@ function asNeedsCard(ws,n){const loc=curLoc(),has=fcHas(loc),use=fcUse(loc),wxRe
     ${use?`<div class="tiny muted">People on shift at each time. Open and close times come from your usual shifts. ${wxReady?'':'Loading weather…'}</div>${hsyncLine()}${days}
       <div class="row wrapr" style="gap:6px"><button class="btn sm" data-act="fcDetail">Hourly detail</button><button class="btn sm" data-act="fcSettings">Forecast settings</button><button class="btn sm" data-act="needsEdit">Usual shifts</button></div>`
     :`${usual}<div class="row" style="gap:6px"><button class="btn sm" data-act="needsEdit">Edit</button><button class="btn sm" data-act="fcSettings">Forecast settings</button></div>`}</div>`}
+// managers: people per hour and weather only
+function asNeedsCardMgr(ws,n){const loc=curLoc(),use=fcUse(loc);
+  const usual=[1,2,3,4,5,6,0].map(i=>{const l=needsFor(loc,i);return `<div class="row small"><b style="width:44px">${WD()[i]}</b><span class="grow">${l.length?l.map(x=>`${fmtT(x.start)}–${fmtT(x.end)} × ${x.n}`).join(' · '):'<span class="muted">Closed</span>'}</span></div>`}).join('');
+  if(!use)return `<div class="card stack"><div class="row"><h3 class="grow">Shifts needed</h3><button class="btn sm" data-act="needsEdit">Edit</button></div>${usual}</div>`;
+  const days=[...Array(n)].map((_,i)=>{const d=addDays(ws,i);const x=fcNeedsOf(loc,d);const nds=needsAt(loc,d);
+    return `<div class="row" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line);gap:8px"><div style="width:58px;flex:none"><b>${WD()[parseYmd(d).getDay()]}</b><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>
+      <div class="grow stack" style="gap:2px">${!nds.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(nds)}</span>`}<span class="tiny muted">${x?`From the sales forecast${x.wx?' · '+esc(x.wx):''}`:'Usual shifts (no forecast for this day yet)'}</span></div></div>`}).join('');
+  return `<div class="card stack"><div class="row"><h3 class="grow">Shifts needed</h3><button class="btn sm" data-act="needsEdit">Usual shifts</button></div>
+    <div class="tiny muted">People on shift at each time, set from the owner's sales forecast and the weather. Open and close times come from your usual shifts.</div>${hsyncLine()}${days}</div>`}
 function fcDetailSheet(ws0,n0){const loc=curLoc(),ws=ws0||AS?.ws||nextWk(),n=n0||AS?.n||7,c=fcCfg();
   openSheet({title:()=>`Sales forecast · ${esc(locName(loc))}`,body:()=>{const M=wxNow(loc)?fcModel():null;
     return `<div class="tiny muted">Based on the last ${c.weeks} same weekdays (newer weeks count more), adjusted for the weather forecast. People = 1 up to ${kmoney(c.max1)}/hour, then one more for every ${kmoney(c.cap)}. Staffing adds a ${FC_BUF.find(b=>b[0]===+c.buffer)?.[1]?.toLowerCase()||'custom'} cushion for hours that swing a lot.</div>
@@ -1837,7 +1849,11 @@ function fcModelTxt(M){const p=x=>Math.round(Math.abs(Math.exp(x)-1)*100);return
 // average day over the last 4 weeks (store open), to say how this weekday compares
 function fcAvgDay(loc,date){const H=hourlyOf(loc),st=settledFrom(H);const xs=[];for(let i=1;i<=28;i++){const d=addDays(date,-i);if(d>=today()||d<st)continue;const t=dayTot(H[d]);if(t>=30)xs.push(t)}return xs.length>=7?xs.reduce((a,b)=>a+b,0)/xs.length:null}
 const pct=x=>`${x>=0?'+':'−'}${Math.round(Math.abs(x)*100)}%`;
-function fcTodayCard(){const loc=curLoc();if(!isMgr||!fcHas(loc))return '';
+function fcTodayCardMgr(){const loc=curLoc(),d=bizDate(),x=fcNeedsOf(loc,d);if(!x)return '';const hrs=Object.entries(x.hours||{}).map(([h,n])=>[+h,n]).sort((a,b)=>a[0]-b[0]);const nowH=new Date().getHours();
+  return `<div class="card stack" style="gap:8px"><div class="row"><div class="grow"><div class="eyebrow">Staffing today</div><div class="small muted">${DOW[parseYmd(d).getDay()]}${x.wx?' · '+esc(x.wx):''}</div></div></div>
+   <div class="row" style="gap:3px">${hrs.map(([h,n])=>`<div style="flex:1;min-width:0;text-align:center;padding:6px 0;border-radius:8px;background:${n>1?'color-mix(in srgb,var(--brand) 22%,transparent)':'var(--sunk)'};${h===nowH?'outline:2px solid var(--brand);':''}"><div style="font-weight:700">${n}</div><div class="tiny muted">${LANG_HOUR(h)}</div></div>`).join('')}</div>
+   <div class="tiny muted">People needed each hour, from the sales forecast and the weather.</div></div>`}
+function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())return fcTodayCardMgr();if(!fcHas(loc))return '';
   if(!wxNow(loc)&&!fcTodayCard.p)fcTodayCard.p=wxAll().then(()=>{fcTodayCard.p=null;rerender()});
   const d=bizDate(),F=fcDay(loc,d);if(!F.ok)return `<div class="card small muted">${ic('spark')} Sales forecast: ${esc(F.why)}</div>`;
   const base=F.tot/(F.f||1),avg=fcAvgDay(loc,d),wd=DOW[parseYmd(d).getDay()];
@@ -1892,9 +1908,9 @@ function fcGrab(){const c=fcCfg();const v=(id,d)=>{const x=num($(id)?.value);ret
   opened:Object.fromEntries(LOCS().map(l=>{const x=$('#fc_open_'+l.id)?.value;return[l.id,x&&/^\d{4}-\d\d-\d\d$/.test(x)?x:(c.opened?.[l.id]||'')]}).filter(([,x])=>x))}}
 async function fcSaveCfg(f){const cfg={...(D.schedCfg||{}),forecast:f};if(!await W(A.db.doc('mgr/sched').set(cfg)))return false;D.schedCfg=cfg;FCM={};return true}
 Object.assign(ACT,{
-  fcSettings:()=>{if(AS)asGrab();fcSettingsSheet()},
+  fcSettings:()=>{if(!isOwner){toast('Only the owner can change the sales forecast');return}if(AS)asGrab();fcSettingsSheet()},
   fcDetail:()=>fcDetailSheet(),
-  fcToggle:async(d,el)=>{asGrab();if(await fcSaveCfg({...fcCfg(),on:el.checked})){if(el.checked)wxAll().then(()=>{if(AS)drawSheet()});drawSheet()}},
+  fcToggle:async(d,el)=>{if(!isOwner){el.checked=!el.checked;return}asGrab();if(await fcSaveCfg({...fcCfg(),on:el.checked})){if(el.checked)wxAll().then(()=>{if(AS)drawSheet()});drawSheet()}},
   fcGeo:async d=>{const q=($('#fc_geo_'+d.l)?.value||'').split(',')[0].trim();if(!q)return;try{const r=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=en&format=json&countryCode=US`).then(r=>r.json());const x=(r.results||[])[0];
     if(!x){toast('City not found');return}FCS.geo[d.l]={lat:+x.latitude.toFixed(4),lon:+x.longitude.toFixed(4),name:`${x.name}, ${x.admin1_code||x.admin1||''}`.replace(/, $/,'')};const keep=fcGrab();D.schedCfg={...(D.schedCfg||{}),forecast:keep};drawSheet()}catch(e){toast('Could not look up the city')}},
   fcSave:async()=>{if(await fcSaveCfg(fcGrab())){toast('Forecast settings saved');if(AS){SH=null;autoSheetReopen()}else closeSheet()}}});
@@ -1904,7 +1920,7 @@ const MS_ORIGIN='https://cloud.menusifucloud.com';let HS_IN=null,HS_T=null;
 function hsGuess(name){const n=String(name||'').toLowerCase();const L2=LOCS();
   const hit=L2.find(l=>n.includes(String(l.name).toLowerCase()))||L2.find(l=>String(l.name).toLowerCase().split(/\s+/).some(w=>w.length>3&&n.includes(w)))||(/new haven/.test(n)?L2.find(l=>/^nh\b|new haven/i.test(l.name)||l.id==='nh'):null)||(/west hartford/.test(n)?L2.find(l=>/west hartford/i.test(l.name)||l.id==='wh'):null);return hit?.id||''}
 function hsReady(){if(location.hash!=='#import-hourly'||!window.opener)return;let n=0;clearInterval(HS_T);HS_T=setInterval(()=>{if(HS_IN||++n>30){clearInterval(HS_T);return}try{window.opener.postMessage({type:'bliss-ready'},MS_ORIGIN)}catch(e){clearInterval(HS_T)}},1000)}
-window.addEventListener('message',e=>{if(e.origin!==MS_ORIGIN||e.data?.type!=='bliss-hourly'||!Array.isArray(e.data.stores))return;if(!isMgr){toast('Only managers and owners can import sales');return}
+window.addEventListener('message',e=>{if(e.origin!==MS_ORIGIN||e.data?.type!=='bliss-hourly'||!Array.isArray(e.data.stores))return;if(!isOwner){toast('Only the owner can import sales');return}
   HS_IN={src:e.source,stores:e.data.stores.slice(0,10).map(x=>{const days={};Object.entries(x.days||{}).forEach(([d,v])=>{if(!/^\d{4}-\d\d-\d\d$/.test(d)||!v||typeof v!=='object')return;const o={};Object.entries(v).forEach(([h,a])=>{h=+h;if(h>=0&&h<24&&Array.isArray(a))o[h]=a.length>=5?[Math.round((+a[0]||0)*100)/100,Math.round(+a[1]||0),+a[2]||0,+a[3]||0,+a[4]||0]:[Math.round((+a[0]||0)*100)/100,Math.round(+a[1]||0)]});days[d]=o});const ds=Object.keys(days).sort();return{name:String(x.name||'').slice(0,120),days,from:ds[0],to:ds[ds.length-1],n:ds.length,loc:hsGuess(x.name)}})};
   clearInterval(HS_T);hsImportSheet()});
 function hsImportSheet(){openSheet({title:()=>'Import hourly sales',body:()=>`<p class="small muted">Hourly sales sent from Menusifu. Check which store each one goes to. Days you import replace the same days already saved; other days are kept.</p>
@@ -2005,9 +2021,9 @@ async function boot(){
   subscribe(db.collection('cover').where('date','>=',addDays(today(),-14)),s=>{D.cover=mapDocs(s)});
   subscribe(db.collection('training'),s=>{D.training=mapDocs(s)});
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
-  if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
+  if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:d.data().days||{}};FCM={}}if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;else if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:v.days||{}};FCM={}}})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);

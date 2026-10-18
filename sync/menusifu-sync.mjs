@@ -4,6 +4,8 @@
 // The repository is public, so this script never logs sales numbers, tokens or page contents —
 // only counts, dates and short status messages.
 import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
+import vm from "node:vm";
 
 const env = (k, d) => { const v = process.env[k]; if (v == null || v === "") { if (d !== undefined) return d; throw new Error(`Missing setting ${k}`); } return v; };
 const EMAIL = env("MENUSIFU_EMAIL"), PASSWORD = env("MENUSIFU_PASSWORD"), SYNC_SECRET = env("BLISS_SYNC_SECRET");
@@ -117,7 +119,8 @@ async function fetchDay(page, hdr, merchant, date) {
 
 async function main() {
   const yesterday = addDays(nyDate(), -1);
-  const last = (await rpc("bliss_menusifu_last", { p_secret: SYNC_SECRET })) || {};
+  const info = (await rpc("bliss_menusifu_last", { p_secret: SYNC_SECRET })) || {};
+  const last = info.last || {};
   const browser = await chromium.launch();
   const page = await (await browser.newContext({ locale: "en-US", timezoneId: "America/New_York", viewport: { width: 1350, height: 900 } })).newPage();
   const done = {};
@@ -139,12 +142,50 @@ async function main() {
       if (n) await rpc("bliss_menusifu_put", { p_secret: SYNC_SECRET, p_loc: loc, p_days: days, p_status: null });
       done[loc] = n; log(`store ${loc}: ${from} → ${yesterday}, saved ${n} days with sales`);
     }
-    await status({ ok: true, through: yesterday, saved: done });
+    const planned = await staffingNeeds(info).catch((e) => { log("staffing needs not updated:", e.message); return null; });
+    await status({ ok: true, through: yesterday, saved: done, ...(planned ? { needsThrough: planned } : {}) });
     log("done");
   } catch (e) {
     log("FAILED:", e.message);
     await status({ ok: false, error: String(e.message).slice(0, 200), saved: done });
     process.exitCode = 1;
   } finally { await browser.close(); }
+}
+
+// Managers can't read sales, so compute their staffing needs here with the app's own forecast code
+// (the "sales forecast → staffing" block of index.html) and save only people per hour + a weather label.
+async function staffingNeeds(info) {
+  const html = readFileSync(new URL("../index.html", import.meta.url), "utf8");
+  const a = html.indexOf("/* ---------- sales forecast → staffing"), b = html.indexOf("/* hourly sales import");
+  if (a < 0 || b < 0) throw new Error("forecast code not found in index.html");
+  const hourly = (await rpc("bliss_menusifu_hourly", { p_secret: SYNC_SECRET })) || {};
+  const today = nyDate();
+  const ctx = vm.createContext({ fetch, console, Math, Date, JSON, Object, Array, Promise, String, Number, isFinite, parseInt, parseFloat, WeakMap, Set, Intl, encodeURIComponent });
+  vm.runInContext(`
+    const localStorage={getItem:()=>null,setItem:()=>{}};
+    const D={hourly:${JSON.stringify(hourly)},schedCfg:{forecast:${JSON.stringify(info.forecast || {})}},settings:{staffing:${JSON.stringify(info.staffing || {})}}};
+    const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+    const DEF_NEEDS=[{start:'11:00',end:'17:00',n:2},{start:'17:00',end:'22:30',n:2}];
+    function needsFor(loc,dow){const l=D.settings.staffing?.[loc]?.[dow];return Array.isArray(l)?l:DEF_NEEDS}
+    const pad=n=>String(n).padStart(2,'0');const ymd=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
+    const parseYmd=s=>{const[y,m,d]=String(s).split('-').map(Number);return new Date(y,(m||1)-1,d||1)};
+    const today=()=>${JSON.stringify(today)};const addDays=(s,n)=>{const d=parseYmd(s);d.setDate(d.getDate()+n);return ymd(d)};
+    const toMin=t=>{if(!t)return 0;const[h,m]=t.split(':').map(Number);return h*60+(m||0)};
+    ${html.slice(a, b)}
+    globalThis.__fc={fcDay,fcNeeds,wxAll,wxLabel};`, ctx);
+  await ctx.__fc.wxAll();
+  let lastDate = null;
+  for (const loc of Object.keys(hourly)) {
+    const dates = {};
+    for (let i = 0; i < 21; i++) {
+      const d = addDays(today, i), r = ctx.__fc.fcNeeds(loc, d);
+      if (!r.fc?.ok) continue;
+      dates[d] = { needs: r.needs, hours: Object.fromEntries(Object.entries(r.fc.hours).map(([h, x]) => [h, x.need])), wx: ctx.__fc.wxLabel(r.fc.wx) };
+      lastDate = d;
+    }
+    await rpc("bliss_menusifu_needs", { p_secret: SYNC_SECRET, p_loc: loc, p_dates: dates });
+    log(`store ${loc}: staffing needs for ${Object.keys(dates).length} days`);
+  }
+  return lastDate;
 }
 main();

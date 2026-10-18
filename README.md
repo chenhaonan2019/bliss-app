@@ -144,7 +144,10 @@ One-time setup:
 3. **First run.** Actions → *Menusifu sync* → *Run workflow*. The first run takes about 10–15 minutes.
 
 Notes:
-- The sync can only write hourly sales and its own status (`bliss_menusifu_put` checks the shared secret); it never gets the Supabase service key.
+- Sales, tips and tax are **owner-only** (`owner/hourly_<store>`). Managers never see amounts: the sync also computes people needed
+  per hour for the next 3 weeks with the app's own forecast code and saves only that (`mgr/fcneeds_<store>`), which Auto-schedule
+  and the managers' "Staffing today" card use. Owners see the full forecast with sales, tax, tips and total receivable.
+- The sync can only write those records and its status (the `bliss_menusifu_*` functions check the shared secret); it never gets the Supabase service key.
 - This repository is public, so Action logs are public: the script logs only dates and counts, never sales or page contents.
 - If Menusifu adds a verification code or "I'm not a robot" check at sign-in, the run stops and the app shows why.
 - GitHub pauses scheduled Actions in a public repository after 60 days without commits. It emails you; click *Enable workflow*.
