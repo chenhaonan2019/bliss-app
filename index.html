@@ -340,7 +340,14 @@ const curSub=(tab,def)=>UI.sub[tab]||def;
 const itemById=id=>D.items.find(i=>i.id===id);
 const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const deepFor=date=>{const dd=D.slots.deepDays;if(dd&&Object.keys(dd).length){return dd[parseYmd(date||bizDate()).getDay()]||[]}return D.slots.deep?.length?D.slots.deep:[{id:'deep-cleaning',name:'Deep cleaning for today'}]};
-const slotsOf=(type,date)=>{date=date||bizDate();const t=taskList().find(x=>x.id===type);if(!t||!taskOnDay(t,date))return[];return (t.byDay?t.dayItems?.[parseYmd(date).getDay()]:t.items)||[]};
+// Each item repeats like an alarm: every day (default), chosen weekdays, monthly on a date, or one date only.
+function itemOn(x,date){const r=x.rep||'daily';if(r==='daily')return true;const dt=parseYmd(date);
+  if(r==='weekly')return (x.days||[]).includes(dt.getDay());
+  if(r==='monthly'){const last=new Date(dt.getFullYear(),dt.getMonth()+1,0).getDate();const want=x.dom==='last'?last:Math.min(+x.dom||1,last);return dt.getDate()===want}
+  if(r==='once')return x.date===date;return true}
+const repText=x=>{const r=x.rep||'daily';if(r==='weekly'){const d=x.days||[];return d.length?[1,2,3,4,5,6,0].filter(i=>d.includes(i)).map(i=>WD()[i]).join(', '):'No days picked'}
+  if(r==='monthly')return x.dom==='last'?'Monthly, last day':`Monthly, day ${x.dom||1}`;if(r==='once')return x.date?fmtD(x.date):'Pick a date';return 'Every day'};
+const slotsOf=(type,date)=>{date=date||bizDate();const t=taskList().find(x=>x.id===type);if(!t||!taskOnDay(t,date))return[];return ((t.byDay?t.dayItems?.[parseYmd(date).getDay()]:t.items)||[]).filter(x=>itemOn(x,date))};
 const slotDone=(doc,id)=>!!(doc?.photos?.[id]||doc?.checks?.[id]);
 const photoDoc=(date,type,loc)=>D.photos[`${loc||curLoc()}_${date}_${type}`];
 function taskState(date,type,loc){
@@ -1056,31 +1063,35 @@ function typesSheet(){SH=null;const T={list:typeList().map(t=>({...t}))};
    <div class="row"><input class="in grow" id="ty_new" maxlength="30" placeholder="New section, e.g. Bulk Order Food"><button class="btn" data-act="typeAdd">${ic('plus')} Add</button></div>`,
    foot:()=>`<button class="btn pri" data-act="typesSave">Save sections</button>`,mount:()=>{SH.T=T}})}
 function typesGrab(){document.querySelectorAll('[data-tn]').forEach(el=>{const t=SH.T.list[+el.dataset.tn];if(t)t.name=el.value})}
-function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEach(t=>{t.days=t.days?.length?t.days:[...ALLDAYS];t.items=t.items||[];if(t.byDay)t.dayItems=Object.fromEntries(ALLDAYS.map(i=>[i,t.dayItems?.[i]||[]]))});
+function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEach(t=>{t.days=t.days?.length?t.days:[...ALLDAYS];t.items=t.items||[];
+   if(t.byDay){const m=new Map();[1,2,3,4,5,6,0].forEach(d=>(t.dayItems?.[d]||[]).forEach(x=>{const k=x.id;if(m.has(k)){const y=m.get(k);if(y.rep==='weekly'&&!y.days.includes(d))y.days.push(d)}else m.set(k,{...x,rep:x.rep&&x.rep!=='daily'?x.rep:'weekly',days:x.rep&&x.rep!=='daily'?x.days:[d]})}));t.items=[...m.values()];delete t.byDay;delete t.dayItems}});
   TK={E,cur:Math.max(0,E.findIndex(t=>t.id===type)),day:parseYmd(bizDate()).getDay(),del:null};
   openSheet({title:()=>'Tasks & checklists',body:()=>{const t=TK.E[TK.cur];if(!t)return `<button class="btn pri" data-act="tkNew">${ic('plus')} New task</button>`;const l=tkList();
    return `<div class="chips">${TK.E.map((x,i)=>`<button class="${i===TK.cur?'on':''}" data-act="tkPick" data-i="${i}"><span>${esc(fmtT(x.time||'22:00'))}</span><b style="font-size:13px">${esc(x.name||'Task')}</b></button>`).join('')}<button data-act="tkNew"><span>New</span><b>${ic('plus')}</b></button></div>
    <div class="card stack">
     <div class="g2"><label class="f">Task name<input class="in" id="tk_name" maxlength="40" value="${esc(t.name||'')}" placeholder="e.g. Morning opening"></label><label class="f">Due by<input class="in" type="time" id="tk_time" value="${esc(t.time||'22:00')}"></label></div>
     <div class="f" style="gap:6px;display:flex;flex-direction:column;font-size:13px;font-weight:600;color:var(--muted)">Days<div class="row wrapr" style="gap:6px">${[1,2,3,4,5,6,0].map(i=>`<button class="btn sm ${t.days.includes(i)?'pri':''}" data-act="tkDay" data-k="${i}" aria-pressed="${t.days.includes(i)}">${WD()[i]}</button>`).join('')}</div></div>
-    <label class="row" style="gap:8px"><input type="checkbox" id="tk_byday" ${t.byDay?'checked':''} data-act="tkByDay"> <span class="small">Different items on each day (like deep cleaning)</span></label>
    </div>
-   ${t.byDay?`<div class="chips">${[1,2,3,4,5,6,0].filter(i=>t.days.includes(i)).map(i=>`<button class="${TK.day===i?'on':''}" data-act="tkDayPick" data-k="${i}"><span>${WD()[i]}</span><b>${(t.dayItems[i]||[]).length}</b></button>`).join('')}</div>`:''}
-   <p class="small muted">${t.byDay?`Items for ${DOW[TK.day]}.`:'Items staff do every time.'} 📷 = staff must take a photo. ☑ = staff just tap to check it off. Add an example photo to show what "done right" looks like.</p>
+   <p class="small muted">Set how often each item repeats, like an alarm: every day, some weekdays, once a month, or one date only. 📷 = staff must take a photo. ☑ = staff just tap to check it off. Add an example photo to show what "done right" looks like.</p>
    <div class="card flush list">${l.length?l.map((x,i)=>`<div class="li" style="gap:6px;padding-block:8px;flex-wrap:wrap">
      <input class="in" id="ti_${i}" value="${esc(x.name)}" aria-label="Item ${i+1}" style="flex:1 1 100%;min-width:0">
      <button class="btn sm" data-act="tiPhoto" data-i="${i}" title="Photo or check">${x.photo===false?'☑ Check':'📷 Photo'}</button>
      ${x.ref?`<img src="${BLOB}${esc(x.ref)}" alt="Example" data-act="viewPh" data-pid="${esc(x.ref)}" data-cap="Example: ${esc(x.name)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;cursor:zoom-in"><button class="btn sm" data-act="tiRefDel" data-i="${i}" aria-label="Remove example photo">✕</button>`
        :`<label class="btn sm" style="cursor:pointer">+ Example<input type="file" accept="image/*" data-up="tref" data-i="${i}" hidden></label>`}
      <button class="btn sm" data-act="tiMv" data-i="${i}" data-n="-1" ${i?'':'disabled'} aria-label="Move up">↑</button>
-     <button class="btn sm bad" data-act="tiDel" data-i="${i}" aria-label="Delete item">✕</button></div>`).join(''):`<div class="empty">No items yet.</div>`}</div>
+     <button class="btn sm bad" data-act="tiDel" data-i="${i}" aria-label="Delete item">✕</button>
+     <div class="row wrapr" style="gap:6px;flex:1 1 100%;align-items:center"><span class="tiny muted">Repeats</span>
+      <select class="in" data-tirep="${i}" style="width:auto;min-height:34px;padding:4px 8px">${[['daily','Every day'],['weekly','Some weekdays'],['monthly','Monthly'],['once','One date only']].map(([k,n])=>`<option value="${k}" ${(x.rep||'daily')===k?'selected':''}>${n}</option>`).join('')}</select>
+      ${x.rep==='weekly'?[1,2,3,4,5,6,0].map(d=>`<button class="btn sm ${(x.days||[]).includes(d)?'pri':''}" style="min-height:30px;padding:2px 8px" data-act="tiWd" data-i="${i}" data-k="${d}">${WD()[d]}</button>`).join('')
+       :x.rep==='monthly'?`<span class="tiny muted">on day</span><select class="in" data-tidom="${i}" style="width:auto;min-height:34px;padding:4px 8px">${[...Array(31)].map((_,k)=>`<option value="${k+1}" ${String(x.dom||1)===String(k+1)?'selected':''}>${k+1}</option>`).join('')}<option value="last" ${x.dom==='last'?'selected':''}>Last day</option></select>`
+       :x.rep==='once'?`<input class="in" type="date" data-tionce="${i}" value="${esc(x.date||'')}" style="width:auto;min-height:34px;padding:4px 8px">`:''}</div></div>`).join(''):`<div class="empty">No items yet.</div>`}</div>
    <div class="row"><input class="in grow" id="ti_new" placeholder="New item, e.g. Wipe the counters" aria-label="New item"><button class="btn" data-act="tiAdd">${ic('plus')} Add</button></div>
-   ${t.byDay?`<div class="row wrapr" style="gap:6px"><span class="small muted">Copy ${DOW[TK.day]}'s items to:</span>${[1,2,3,4,5,6,0].filter(i=>i!==TK.day&&t.days.includes(i)).map(i=>`<button class="btn sm" data-act="tkCopy" data-k="${i}">${WD()[i]}</button>`).join('')}</div>`:''}
    <button class="btn bad" data-act="tkDel">${TK.del===t.id?'Tap again to delete this task':'Delete this task'}</button>`},
    foot:()=>`<button class="btn pri big" data-act="tkSave">Save all tasks</button>`})}
 let TK=null;
 const tkList=()=>{const t=TK.E[TK.cur];if(!t)return[];if(t.byDay){t.dayItems=t.dayItems||{};return t.dayItems[TK.day]=t.dayItems[TK.day]||[]}return t.items};
-function tkGrab(){const t=TK?.E[TK.cur];if(!t||!$('#tk_name'))return;t.name=$('#tk_name').value;t.time=$('#tk_time').value||t.time;tkList().forEach((x,i)=>{const el=$('#ti_'+i);if(el)x.name=el.value})}
+function tkGrab(){const t=TK?.E[TK.cur];if(!t||!$('#tk_name'))return;t.name=$('#tk_name').value;t.time=$('#tk_time').value||t.time;tkList().forEach((x,i)=>{const el=$('#ti_'+i);if(el)x.name=el.value;
+  const r=document.querySelector(`[data-tirep="${i}"]`);if(r)x.rep=r.value;const dm=document.querySelector(`[data-tidom="${i}"]`);if(dm)x.dom=dm.value==='last'?'last':+dm.value;const on=document.querySelector(`[data-tionce="${i}"]`);if(on)x.date=on.value})}
 function pinSheet(title,pin,onOk){let v='';const draw=()=>{const d=$('#pindots');if(d)d.innerHTML=[...Array(pin.length)].map((_,i)=>`<i class="${i<v.length?'f':''}"></i>`).join('')};
   openSheet({title:()=>title,body:()=>`<div class="pindots" id="pindots"></div><div class="pin">${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>k===''?'<span></span>':`<button data-pin="${k}" aria-label="${k}">${k}</button>`).join('')}</div><div id="pinerr" class="small" style="text-align:center;color:var(--bad);min-height:20px"></div>`,
    mount:()=>{draw();$('#sheet .pin').onclick=e=>{const b=e.target.closest('[data-pin]');if(!b)return;const k=b.dataset.pin;if(k==='⌫')v=v.slice(0,-1);else if(v.length<pin.length)v+=k;$('#pinerr').textContent='';draw();
@@ -1187,13 +1198,17 @@ const ACT={
  tkByDay:(d,el)=>{tkGrab();const t=TK.E[TK.cur];if(el.checked){t.byDay=true;t.dayItems=Object.fromEntries(ALLDAYS.map(i=>[i,(t.dayItems?.[i]?.length?t.dayItems[i]:t.items).map(x=>({...x}))]))}else{t.byDay=false;t.items=t.items?.length?t.items:(t.dayItems?.[TK.day]||[]).map(x=>({...x}))}drawSheet()},
  tkDayPick:d=>{tkGrab();TK.day=+d.k;drawSheet()},
  tkCopy:d=>{tkGrab();const t=TK.E[TK.cur];t.dayItems[+d.k]=tkList().map(x=>({...x,id:x.id}));toast(`Copied to ${DOW[+d.k]}`);drawSheet()},
+ tiWd:d=>{tkGrab();const x=tkList()[+d.i];if(!x)return;const k=+d.k;x.days=(x.days||[]).includes(k)?x.days.filter(v=>v!==k):[...(x.days||[]),k];drawSheet()},
  tiAdd:()=>{tkGrab();const v=$('#ti_new').value.trim();if(!v){$('#ti_new').focus();return}tkList().push({id:slug(v)+'-'+uidGen().slice(-3),name:v,photo:true});drawSheet();setTimeout(()=>$('#ti_new')?.focus(),0)},
  tiPhoto:d=>{tkGrab();const x=tkList()[+d.i];if(x){x.photo=x.photo===false?true:false;drawSheet()}},
  tiRefDel:d=>{tkGrab();const x=tkList()[+d.i];if(x){delete x.ref;drawSheet()}},
  tiMv:d=>{tkGrab();const l=tkList(),i=+d.i,j=i+(+d.n);if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];drawSheet()},
  tiDel:d=>{tkGrab();tkList().splice(+d.i,1);drawSheet()},
  tkDel:()=>{tkGrab();const t=TK.E[TK.cur];if(!t)return;if(TK.del!==t.id){TK.del=t.id;drawSheet();return}TK.E.splice(TK.cur,1);TK.cur=Math.max(0,TK.cur-1);TK.del=null;drawSheet()},
- tkSave:async()=>{tkGrab();const clean=l=>(l||[]).map(x=>({id:x.id,name:String(x.name||'').trim(),photo:x.photo!==false,...(x.ref?{ref:x.ref}:{})})).filter(x=>x.name);
+ tkSave:async()=>{tkGrab();const clean=l=>(l||[]).map(x=>({id:x.id,name:String(x.name||'').trim(),photo:x.photo!==false,...(x.ref?{ref:x.ref}:{}),
+     ...(x.rep==='weekly'?{rep:'weekly',days:[...(x.days||[])].sort()}:x.rep==='monthly'?{rep:'monthly',dom:x.dom||1}:x.rep==='once'?{rep:'once',date:x.date||''}:{})})).filter(x=>x.name);
+   const badItem=TK.E.flatMap(t=>(t.items||[]).map(x=>({t,x}))).find(({x})=>String(x.name||'').trim()&&((x.rep==='weekly'&&!(x.days||[]).length)||(x.rep==='once'&&!x.date)));
+   if(badItem){TK.cur=TK.E.indexOf(badItem.t);drawSheet();toast(badItem.x.rep==='weekly'?`Pick at least one day for "${badItem.x.name}"`:`Pick a date for "${badItem.x.name}"`);return}
    const bad=TK.E.find(t=>!String(t.name||'').trim()||!t.days.length);if(bad){toast(!String(bad.name||'').trim()?'Every task needs a name':`Pick at least one day for ${bad.name}`);return}
    const list=TK.E.map(t=>({id:t.id,name:t.name.trim(),time:t.time||'22:00',days:[...t.days].sort(),...(t.byDay?{byDay:true,dayItems:Object.fromEntries(ALLDAYS.map(i=>[i,clean(t.dayItems?.[i])])),items:[]}:{items:clean(t.items)})}));
    if(await W(A.db.doc('config/tasks').set({list}))){D.taskCfg=list;toast('Tasks saved');closeSheet();render()}},
@@ -1261,6 +1276,7 @@ document.addEventListener('change',async e=>{const t=e.target;
   if(t.matches('select[data-act=orderLoc]')){const id=t.dataset.id;if(await W(A.db.doc('orders/'+id).update({loc:t.value}))){toast('Moved to '+locName(t.value));closeSheet()}return}
   if((t.id==='as_from'||t.id==='as_to')&&AS){asGrab();const f=$('#as_from').value,to=$('#as_to').value;if(!f)return;let n=to?diffDays(f,to)+1:AS.n;if(t.id==='as_from'&&to&&to<f)n=AS.n;n=Math.max(1,Math.min(21,n));AS.ws=f;AS.n=n;asLoadDraft();drawSheet();return}
   if(/^as_[pm]_/.test(t.id)&&AS){asGrab();if(await W(A.db.doc('mgr/sched').set({...D.schedCfg})))toast(t.id.startsWith('as_m_')?'Max hours saved':'Priority saved');return}
+  if(t.dataset?.tirep!=null&&TK){tkGrab();const x=tkList()[+t.dataset.tirep];if(x){if(x.rep==='weekly'&&!(x.days||[]).length)x.days=[parseYmd(bizDate()).getDay()];if(x.rep==='monthly'&&!x.dom)x.dom=1;if(x.rep==='once'&&!x.date)x.date=bizDate()}drawSheet();return}
   if(t.id==='it_cat'){const r=$('#it_newcat_row');if(r){r.hidden=t.value!=='__new';if(!r.hidden)$('#it_newcat').focus()}return}
   if(t.matches('select[data-act=avMode]')){const r=$('#av_t'+t.dataset.i);if(r)r.hidden=t.value!=='custom';return}
   if(t.type!=='file'||!t.dataset.up)return;const kind=t.dataset.up;
