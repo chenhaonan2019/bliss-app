@@ -244,7 +244,7 @@ const A={db:null,user:null,assets:null,sample:null,downloads:null};
 let uid=null,isMgr=false,isOwner=false,LOC_OVR=null;
 const ownerView=()=>isOwner&&UI.pv!=='mgr';
 const withLoc=(l,f)=>{const o=LOC_OVR;LOC_OVR=l;try{return f()}finally{LOC_OVR=o}};
-const UI={loc:ls.get('loc')||'wh',tab:null,sub:{},kiosk:ls.get('kiosk')==='1',kActor:null,mgrUnlocked:false,
+const UI={loc:ls.get('loc')||'wh',ewView:ls.get('ewView')||'list',tab:null,sub:{},kiosk:ls.get('kiosk')==='1',kActor:null,mgrUnlocked:false,
   day:null,week:null,pDate:null,ps:null,pl:7,openGrp:{}};
 // Task checklists. Owners and managers set them up (name, due time, days, items); saved in config/tasks.
 // Each item needs a photo or just a check, and can have an example photo. Until the list is edited once,
@@ -416,6 +416,13 @@ const availDue=d=>addDays(weekStart(d||today()),((D.settings.availDueDay??3)+6)%
 function availState(emp,d){d=d||today();const wk=nextWk(d);const at=D.avail[emp]?.weeks?.[wk];const due=availDue(d);return{wk,due,at,st:at?'done':d<due?'todo':d===due?'due':'overdue'}}
 function availRow(emp){const a=availState(emp);const c=a.st==='done'?chip('ok','Done'):a.st==='overdue'?chip('bad','Overdue'):a.st==='due'?chip('warn','Due today'):chip('',`Due ${fmtD(a.due,{weekday:'short'})}`);
   return `<div class="li tap" data-act="availSheet" data-id="${emp}" tabindex="0">${ic('cal')}<div class="grow"><div class="t">Fill availability for next week</div><div class="small muted">${fmtD(a.wk,{month:'short',day:'numeric'})} – ${fmtD(addDays(a.wk,6),{month:'short',day:'numeric'})}${a.at?' · sent '+fmtDT(a.at):` · due ${fmtD(a.due,{weekday:'long'})}`}</div></div>${c}${ic('chev')}</div>`}
+function availCard(emp){if(!emp)return'';const a=availState(emp);const rng=`${fmtD(a.wk,{month:'short',day:'numeric'})} – ${fmtD(addDays(a.wk,6),{month:'short',day:'numeric'})}`;
+  if(a.st==='done')return `<div class="card row" style="gap:12px;border-left:4px solid var(--ok)"><span style="font-size:22px;color:var(--ok)">✓</span><div class="grow"><div class="t">Availability sent for ${rng}</div><div class="small muted">Sent ${fmtDT(a.at)}</div></div><button class="btn sm" data-act="availSheet" data-id="${emp}">Edit</button></div>`;
+  const bad=a.st==='overdue',due=a.st==='due';
+  return `<div class="card stack" style="gap:10px;border:2px solid ${bad?'var(--bad)':due?'var(--warn)':'var(--brand)'};background:${bad?'var(--bad-bg)':due?'var(--warn-bg)':'var(--surface)'}">
+   <div class="row" style="gap:12px">${ic('cal')}<div class="grow"><div style="font-weight:700;font-size:17px">Fill in your availability</div><div class="small muted">For next week, ${rng}</div></div>${bad?chip('bad','Overdue'):due?chip('warn','Due today'):chip('',`Due ${fmtD(a.due,{weekday:'short'})}`)}</div>
+   <div class="small">${bad?`It was due ${fmtD(a.due,{weekday:'long'})}. Please send it now so you get scheduled.`:`Due by ${fmtD(a.due,{weekday:'long',month:'short',day:'numeric'})}. Your manager builds next week's schedule from it.`}</div>
+   <button class="btn pri big block" data-act="availSheet" data-id="${emp}">${ic('cal')} Fill availability</button></div>`}
 const MGR_ONLY_FREQ=['weekly'];
 function countRows(d,mgr){return usedFreqs().filter(f=>mgr||!MGR_ONLY_FREQ.includes(f)).map(f=>{const g=groupState(f,d);if(!g||g.st==='later')return'';const n=itemsOf(f).length;
   const t=f==='daily'?'Night inventory count':`${freqName(f)} inventory count`;
@@ -464,12 +471,12 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
     :`<button class="btn pri big block" data-act="clockIn">${ic('clock')} ${L('Clock in','上班打卡')}</button>`}
     ${todayP.filter(p=>p.out).map(p=>`<div class="small muted">${fmtT(hm(new Date(p.in)))} – ${fmtT(hm(new Date(p.out)))} · ${fmtH(punchHrs(p))} h</div>`).join('')}
   </div>
+  ${availCard(me)}
   <h3>${L('Today’s tasks','今日任务')}</h3>
   <div class="card flush list">
-    ${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time())}</div><div class="small muted">${s.filled}/${s.total} ${L('photos','张照片')}</div></div>${chip(stChip(s.st),s.label)}${ic('chev')}</div>`}).join('')}
+    ${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time())}</div><div class="small muted">${s.filled}/${s.total} done</div></div>${chip(stChip(s.st),s.label)}${ic('chev')}</div>`}).join('')}
     ${dueD.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · take photos when it arrives</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}
     ${countRows(d)}
-    ${availRow(me)}
   </div>
   ${deliveries.length?`<h3>Upcoming deliveries</h3><div class="card flush list">${deliveries.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">${esc(o.store||'')} · ${(o.lines||[]).length} ${L('items','项')}</div><div class="small muted">${L('Expected','预计')} ${o.expected?fmtD(o.expected):'—'}${o.window?' · '+esc(o.window):''}</div></div>${chip('info','Upcoming')}</div>`).join('')}</div>`:''}
   ${next?`<div class="card row">${ic('cal')}<div class="grow"><div class="small muted">${L('Next shift','下一班')}</div><div class="t">${fmtD(next.date)} · ${fmtT(next.start)} – ${fmtT(next.end)}</div></div></div>`:''}
@@ -478,12 +485,15 @@ function vEShift(){const me=actor(),d=today();const up=Object.values(D.shifts).f
   const ws=weekStart(d),we=addDays(ws,6);const wk=Object.values(D.punches).filter(p=>p.empId===me&&p.date>=ws&&p.date<=we);const hrs=wk.reduce((s,p)=>s+punchHrs(p),0);
   const a=D.avail[me];
   return `<div class="stack"><div class="row"><h2 class="grow">${L('My shifts','我的排班')}</h2>${A.downloads&&up.length?`<button class="btn sm" data-act="ics">${ic('dl')} ${L('Add to calendar','加入日历')}</button>`:''}</div>
+  ${availCard(me)}
   <div class="stats" style="grid-template-columns:1fr 1fr"><div class="stat"><b>${fmtH(hrs)}</b><span>${L('Hours this week','本周工时')}</span></div><div class="stat"><b>${up.length}</b><span>${L('Upcoming shifts','即将的班次')}</span></div></div>
   ${up.length?`<div class="card flush list">${up.map(s=>`<div class="li"><div class="grow"><div class="t">${fmtD(s.date)}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)} · ${fmtH(shiftHrs(s))} h${s.note?' · '+esc(s.note):''}</div></div>${s.date===d?chip('brand',L('Today','今天')):''}</div>`).join('')}</div>`
    :`<div class="empty card"><b>${L('No upcoming shifts','暂无排班')}</b>${L('Your manager will post the schedule here.','经理排班后会显示在这里。')}</div>`}
   ${(()=>{const ws=UI.ew||weekStart(today());const days=[...Array(7)].map((_,i)=>addDays(ws,i));
+    const view=UI.ewView||'list';const wkSh=days.flatMap(x=>shiftsOn(x));
     return `<div class="card stack"><div class="row"><h3 class="grow">Team schedule</h3><button class="btn sm" data-act="ew" data-n="-7" aria-label="Previous week">${ic('left')}</button><span class="small" style="font-weight:700">${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(addDays(ws,6),{month:'short',day:'numeric'})}</span><button class="btn sm" data-act="ew" data-n="7" aria-label="Next week">${ic('chev')}</button></div>
-    ${days.map(x=>{const sh=shiftsOn(x);return `<div class="row" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line)"><div style="width:58px;flex:none"><b>${WD()[parseYmd(x).getDay()]}</b><div class="tiny muted">${fmtD(x,{month:'numeric',day:'numeric'})}</div></div><div class="grow stack" style="gap:4px">${sh.length?sh.map(s=>`<div class="row" style="gap:8px;${s.empId===me?'font-weight:700':''}"><span class="dot" style="background:${esc(D.employees[s.empId]?.color||COLORS[0])}"></span><span class="grow">${esc(empName(s.empId))}${s.empId===me?' (you)':''}</span><span class="small">${fmtT(s.start)}–${fmtT(s.end)}</span></div>`).join(''):'<span class="small muted">No shifts</span>'}</div></div>`}).join('')}</div>`})()}
+    <div class="seg" role="tablist" aria-label="Schedule view"><button role="tab" class="${view==='list'?'on':''}" data-act="ewView" data-k="list">List</button><button role="tab" class="${view==='chart'?'on':''}" data-act="ewView" data-k="chart">Chart</button></div>
+    ${view==='chart'?(wkSh.length?schedChart(wkSh,ws,7,[],me):'<div class="empty">No shifts this week.</div>'):days.map(x=>{const sh=shiftsOn(x);return `<div class="row" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line)"><div style="width:58px;flex:none"><b>${WD()[parseYmd(x).getDay()]}</b><div class="tiny muted">${fmtD(x,{month:'numeric',day:'numeric'})}</div></div><div class="grow stack" style="gap:4px">${sh.length?sh.map(s=>`<div class="row" style="gap:8px;${s.empId===me?'font-weight:700':''}"><span class="dot" style="background:${esc(D.employees[s.empId]?.color||COLORS[0])}"></span><span class="grow">${esc(empName(s.empId))}${s.empId===me?' (you)':''}</span><span class="small">${fmtT(s.start)}–${fmtT(s.end)}</span></div>`).join(''):'<span class="small muted">No shifts</span>'}</div></div>`}).join('')}</div>`})()}
   <div class="card stack"><div class="sec-t"><h3>${L('My availability','我的可上班时间')}</h3><button class="btn sm" data-act="availSheet" data-id="${me}">${L('Edit','修改')}</button></div>
   ${availSummary(me)}${a?.updatedAt?`<div class="tiny muted">${L('Updated','更新于')} ${fmtDT(a.updatedAt)}</div>`:`<div class="hint">${L('Tell your manager when you can work so you get scheduled.','请填写你能上班的时间，经理会据此排班。')}</div>`}</div>
   <p class="tiny muted">${L('Shift reminders: tap "Add to calendar" to get an alert on your phone 1 hour before each shift.','班次提醒：点"加入日历"，手机会在每班开始前 1 小时提醒你。')}</p>${UI.kiosk?'':accountCard()}</div>`}
@@ -1089,6 +1099,7 @@ const ACT={
    if(await W(A.db.doc('config/items').set({list}))&&await W(A.db.doc('config/settings').set(settings))){D.items=list;D.settings=settings;toast('Count schedule saved');closeSheet()}},
  pvStart:d=>{UI.pv=d.k;UI.kActor=null;UI.tab=null;UI.mgrUnlocked=false;window.scrollTo(0,0);render(true)},
  pvExit:()=>{UI.pv=null;UI.kActor=null;UI.tab='team';UI.sub.team='set';window.scrollTo(0,0);render(true)},
+ ewView:d=>{UI.ewView=d.k;ls.set('ewView',d.k);render()},
  ew:d=>{UI.ew=addDays(UI.ew||weekStart(today()),+d.n);render()},
  autoSched:()=>autoSheet(),chartView:()=>chartSheet(),asView:d=>{AS.view=d.k;drawSheet()},
  ruleAdd:d=>{asGrab();const t=$('#as_rule').value.trim();if(!t){$('#as_rule').focus();return}const R=asRules();const r={id:uidGen(),text:t.slice(0,300),on:true};d.k==='keep'?asRulesSet([...R.keep,r],R.week):asRulesSet(R.keep,[...R.week,r])},
@@ -1373,7 +1384,7 @@ function needsSheet(){const loc=curLoc();const ed=Object.fromEntries([0,1,2,3,4,
 function autoSheetReopen(){const keep=AS;autoSheet();if(keep){AS={...AS,...keep,plan:keep.plan}};drawSheet()}
 
 
-function schedChart(shifts,ws,n,gaps){gaps=gaps||[];const days=[...Array(n)].map((_,i)=>addDays(ws,i));
+function schedChart(shifts,ws,n,gaps,me){gaps=gaps||[];const days=[...Array(n)].map((_,i)=>addDays(ws,i));
   const mins=[];shifts.forEach(s=>{mins.push(toMin(s.start),toMin(s.end)<=toMin(s.start)?toMin(s.end)+1440:toMin(s.end))});days.forEach(d=>needsFor(curLoc(),parseYmd(d).getDay()).forEach(x=>{mins.push(toMin(x.start),toMin(x.end))}));
   let lo=mins.length?Math.floor(Math.min(...mins)/60)*60:540,hi=mins.length?Math.ceil(Math.max(...mins)/60)*60:1380;if(hi-lo<360)hi=lo+360;const span=hi-lo;const X=m=>((m-lo)/span*100).toFixed(2)+'%';
   const hrsL=[];for(let m=lo;m<=hi;m+=60)hrsL.push(m);const step=span>720?2:1;
@@ -1385,7 +1396,7 @@ function schedChart(shifts,ws,n,gaps){gaps=gaps||[];const days=[...Array(n)].map
      return `<div style="display:flex;align-items:stretch;border-top:1px solid var(--line)"><div style="width:62px;flex:none;padding:6px 4px"><b class="small">${WD()[parseYmd(d).getDay()]}</b><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>
       <div style="position:relative;flex:1;height:${L*26+10+(gp.length?8:0)}px">
        ${hrsL.map(m=>`<i style="position:absolute;top:0;bottom:0;left:${X(m)};border-left:1px solid var(--line)"></i>`).join('')}
-       ${ds.map(s=>{const c=D.employees[s.empId]?.color||COLORS[0];const e=toMin(s.end)<=toMin(s.start)?toMin(s.end)+1440:toMin(s.end);return `<div title="${esc(empName(s.empId))} ${esc(fmtT(s.start))}–${esc(fmtT(s.end))}" style="position:absolute;top:${5+s._lane*26}px;height:22px;left:${X(toMin(s.start))};width:calc(${X(e)} - ${X(toMin(s.start))});background:${esc(c)};${s.warn?.length?'outline:2px solid var(--bad);outline-offset:1px;':''}border-radius:6px;color:#fff;font-size:11px;font-weight:600;line-height:22px;padding:0 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(empName(s.empId).split(' ')[0])} ${esc(fmtT(s.start))}–${esc(fmtT(s.end))}</div>`}).join('')}
+       ${ds.map(s=>{const c=D.employees[s.empId]?.color||COLORS[0];const e=toMin(s.end)<=toMin(s.start)?toMin(s.end)+1440:toMin(s.end);return `<div title="${esc(empName(s.empId))} ${esc(fmtT(s.start))}–${esc(fmtT(s.end))}" style="position:absolute;top:${5+s._lane*26}px;height:22px;left:${X(toMin(s.start))};width:calc(${X(e)} - ${X(toMin(s.start))});background:${esc(c)};${s.warn?.length?'outline:2px solid var(--bad);outline-offset:1px;':me&&s.empId===me?'outline:2px solid var(--ink);outline-offset:1px;':''}border-radius:6px;color:#fff;font-size:11px;font-weight:600;line-height:22px;padding:0 6px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis">${esc(empName(s.empId).split(' ')[0])}${me&&s.empId===me?' (you)':''} ${esc(fmtT(s.start))}–${esc(fmtT(s.end))}</div>`}).join('')}
        ${gp.map(g=>`<div title="Short ${g.missing}" style="position:absolute;bottom:2px;height:5px;left:${X(toMin(g.start))};width:calc(${X(toMin(g.end))} - ${X(toMin(g.start))});background:var(--bad);border-radius:3px"></div>`).join('')}
       </div></div>`}).join('')}</div></div>`;
   const ids=[...new Set(shifts.map(s=>s.empId))].sort((a,b)=>empName(a).localeCompare(empName(b)));
