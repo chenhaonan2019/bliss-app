@@ -170,6 +170,8 @@
       renameOrg: async (name) => { await rpc("rename_org", { new_name: name }); window.blissAccount.org = name.trim(); },
     };
     hideAuth();
+    // Who's who (owners and managers can read everyone; staff only themselves). Used to show reviewer names.
+    SB.from("members").select("user_id,email,role").eq("org_id", ORG).then(({ data }) => { window.blissAccount.members = data || []; });
     if (started) return;
     started = true; startRealtime(); readyResolve();
   }
@@ -190,10 +192,11 @@
   const collOf = (p) => p.split("/").slice(0, -1).join("/");
   const idOf = (p) => p.split("/").pop();
   const newId = () => (crypto.randomUUID ? crypto.randomUUID().replace(/-/g, "").slice(0, 20) : Date.now().toString(36) + Math.random().toString(36).slice(2));
-  const snapDoc = (row, id) => ({ id: row ? row.doc_id : id, exists: !!row, data: () => (row ? row.data : undefined), metadata: { fromCache: false, hasPendingWrites: false } });
+  // __by = account that last changed the document (lets the app name who did an older review).
+  const snapDoc = (row, id) => ({ id: row ? row.doc_id : id, exists: !!row, data: () => (row ? (row.updated_by ? { ...row.data, __by: row.updated_by } : row.data) : undefined), metadata: { fromCache: false, hasPendingWrites: false } });
 
   async function fetchQuery(q) {
-    let r = SB.from("docs").select("doc_id,path,data").eq("org_id", ORG);
+    let r = SB.from("docs").select("doc_id,path,data,updated_by").eq("org_id", ORG);
     if (q.path) r = r.eq("path", q.path); else r = r.eq("coll", q.coll);
     for (const [f, op, v] of q.where || []) {
       const fn = OPS[op]; if (!fn) continue;
@@ -253,10 +256,12 @@
       id: idOf(path), path,
       async get() { const rows = await fetchQuery({ path }); return snapDoc(rows[0], idOf(path)); },
       async set(data) {
+        if (data && typeof data === "object" && "__by" in data) { data = { ...data }; delete data.__by; }
         const { error } = await SB.from("docs").upsert({ org_id: ORG, path, coll: collOf(path), doc_id: idOf(path), data }, { onConflict: "org_id,path" });
         if (error) throw errMap(error); refresh(collOf(path));
       },
       async update(patch) {
+        if (patch && typeof patch === "object" && "__by" in patch) { patch = { ...patch }; delete patch.__by; }
         const { error } = await SB.rpc("doc_merge", { o: ORG, p: path, patch });
         if (error) throw errMap(error); refresh(collOf(path));
       },
