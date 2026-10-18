@@ -72,15 +72,25 @@ async function describePage(page) {
 }
 
 // Open Breakdowns once so the page makes its own hourly-report request, and reuse its headers.
+// Only a response that actually contains the hourly "Sales Summary" table counts (the Overview tab
+// makes the same kind of request for a different report).
 async function captureHeaders(page) {
-  let hdr = null;
-  page.on("request", (r) => { if (!hdr && r.url().includes("/cloud-report-service/fetchReportData") && /orderType/.test(r.postData() || "")) hdr = r.headers(); });
-  await page.waitForTimeout(3000);
+  let hdr = null, armed = false;
+  page.on("response", async (res) => {
+    if (hdr || !armed || !res.url().includes("/cloud-report-service/fetchReportData")) return;
+    try {
+      const j = await res.json();
+      const ok = (j?.reportData?.serviceData || []).some((x) => x.title === "Sales Summary" && x.style === "table" && (x.data?.labels || []).some((l) => /^\d\d(AM|PM)$/.test(l)));
+      if (ok) hdr = res.request().headers();
+    } catch (e) {}
+  });
   const tab = page.getByText("Breakdowns", { exact: true }).first();
   await tab.waitFor({ timeout: 30000 });
+  await page.waitForTimeout(3000);
+  armed = true;
   await tab.click();
-  for (let i = 0; i < 40 && !hdr; i++) await page.waitForTimeout(500);
-  if (!hdr) throw new Error("The hourly report did not load");
+  for (let i = 0; i < 60 && !hdr; i++) await page.waitForTimeout(500);
+  if (!hdr) { await describePage(page); throw new Error("The hourly report did not load"); }
   const keep = ["accept", "content-type", "_domain", "_merchantid", "reportid", "merchants", "businessid", "token"];
   return Object.fromEntries(Object.entries(hdr).filter(([k]) => keep.includes(k.toLowerCase())));
 }
@@ -92,7 +102,7 @@ async function fetchDay(page, hdr, merchant, date) {
     if (!r.ok) return { err: r.status };
     const j = await r.json();
     const t = (j?.reportData?.serviceData || []).find((s) => s.title === "Sales Summary" && s.style === "table");
-    if (!t) return { out: {} };
+    if (!t) return { err: "no hourly table" };
     const labels = t.data.labels.slice(1), names = t.data.dataSets[0].data, iN = names.indexOf("Net Sales"), iO = names.indexOf("Orders"), out = {};
     labels.forEach((l, j2) => { const col = t.data.dataSets[j2 + 1]?.data || []; const m = /^(\d\d)(AM|PM)$/.exec(l); if (!m) return; const hh = (+m[1] % 12) + (m[2] === "PM" ? 12 : 0); out[hh] = [+String(col[iN]).replace(/[$,]/g, "") || 0, +col[iO] || 0]; });
     return { out };
@@ -118,6 +128,8 @@ async function main() {
       }
       if (errs > 5) throw new Error(`Menusifu stopped answering for store ${loc} (${errs} days failed)`);
       const n = Object.keys(days).length;
+      const span = Math.round((new Date(yesterday) - new Date(from)) / 864e5) + 1;
+      if (!n && span >= 7) throw new Error(`No sales came back for store ${loc} over ${span} days — the report may have changed`);
       if (n) await rpc("bliss_menusifu_put", { p_secret: SYNC_SECRET, p_loc: loc, p_days: days, p_status: null });
       done[loc] = n; log(`store ${loc}: ${from} → ${yesterday}, saved ${n} days with sales`);
     }
