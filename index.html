@@ -289,6 +289,9 @@ const taxRates=()=>({...TAXDEF,...(D.mgrSet.taxes||{})});
 // Pay rates and pay totals are for owners only (managers see hours, not money).
 const seePay=()=>isOwner&&UI.pv!=='mgr'&&UI.pv!=='emp';
 const wageOf=e=>({pay:num(D.wages[e])||0,cash:num(D.cashRates?.[e])||0,cap:num(D.payCaps?.[e]),ccap:null});
+// Training pay: its own rate while someone is training (until the end date, or while their role is Trainee if no date).
+const trainOf=e=>({rate:num(D.trainRates?.[e])||0,via:D.trainVia?.[e]==='cash'?'cash':'payroll',until:D.trainUntil?.[e]||''});
+const inTraining=(e,date)=>{const t=trainOf(e);if(!t.rate)return false;return t.until?date<=t.until:D.employees[e]?.role==='Trainee'};
 function splitHrs(h,W_){if(!W_.cash)return[h,0];if(!W_.pay)return[0,h];let ph,ch;if(W_.cap!=null&&W_.ccap!=null){ph=Math.min(h,W_.cap);ch=Math.min(h-ph,W_.ccap);ph=h-ch}else if(W_.cap!=null){ph=Math.min(h,W_.cap);ch=h-ph}else if(W_.ccap!=null){ch=Math.min(h,W_.ccap);ph=h-ch}else{ph=h;ch=0}return[ph,ch]}
 const payType=e=>{const w=wageOf(e);return w.pay&&w.cash?'split':w.cash?'cash':'payroll'};
 const wageLabel=e=>{if(!seePay())return'';const w=wageOf(e);const a=[];if(w.pay)a.push(money(w.pay)+'/h payroll'+(w.cash&&w.cap!=null?` (first ${w.cap} h/wk)`:''));if(w.cash)a.push(money(w.cash)+'/h cash');return a.join(' + ')};
@@ -739,21 +742,23 @@ function schedAvail(){setTimeout(()=>ls.set('availSeen',Date.now()),500);const s
   <p class="small muted">Staff submit this every week from their phone (Today → Fill availability). You can also fill it in for them.</p>
   ${ems.map(e=>{const a=D.avail[e.id];const isNew=a?.updatedAt&&new Date(a.updatedAt).getTime()>seen;const sw=a?.weeks?.[nw];return `<div class="card stack"><div class="row">${avatar(e.id)}<div class="grow t">${esc(e.name)}</div>${sw?chip('ok','Submitted'):chip(today()>due?'bad':'','Not yet')}${isNew?chip('warn',L('Updated','新更新')):''}<button class="btn sm" data-act="availSheet" data-id="${e.id}">${L('Edit','修改')}</button></div>${availSummary(e.id)}${a?.updatedAt?`<div class="tiny muted">${L('Updated','更新于')} ${fmtDT(a.updatedAt)}</div>`:''}</div>`}).join('')||`<div class="empty card">${L('No team members yet.','还没有员工。')}</div>`}`}
 function payroll(ps,pl){const pe=addDays(ps,pl-1);const res={};Object.values(D.employees).filter(e=>locOf(e.id)===curLoc()).forEach(e=>{const P=Object.values(D.punches).filter(p=>p.empId===e.id&&p.date>=ps&&p.date<=pe);
-    const W_=wageOf(e.id);let hrs=0,ot=0,pH=0,cH=0,payPay=0,cashPay=0;
-    for(let w=0;w<pl;w+=7){const a=addDays(ps,w),b=addDays(ps,Math.min(w+6,pl-1));const h=P.filter(p=>p.date>=a&&p.date<=b).reduce((s,p)=>s+punchHrs(p),0);const o=Math.max(0,h-(D.settings.otWeekly||40));hrs+=h;ot+=o;
-      const[ph,ch]=splitHrs(h,W_);const oc=Math.min(ch,o),op=o-oc;pH+=ph;cH+=ch;
-      payPay+=(ph-op)*W_.pay+op*W_.pay*1.5;cashPay+=(ch-oc)*W_.cash+oc*W_.cash*1.5}
+    const W_=wageOf(e.id),TR=trainOf(e.id);let hrs=0,ot=0,pH=0,cH=0,payPay=0,cashPay=0,trH=0,trPay=0;
+    for(let w=0;w<pl;w+=7){const a=addDays(ps,w),b=addDays(ps,Math.min(w+6,pl-1));const Pw=P.filter(p=>p.date>=a&&p.date<=b);const h=Pw.reduce((s,p)=>s+punchHrs(p),0);const o=Math.max(0,h-(D.settings.otWeekly||40));hrs+=h;ot+=o;
+      const th=Pw.filter(p=>inTraining(e.id,p.date)).reduce((s,p)=>s+punchHrs(p),0),rh=h-th;const oR=Math.min(o,rh),oT=o-oR;
+      const[ph,ch]=splitHrs(rh,W_);const oc=Math.min(ch,oR),op=oR-oc;pH+=ph;cH+=ch;
+      payPay+=(ph-op)*W_.pay+op*W_.pay*1.5;cashPay+=(ch-oc)*W_.cash+oc*W_.cash*1.5;
+      if(th){const tp=th*TR.rate+oT*TR.rate*.5;trH+=th;trPay+=tp;if(TR.via==='cash'){cashPay+=tp;cH+=th}else{payPay+=tp;pH+=th}}}
     const late=P.filter(p=>p.late>0);const sched=Object.values(D.shifts).filter(s=>s.empId===e.id&&s.date>=ps&&s.date<=pe).reduce((s,x)=>s+shiftHrs(x),0);
     const tasks=Object.values(D.photos).filter(x=>x.completedBy===e.id&&x.date>=ps&&x.date<=pe);const onT=tasks.filter(x=>taskState(x.date,x.type,x.loc).st==='ontime').length;const issues=tasks.filter(x=>x.review?.status==='issue').length;
-    const rate=W_.pay||W_.cash;const pay=payPay+cashPay;
-    if(P.length||sched)res[e.id]={e,P,hrs,ot,late:late.length,lateMin:late.reduce((s,p)=>s+p.late,0),sched,tasks:tasks.length,onT,issues,rate,pay,payPay,cashPay,pH,cH,W:W_,type:payType(e.id),open:P.filter(p=>!p.out).length}});return res}
+    const rate=W_.pay||W_.cash||TR.rate;const pay=payPay+cashPay;
+    if(P.length||sched)res[e.id]={e,P,hrs,ot,late:late.length,lateMin:late.reduce((s,p)=>s+p.late,0),sched,tasks:tasks.length,onT,issues,rate,pay,payPay,cashPay,pH,cH,trH,trPay,TR,W:W_,type:payType(e.id),open:P.filter(p=>!p.out).length}});return res}
 function schedTime(){const ps=UI.ps||weekStart(today());const pl=UI.pl||7;const R=payroll(ps,pl);const rows=Object.values(R);const LS=laborSum(R);const th=LS.hrs;
   return `<div class="card stack"><div class="g2"><label class="f">${L('Period starts','开始日期')}<input class="in" type="date" id="ps_in" value="${ps}"></label><label class="f">${L('Length','周期')}<select class="in" id="pl_in"><option value="7" ${pl==7?'selected':''}>${L('1 week','1 周')}</option><option value="14" ${pl==14?'selected':''}>${L('2 weeks','2 周')}</option></select></label></div>
    <div class="row wrapr"><button class="btn sm" data-act="per" data-n="-1">${ic('left')} ${L('Previous','上一期')}</button><button class="btn sm" data-act="per" data-n="0">${L('This week','本周')}</button><button class="btn sm" data-act="per" data-n="1">${L('Next','下一期')} ${ic('chev')}</button></div></div>
   <div class="stats" style="grid-template-columns:repeat(3,1fr)"><div class="stat"><b>${fmtH(th)}</b><span>Total hours</span></div>${seePay()?`<div class="stat"><b>${money(LS.payroll)}</b><span>Payroll (gross)</span></div><div class="stat"><b>${money(LS.cash)}</b><span>Cash</span></div>`:`<div class="stat"><b>${fmtH(LS.sched)}</b><span>Scheduled</span></div><div class="stat"><b>${fmtH(LS.ot)}</b><span>Overtime</span></div>`}</div>
   ${rows.length?`<div class="card flush list">${rows.map(r=>`<div class="li tap" data-act="empTime" data-id="${r.e.id}" data-ps="${ps}" data-pl="${pl}" tabindex="0">${avatar(r.e.id)}<div class="grow"><div class="t">${esc(r.e.name)}</div><div class="small muted">${fmtH(r.hrs)} h ${L('worked','实际')} / ${fmtH(r.sched)} h ${L('scheduled','排班')}${r.ot?` · OT ${fmtH(r.ot)} h`:''}</div>
     <div class="row wrapr" style="gap:4px;margin-top:4px">${r.late?chip('warn',L(`Late ×${r.late} (${r.lateMin}m)`,`迟到 ${r.late} 次（${r.lateMin}分）`)):chip('ok',L('Never late','无迟到'))}${r.tasks?chip(r.onT===r.tasks?'ok':'warn',L(`Photos on time ${r.onT}/${r.tasks}`,`照片按时 ${r.onT}/${r.tasks}`)):''}${r.issues?chip('bad',L(`${r.issues} cleaning issue`,`${r.issues} 次卫生问题`)):''}${r.open?chip('bad',L('Missing clock-out','缺下班卡')):''}</div></div>
-    ${seePay()?`<div style="text-align:right"><b>${money(r.pay)}</b><div class="tiny muted">${r.rate?money(r.rate)+'/h':L('No rate','未设时薪')}</div><div class="tiny muted">${r.pH?`P ${fmtH(r.pH)}h ${money(r.payPay)}`:''}${r.pH&&r.cH?'<br>':''}${r.cH?`C ${fmtH(r.cH)}h ${money(r.cashPay)}`:''}</div></div>`:`<div style="text-align:right"><b>${fmtH(r.hrs)} h</b></div>`}</div>`).join('')}</div>`:`<div class="empty card">${L('No hours in this period.','这一期没有工时记录。')}</div>`}
+    ${seePay()?`<div style="text-align:right"><b>${money(r.pay)}</b><div class="tiny muted">${r.rate?money(r.rate)+'/h':L('No rate','未设时薪')}</div><div class="tiny muted">${r.pH?`P ${fmtH(r.pH)}h ${money(r.payPay)}`:''}${r.pH&&r.cH?'<br>':''}${r.cH?`C ${fmtH(r.cH)}h ${money(r.cashPay)}`:''}${r.trH?`<br><span style="color:var(--info)">incl. training ${fmtH(r.trH)}h ${money(r.trPay)} (${r.TR.via})</span>`:''}</div></div>`:`<div style="text-align:right"><b>${fmtH(r.hrs)} h</b></div>`}</div>`).join('')}</div>`:`<div class="empty card">${L('No hours in this period.','这一期没有工时记录。')}</div>`}
   <div class="row"><span class="tiny muted grow">${L(`Overtime is paid at 1.5× over ${D.settings.otWeekly||40} h per week.`,`每周超过 ${D.settings.otWeekly||40} 小时按 1.5 倍计算加班。`)}</span>${A.downloads?`<button class="btn sm" data-act="payCsv" data-ps="${ps}" data-pl="${pl}">${ic('dl')} ${seePay()?L('Export payroll','导出工资表'):'Export hours'}</button>`:''}</div>`}
 
 function vTeam(){const s=curSub('team','people');
@@ -1165,7 +1170,12 @@ function empSheet(id){const e=id?D.employees[id]:{name:'',email:'',role:'Staff',
    ${(()=>{const lockMgr=!isOwner&&e.role==='Manager';const roles=isOwner||lockMgr?['Staff','Shift Lead','Manager','Trainee']:['Staff','Shift Lead','Trainee'];
      return `<div class="g2"><label class="f">${L('Role','职位')}<select class="in" id="e_role" ${lockMgr?'disabled':''}>${roles.map(r=>`<option ${e.role===r?'selected':''}>${r}</option>`).join('')}</select></label><span></span></div>${lockMgr?'<p class="tiny muted">Only an owner can change a manager\'s role.</p>':isOwner?'':'<p class="tiny muted">Only an owner can add a manager.</p>'}`})()}
 ${seePay()?`   <div class="g3"><label class="f">Payroll $/h<input class="in" type="number" step="0.01" id="e_wage" value="${esc(D.wages[id]??'')}"></label><label class="f">Cash $/h<input class="in" type="number" step="0.01" id="e_cash" value="${esc(D.cashRates?.[id]??'')}"></label><label class="f">Payroll hours/week<input class="in" type="number" step="0.5" id="e_cap" value="${esc(D.payCaps?.[id]??'')}" placeholder="all"></label></div>
-   <p class="tiny muted">With both rates, the first hours each week go on payroll and the rest are paid in cash. Leave payroll hours blank to put every hour on payroll.</p>`:''}
+   <p class="tiny muted">With both rates, the first hours each week go on payroll and the rest are paid in cash. Leave payroll hours blank to put every hour on payroll.</p>
+   <div class="card stack" style="gap:8px;background:var(--sunk)"><div class="eyebrow">Training pay (optional)</div>
+    <div style="display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px"><label class="f" style="min-width:0">Training $/h<input class="in" type="number" step="0.01" id="e_trate" value="${esc(D.trainRates?.[id]??'')}" style="min-width:0"></label>
+     <label class="f" style="min-width:0">Paid as<select class="in" id="e_tvia" style="min-width:0"><option value="payroll" ${D.trainVia?.[id]!=='cash'?'selected':''}>Payroll</option><option value="cash" ${D.trainVia?.[id]==='cash'?'selected':''}>Cash</option></select></label>
+     <label class="f" style="min-width:0">Training ends<input class="in" type="date" id="e_tuntil" value="${esc(D.trainUntil?.[id]||'')}" style="min-width:0"></label></div>
+    <p class="tiny muted" style="margin:0">Hours worked up to and including the end date are paid at the training rate; after that the normal rate applies. Leave the end date empty to use the training rate while their role is Trainee.</p></div>`:''}
    <label class="f">${L('Store-phone PIN','共用手机 PIN')}<input class="in" inputmode="numeric" maxlength="6" id="e_pin" value="${esc(D.mgrSet.pins?.[id]||'')}"></label>
    <div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:var(--muted)">Color on schedule<div class="swatches" role="radiogroup" aria-label="Color">${COLORS.map((c,i)=>`<label title="${COLOR_NAMES[i]}"><input type="radio" name="e_color" value="${c}" ${(e.color||COLORS[0])===c?'checked':''}><span class="sw" style="background:${c}">${esc((e.name||'A').trim().charAt(0).toUpperCase())}</span><small>${COLOR_NAMES[i]}</small></label>`).join('')}</div></div>
    <label class="row"><input type="checkbox" id="e_active" ${e.active!==false?'checked':''}> ${L('Active (shows in schedule and store phone)','在职（显示在排班和共用手机）')}</label>
@@ -1447,7 +1457,7 @@ const ACT={
    for(const s of fut)await W(A.db.doc('shifts/'+s.id).delete());
    if(!await W(A.db.doc('employees/'+d.id).delete()))return;
    const drop=o=>{const x={...(o||{})};delete x[d.id];return x};
-   if(isOwner)await W(A.db.doc('mgr/wages').set({rates:drop(D.wages),cash:drop(D.cashRates),caps:drop(D.payCaps)}));
+   if(isOwner)await W(A.db.doc('mgr/wages').set({rates:drop(D.wages),cash:drop(D.cashRates),caps:drop(D.payCaps),train:drop(D.trainRates),tvia:drop(D.trainVia),tuntil:drop(D.trainUntil)}));
    if(D.mgrSet.pins?.[d.id])await W(A.db.doc('mgr/settings').set({...D.mgrSet,pins:drop(D.mgrSet.pins)}));
    D.former={...(D.former||{}),[d.id]:e.name};delete D.employees[d.id];closeSheet();toast(`${e.name} removed`);render()},
  empSave:async d=>{const name=$('#e_name').value.trim();if(!name){toast(L('Enter a name','请填写姓名'));return}const id=d.id||slug(name)+'-'+uidGen().slice(-4);
@@ -1457,7 +1467,8 @@ const ACT={
    if(!await W(A.db.doc('employees/'+id).set(body)))return;
    if(body.email&&body.active&&window.blissAccount?.ensureUsers&&(!prev||body.email.toLowerCase()!==String(prev.email||'').toLowerCase()||prev.active===false)){
      window.blissAccount.ensureUsers([body.email]).then(r=>{if(r?.created?.length)toast(`${name} can now sign in with ${body.email}`)}).catch(e=>toast(e.message))}
-   const st=(o,v)=>{const x={...(o||{})};if(v==null)delete x[id];else x[id]=v;return x};if(seePay()&&$('#e_wage'))await W(A.db.doc('mgr/wages').set({rates:st(D.wages,num($('#e_wage').value)),cash:st(D.cashRates,num($('#e_cash').value)),caps:st(D.payCaps,num($('#e_cap').value))}));
+   const st=(o,v)=>{const x={...(o||{})};if(v==null)delete x[id];else x[id]=v;return x};if(seePay()&&$('#e_wage'))await W(A.db.doc('mgr/wages').set({rates:st(D.wages,num($('#e_wage').value)),cash:st(D.cashRates,num($('#e_cash').value)),caps:st(D.payCaps,num($('#e_cap').value)),
+     train:st(D.trainRates,num($('#e_trate').value)),tvia:st(D.trainVia,num($('#e_trate').value)!=null?$('#e_tvia').value:null),tuntil:st(D.trainUntil,$('#e_tuntil').value||null)}));
    const pin=$('#e_pin').value.trim();const pins={...(D.mgrSet.pins||{})};if(pin)pins[id]=pin;else delete pins[id];await W(A.db.doc('mgr/settings').set({...D.mgrSet,pins}));closeSheet()},
  linkAcct:async d=>{const e=$('#lk_'+CSS.escape(d.u))?.value;if(!e){toast(L('Choose a team member','请选择员工'));return}if(await W(A.db.doc('links/'+d.u).set({empId:e,at:new Date().toISOString()}))){await W(A.db.doc('pending/'+d.u).delete());toast(L('Linked','已关联'))}},
  linkSelf:async()=>{const e=$('#lk_self').value;if(e&&uid)await W(A.db.doc('links/'+uid).set({empId:e,at:new Date().toISOString()}))},
@@ -1663,11 +1674,11 @@ const csvCell=v=>{const s=String(v??'');return /[",\n]/.test(s)?'"'+s.replace(/"
 async function save(filename,data){if(!A.downloads){toast(L('Downloads are not available here','此处无法下载'));return}try{await A.downloads.save({filename,data})}catch(e){if(e?.code!=='declined'&&e?.code!=='cancelled')toast(L('Could not save the file','无法保存文件'))}}
 function exportUsage(){const rows=usageRows();const head=['Date','From','Days',...D.items.map(i=>`${i.name} (${i.unit||''})`)];
   const lines=[head,...rows.map(r=>[r.date,r.prev,r.days,...D.items.map(i=>r.u[i.id]??'')])];save(`BLISS-usage-${today()}.csv`,lines.map(l=>l.map(csvCell).join(',')).join('\n'))}
-function exportPay(ps,pl){const R=payroll(ps,pl);
+function exportPay(ps,pl){const R=payroll(ps,pl);const TRX=Object.values(R).some(r=>r.trH);
   if(!seePay()){const lines=[['Employee','Date','In','Out','Hours','Late min']];Object.values(R).forEach(r=>r.P.forEach(p=>lines.push([r.e.name,p.date,p.in?hm(new Date(p.in)):'',p.out?hm(new Date(p.out)):'',fmtH(punchHrs(p)),p.late||0])));
     lines.push([]);lines.push(['Employee','Hours','Overtime hours','Scheduled hours','Late count']);Object.values(R).forEach(r=>lines.push([r.e.name,fmtH(r.hrs),fmtH(r.ot),fmtH(r.sched),r.late]));
-    return save(`BLISS-hours-${ps}.csv`,lines.map(l=>l.map(csvCell).join(',')).join('\n'))}const lines=[['Employee','Pay method','Hours','Overtime hours','Payroll hours','Payroll rate','Payroll pay','Cash hours','Cash rate','Cash pay','Total pay','Late count','Late minutes','Scheduled hours','Photo tasks','On time','Missing clock-outs']];
-  Object.values(R).forEach(r=>lines.push([r.e.name,r.type,fmtH(r.hrs),fmtH(r.ot),fmtH(r.pH),r.W.pay,r.payPay.toFixed(2),fmtH(r.cH),r.W.cash,r.cashPay.toFixed(2),(Math.round(r.pay*100)/100).toFixed(2),r.late,r.lateMin,fmtH(r.sched),r.tasks,r.onT,r.open]));
+    return save(`BLISS-hours-${ps}.csv`,lines.map(l=>l.map(csvCell).join(',')).join('\n'))}const lines=[['Employee','Pay method','Hours','Overtime hours','Payroll hours','Payroll rate','Payroll pay','Cash hours','Cash rate','Cash pay','Total pay','Training hours','Training rate','Training pay (included above)','Late count','Late minutes','Scheduled hours','Photo tasks','On time','Missing clock-outs']];
+  Object.values(R).forEach(r=>lines.push([r.e.name,r.type,fmtH(r.hrs),fmtH(r.ot),fmtH(r.pH),r.W.pay,r.payPay.toFixed(2),fmtH(r.cH),r.W.cash,r.cashPay.toFixed(2),(Math.round(r.pay*100)/100).toFixed(2),fmtH(r.trH||0),r.trH?r.TR.rate:'',(r.trPay||0).toFixed(2),r.late,r.lateMin,fmtH(r.sched),r.tasks,r.onT,r.open]));
   lines.push([]);lines.push(['Employee','Date','In','Out','Hours','Late min']);Object.values(R).forEach(r=>r.P.forEach(p=>lines.push([r.e.name,p.date,p.in?hm(new Date(p.in)):'',p.out?hm(new Date(p.out)):'',fmtH(punchHrs(p)),p.late||0])));
   save(`BLISS-payroll-${ps}.csv`,lines.map(l=>l.map(csvCell).join(',')).join('\n'))}
 function exportIcs(){const me=actor();const up=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=today());const f=(date,t)=>date.replace(/-/g,'')+'T'+t.replace(':','')+'00';
@@ -1697,7 +1708,7 @@ async function boot(){
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
