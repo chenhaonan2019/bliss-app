@@ -112,3 +112,18 @@ iPhone only allows them for apps added to the Home Screen: Safari → Share → 
 - After approval, changes go live right away and the owner sees "N changes since you approved" with the list, until they tap **Got it**.
 - Turn it on or off in Team → Settings → Schedule review. Weeks that already had shifts when it was turned on stay visible.
 - Needs `schema.sql` run again (only owners can publish).
+
+## Staffing from the sales forecast
+Auto-schedule can decide how many people each hour needs from hourly sales and the weather, instead of fixed numbers.
+
+- **Forecast** for each hour = recent same weekdays (last 8 by default, newer weeks count more, odd days trimmed),
+  adjusted for the weather forecast (Open-Meteo, free, no key). How much cold, rain and snow lower sales is learned from
+  your own history across both stores. A new store's first 6 weeks (opening buzz) are left out.
+- **People** = 1 up to $150 an hour, then one more for every $100 (both editable). A cushion is added for hours that
+  usually swing a lot, so busy weekend hours get covered.
+- **Open and close times** still come from the usual "Shifts needed". If a store doesn't have enough history yet,
+  the usual shifts are used for that day.
+- **Getting hourly sales in**: Auto-schedule → Forecast settings → Import CSV (`date, hour, net_sales, orders`), or
+  send it straight from a Menusifu reports tab: that tab opens the app with `#import-hourly` and posts the data;
+  a manager checks which store it goes to and taps **Import**. Data is saved in `mgr/hourly_<store>` (managers and owners only).
+- Turn it off with the **From sales forecast** switch in Auto-schedule.
