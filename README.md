@@ -127,3 +127,25 @@ Auto-schedule can decide how many people each hour needs from hourly sales and t
   send it straight from a Menusifu reports tab: that tab opens the app with `#import-hourly` and posts the data;
   a manager checks which store it goes to and taps **Import**. Data is saved in `mgr/hourly_<store>` (managers and owners only).
 - Turn it off with the **From sales forecast** switch in Auto-schedule.
+
+### Menusifu sync (automatic, no computer needed)
+Every morning a GitHub Action (`.github/workflows/menusifu-sync.yml`) signs in to Menusifu Cloud in a headless browser,
+reads each store's sales per hour for the days the app doesn't have yet (the first run fills about a year), and saves them.
+Auto-schedule shows "Sales synced from Menusifu … ago", or the reason if a run failed.
+
+One-time setup:
+1. **Database.** Supabase → SQL Editor → run `supabase/schema.sql` again. Then run this once and copy the value it shows:
+   ```sql
+   insert into public.app_secrets (k, v) values ('menusifu_sync', replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''))
+     on conflict (k) do update set v = excluded.v returning v;
+   ```
+2. **GitHub secrets.** Repository → Settings → Secrets and variables → Actions → *New repository secret*, three times:
+   `MENUSIFU_EMAIL`, `MENUSIFU_PASSWORD` (best: a Menusifu user that can only view reports), and `BLISS_SYNC_SECRET` (the value from step 1).
+3. **First run.** Actions → *Menusifu sync* → *Run workflow*. The first run takes about 10–15 minutes.
+
+Notes:
+- The sync can only write hourly sales and its own status (`bliss_menusifu_put` checks the shared secret); it never gets the Supabase service key.
+- This repository is public, so Action logs are public: the script logs only dates and counts, never sales or page contents.
+- If Menusifu adds a verification code or "I'm not a robot" check at sign-in, the run stops and the app shows why.
+- GitHub pauses scheduled Actions in a public repository after 60 days without commits. It emails you; click *Enable workflow*.
+- Store mapping is `MENUSIFU_STORES` in the workflow file (`Menusifu branch id=app store id`).

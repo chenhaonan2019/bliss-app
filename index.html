@@ -1744,6 +1744,10 @@ function needsSheet(){const loc=curLoc();const ed=Object.fromEntries([0,1,2,3,4,
 function autoSheetReopen(){const keep=AS;autoSheet();if(keep){AS={...AS,...keep,plan:keep.plan}};drawSheet()}
 /* ---------- forecast UI ---------- */
 const kmoney=n=>'$'+Math.round(n).toLocaleString('en-US');
+/* status of the daily Menusifu → app sync (GitHub Action) */
+function hsyncLine(){const v=D.hsync;if(!v?.at)return'';const ago=Math.max(0,Math.round((Date.now()-new Date(v.at))/36e5));const when=ago<1?'just now':ago<48?`${ago} h ago`:`${Math.round(ago/24)} days ago`;
+  if(v.ok===false)return `<div class="tiny" style="color:var(--bad)">Menusifu sync failed ${when}: ${esc(v.error||'')}</div>`;
+  return `<div class="tiny ${ago>48?'':'muted'}" style="${ago>48?'color:var(--bad)':''}">Sales synced from Menusifu ${when}${v.through?` · through ${fmtD(v.through,{month:'short',day:'numeric'})}`:''}${ago>48?' — check the sync':''}</div>`}
 const curveTxt=nds=>needsCurve(nds).map(x=>{const h=m=>`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;return `${fmtT(h(x.s))}–${fmtT(h(x.e))} <b>${x.c}</b>`}).join(' · ');
 function asNeedsCard(ws,n){const loc=curLoc(),has=fcHas(loc),use=fcUse(loc),wxReady=!!wxNow(loc);
   const usual=[1,2,3,4,5,6,0].map(i=>{const l=needsFor(loc,i);return `<div class="row small"><b style="width:44px">${WD()[i]}</b><span class="grow">${l.length?l.map(x=>`${fmtT(x.start)}–${fmtT(x.end)} × ${x.n}`).join(' · '):'<span class="muted">Closed</span>'}</span></div>`}).join('');
@@ -1754,7 +1758,7 @@ function asNeedsCard(ws,n){const loc=curLoc(),has=fcHas(loc),use=fcUse(loc),wxRe
       <div class="grow stack" style="gap:2px">${!r.needs.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(r.needs)}</span>`}
       ${F?.ok?`<span class="tiny muted">Forecast ${kmoney(F.tot)}${F.wx?` · ${esc(wxLabel(F.wx))}${Math.abs(F.f-1)>=0.02?` (${F.f>1?'+':'−'}${Math.round(Math.abs(F.f-1)*100)}% weather)`:''}`:''}</span>`:F&&!F.ok?`<span class="tiny muted">Using usual shifts: ${esc(F.why)}</span>`:''}</div></div>`}).join('');
   return `<div class="card stack"><div class="row wrapr"><h3 class="grow">Shifts needed</h3><label class="row small" style="gap:6px"><input type="checkbox" data-act="fcToggle" ${use?'checked':''}> From sales forecast</label></div>
-    ${use?`<div class="tiny muted">People on shift at each time. Open and close times come from your usual shifts. ${wxReady?'':'Loading weather…'}</div>${days}
+    ${use?`<div class="tiny muted">People on shift at each time. Open and close times come from your usual shifts. ${wxReady?'':'Loading weather…'}</div>${hsyncLine()}${days}
       <div class="row wrapr" style="gap:6px"><button class="btn sm" data-act="fcDetail">Hourly detail</button><button class="btn sm" data-act="fcSettings">Forecast settings</button><button class="btn sm" data-act="needsEdit">Usual shifts</button></div>`
     :`${usual}<div class="row" style="gap:6px"><button class="btn sm" data-act="needsEdit">Edit</button><button class="btn sm" data-act="fcSettings">Forecast settings</button></div>`}</div>`}
 function fcDetailSheet(){const loc=curLoc(),ws=AS?.ws||nextWk(),n=AS?.n||7,c=fcCfg();
@@ -1776,7 +1780,7 @@ function fcSettingsSheet(){const c=fcCfg();FCS={geo:{...(c.geo||{})},msg:''};
       <label class="f">Cushion for busy swings<select class="in" id="fc_buf">${FC_BUF.map(([v,n,d])=>`<option value="${v}" ${+c.buffer===v?'selected':''}>${n} — ${d}</option>`).join('')}</select></label>
       <label class="f">Weeks of history to use<input class="in" type="number" min="3" max="16" step="1" id="fc_weeks" value="${esc(c.weeks)}"></label>
       <div class="tiny muted">Fewer weeks reacts faster to the season changing; more weeks is steadier.</div></div>
-     <div class="card stack"><h3>Hourly sales history</h3>
+     <div class="card stack"><h3>Hourly sales history</h3>${hsyncLine()}
       ${L2.map(l=>{const H=hourlyOf(l.id);const ds=Object.keys(H).sort();const g=FCS.geo[l.id]||DEF_GEO[l.id];
         return `<div class="stack" style="gap:6px;padding-block:6px;border-top:1px solid var(--line)"><div class="row"><b class="grow">${esc(l.name)}</b><span class="small muted">${ds.length?`${ds.length} days · ${fmtD(ds[0],{month:'short',day:'numeric',year:'2-digit'})} – ${fmtD(ds[ds.length-1],{month:'short',day:'numeric'})}`:'No data yet'}</span></div>
          <label class="btn sm" style="width:max-content">${ic('plus')} Import CSV<input type="file" accept=".csv,text/csv" data-fcimp="${esc(l.id)}" hidden></label>
@@ -1904,7 +1908,7 @@ async function boot(){
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:v.days||{}};FCM={}}})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;else if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:v.days||{}};FCM={}}})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);

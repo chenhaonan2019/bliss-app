@@ -603,3 +603,56 @@ drop policy if exists photos_delete on storage.objects;
 create policy photos_delete on storage.objects for delete to authenticated
   using (bucket_id = 'photos'
          and public.my_level(((storage.foldername(name))[1])::uuid) >= 3);
+
+-- ───────────────────────── Menusifu hourly sales sync ─────────────────────────
+-- The GitHub Action in .github/workflows/menusifu-sync.yml calls these two functions with a shared secret
+-- (stored here as app_secrets k='menusifu_sync'). They can only write mgr/hourly_<store> and mgr/hourly_sync,
+-- so the Action never needs the all-powerful service key. If you run more than one business in this project,
+-- also store the business id as app_secrets k='menusifu_org'.
+create or replace function public.bliss_menusifu_org(p_secret text) returns uuid
+language plpgsql stable security definer set search_path = public as $$
+declare s text;
+begin
+  select v into s from app_secrets where k = 'menusifu_sync';
+  if s is null or length(s) < 20 or p_secret is distinct from s then
+    raise exception 'not allowed' using errcode = '42501';
+  end if;
+  return coalesce((select v::uuid from app_secrets where k = 'menusifu_org'),
+                  (select id from orgs order by created_at limit 1));
+end $$;
+
+create or replace function public.bliss_menusifu_put(p_secret text, p_loc text, p_days jsonb, p_status jsonb) returns jsonb
+language plpgsql security definer set search_path = public as $$
+declare o uuid := public.bliss_menusifu_org(p_secret); cur jsonb;
+begin
+  if p_loc is not null then
+    if p_loc !~ '^[a-z0-9_-]{1,20}$' or p_loc = 'sync' or jsonb_typeof(p_days) is distinct from 'object' then
+      raise exception 'bad input' using errcode = '22023';
+    end if;
+    select data into cur from docs where org_id = o and path = 'mgr/hourly_' || p_loc;
+    insert into docs (org_id, path, coll, doc_id, data)
+      values (o, 'mgr/hourly_' || p_loc, 'mgr', 'hourly_' || p_loc,
+              jsonb_build_object('days', coalesce(cur -> 'days', '{}'::jsonb) || p_days, 'updatedAt', now()))
+      on conflict (org_id, path) do update set data = excluded.data;
+  end if;
+  if p_status is not null then
+    insert into docs (org_id, path, coll, doc_id, data) values (o, 'mgr/hourly_sync', 'mgr', 'hourly_sync', p_status)
+      on conflict (org_id, path) do update set data = excluded.data;
+  end if;
+  return jsonb_build_object('ok', true);
+end $$;
+
+-- latest saved date per store, so each run only fetches what is missing
+create or replace function public.bliss_menusifu_last(p_secret text) returns jsonb
+language plpgsql stable security definer set search_path = public as $$
+declare o uuid := public.bliss_menusifu_org(p_secret);
+begin
+  return coalesce((select jsonb_object_agg(substr(doc_id, 8), (select max(k) from jsonb_object_keys(data -> 'days') k))
+                   from docs where org_id = o and coll = 'mgr' and doc_id like 'hourly\_%' and doc_id <> 'hourly_sync'), '{}'::jsonb);
+end $$;
+
+revoke all on function public.bliss_menusifu_org(text) from public, anon, authenticated;
+revoke all on function public.bliss_menusifu_put(text, text, jsonb, jsonb) from public;
+revoke all on function public.bliss_menusifu_last(text) from public;
+grant execute on function public.bliss_menusifu_put(text, text, jsonb, jsonb) to anon;
+grant execute on function public.bliss_menusifu_last(text) to anon;
