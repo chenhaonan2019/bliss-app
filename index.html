@@ -89,7 +89,11 @@ main{padding-block:16px 110px}
 .chips button{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:6px 10px;cursor:pointer;text-align:center;min-width:52px}
 .chips button.on{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
 .chips button b{display:block;font-size:16px}
-.chips button{position:relative}.nobk{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--bad)}
+.chips button{position:relative}
+.guide p{margin:6px 0}.gl{margin:6px 0 10px;padding-left:22px}.gl li{margin:4px 0;line-height:1.45}.gh{margin:14px 0 4px;font-size:15px}.gh:first-child{margin-top:0}
+.gwarn{background:var(--warn-bg);color:var(--ink);border-left:4px solid var(--warn);border-radius:8px;padding:8px 10px;margin:8px 0;font-weight:600}
+.gtbl{border-collapse:collapse;width:100%;margin:8px 0;font-size:14px}.gtbl th,.gtbl td{border:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}.gtbl th{background:var(--sunk);font-weight:700}
+.grid-ph{display:grid;grid-template-columns:repeat(auto-fill,minmax(120px,1fr));gap:8px}.grid-ph img{width:100%;aspect-ratio:3/4;object-fit:cover;border-radius:12px}.nobk{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--bad)}
 .chips button span{font-size:11px;opacity:.8}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px}
@@ -626,11 +630,11 @@ function trainBoard(emp,editable){const cfg=D.trainCfg,tp=D.training[emp]||{};co
   ${editable?'':`<h2>${L('My training','我的培训')}</h2>`}
   <div class="card stack"><div class="row"><div class="grow"><div class="eyebrow">${L('Overall','总进度')}</div><div style="font-family:var(--display);font-weight:800;font-size:28px">${S.tot?Math.round(S.s2/S.tot*100):0}%</div></div><div class="small muted" style="text-align:right">${S.s2} ${L('fluent','熟练')}<br>${S.s1} ${L('shown','已教过')}<br>${S.tot-S.s1-S.s2} ${L('not started','未开始')}</div></div>
   ${barHtml(S.tot,S.s1,S.s2)}<div class="legend"><span><i style="background:var(--st2)"></i>${L('Fluent / Satisfactory','熟练 / 合格')}</span><span><i style="background:var(--st1)"></i>${L('Shown','已教过')}</span><span><i style="background:var(--st0)"></i>${L('Not started','未开始')}</span></div>
-  ${editable?`<div class="tiny muted">Tap a status to move it forward: Not started → Shown → Fluent. Trainees can mark items Shown themselves; only managers mark Fluent.</div>`:`<div class="tiny muted">Tap an item to mark it <b>Shown</b> once you have been taught it. Your manager marks it <b>${esc(D.trainCfg.sections[0]?.doneLabel||'Fluent')}</b> when you can do it on your own.</div>`}</div>
+  ${editable?`<div class="tiny muted">Tap an item's name for its how-to. Tap a status to move it forward: Not started → Shown → Fluent. Trainees can mark items Shown themselves; only managers mark Fluent.</div>`:`<div class="tiny muted">Tap an item's name to read how to do it. Tap the status to mark it <b>Shown</b> once you have been taught it. Your manager marks it <b>${esc(D.trainCfg.sections[0]?.doneLabel||'Fluent')}</b> when you can do it on your own.</div>`}</div>
   ${cfg.sections.map((sec,gi)=>{const p=S.per[sec.id];const open=UI.openGrp[sec.id]!==false;const done=sec.doneLabel||'Fluent';
-    return `<div class="grp" style="--gc:${GC[gi%GC.length]}"><div class="grp-h" data-act="grpToggle" data-id="${sec.id}"><h3>${esc(sec.title)}</h3><span class="small muted">${p.s2}/${p.n} ${esc(done)}</span><div style="width:70px">${barHtml(p.n,p.s1,p.s2)}</div></div>
+    return `<div class="grp" style="--gc:${GC[gi%GC.length]}"><div class="grp-h" data-act="grpToggle" data-id="${sec.id}"><h3>${esc(sec.title)}</h3><span class="small muted">${sec.hours?sec.hours+' h · ':''}${p.s2}/${p.n} ${esc(done)}</span><div style="width:70px">${barHtml(p.n,p.s1,p.s2)}</div></div>
     ${open?`<div class="grp-cols"><span>${L('Item','项目')}</span><span style="text-align:center">${L('Status','状态')}</span></div>${sec.items.map(it=>{const k=sec.id+'__'+it.id,v=tStat(emp,k);const selfEd=!editable&&mode()==='emp'&&v<2;
-      return `<div class="grp-r"><div class="n">${esc(it.name)}</div><button class="pill s${v}" ${editable?`data-act="trainCycle" data-emp="${emp}" data-k="${k}"`:selfEd?`data-act="trainSelf" data-emp="${emp}" data-k="${k}" aria-label="Mark ${esc(it.name)} as ${v?'not started':'shown'}"`:'disabled'}>${v===2?esc(done):lbl(v)}</button></div>`}).join('')}
+      return `<div class="grp-r"><div class="n tap" data-act="guideGo" data-s="${sec.id}" data-i="${it.id}" data-emp="${emp}" tabindex="0" role="button" style="cursor:pointer">${esc(it.name)}${it.body||(it.photos||[]).length?' <span style="color:var(--brand);font-weight:700">›</span>':''}</div><button class="pill s${v}" ${editable?`data-act="trainCycle" data-emp="${emp}" data-k="${k}"`:selfEd?`data-act="trainSelf" data-emp="${emp}" data-k="${k}" aria-label="Mark ${esc(it.name)} as ${v?'not started':'shown'}"`:'disabled'}>${v===2?esc(done):lbl(v)}</button></div>`}).join('')}
       ${editable?`<div class="grp-r" style="grid-template-columns:1fr"><button class="btn sm" style="margin:8px 14px;justify-self:start" data-act="trainAddItem" data-sec="${sec.id}">${ic('plus')} ${L('Add item','添加项目')}</button></div>`:''}`:''}</div>`}).join('')}
   <div class="card stack"><h3>${L('Documents to read','必读文档')}</h3>${(cfg.docs||[]).map(dn=>{const r=tp.docs?.[slug(dn)];return `<div class="row">${editable?`<input type="checkbox" id="doc_${slug(dn)}" data-act="trainDoc" data-emp="${emp}" data-k="${slug(dn)}" ${r?'checked':''}>`:(r?ic('check'):'<span style="width:20px"></span>')}<label for="doc_${slug(dn)}" class="grow">${esc(dn)}</label>${r?chip('ok',L('Read','已读')):''}</div>`}).join('')}</div>
   <div class="card stack"><h3>${L('Training time log','培训时间记录')}</h3>
@@ -783,11 +787,11 @@ function fileRows(list,edit){const cats=[...new Set(list.map(f=>f.cat||'General'
   return cats.map(c=>`<div class="card flush"><div class="li" style="min-height:0;padding-block:8px;background:var(--sunk)"><span class="eyebrow grow">${esc(c)}</span><span class="tiny muted">${list.filter(f=>(f.cat||'General')===c).length}</span></div><div class="list">${list.filter(f=>(f.cat||'General')===c).map(f=>`
     <div class="li" style="gap:10px"><a class="grow row" style="gap:10px;color:inherit;text-decoration:none;min-width:0" href="${BLOB}${esc(f.path)}" target="_blank" rel="noopener"><span style="font-size:24px">${fileIcon(f)}</span><div class="grow" style="min-width:0"><div class="t" style="overflow:hidden;text-overflow:ellipsis">${esc(f.name)}</div><div class="small muted">${fileKind(f)}${f.size?' · '+fmtSize(f.size):''}${f.mgr?' · managers only':''}${edit&&f.loc&&f.loc!=='all'?' · '+esc(locName(f.loc)):''}</div></div></a>
     ${edit?`<button class="btn sm" data-act="fileEdit" data-id="${esc(f.id)}" data-m="${f.mgr?1:0}">Edit</button>`:`<a class="btn sm" href="${BLOB}${esc(f.path)}" target="_blank" rel="noopener">Open</a>`}</div>`).join('')}</div></div>`).join('')}
-function vEFiles(){const list=filesHere();return `<div class="stack"><h2>Files</h2><p class="small muted">Recipes, guides and documents from your manager. Tap one to open it.</p>
+function vEFiles(){const list=filesHere();return `<div class="stack"><h2>Files</h2>${howtoCard()}<p class="small muted">Recipes, guides and documents from your manager. Tap one to open it.</p>
   ${list.length>6?`<input class="in" id="file_q" placeholder="Search files" value="${esc(UI.fileQ||'')}">`:''}
   ${list.length?fileRows(list.filter(f=>!UI.fileQ||(f.name+' '+(f.cat||'')).toLowerCase().includes(UI.fileQ.toLowerCase())),false):`<div class="empty card"><b>No files yet</b>Your manager will add recipes, guides and documents here.</div>`}</div>`}
 function teamFiles(){const list=allFiles().filter(f=>!f.loc||f.loc==='all'||f.loc===curLoc());
-  return `<label class="btn pri" style="cursor:pointer">${ic('plus')} Upload files (PDF, Word, Excel, images…)<input type="file" multiple data-up="files" hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,image/*,video/*"></label>
+  return `${howtoCard()}<label class="btn pri" style="cursor:pointer">${ic('plus')} Upload files (PDF, Word, Excel, images…)<input type="file" multiple data-up="files" hidden accept=".pdf,.doc,.docx,.xls,.xlsx,.csv,.ppt,.pptx,.txt,image/*,video/*"></label>
   ${UI.fileBusy?`<div class="hint">Uploading ${esc(UI.fileBusy)}…</div>`:''}
   <p class="small muted">Staff see these under Files in their app. Mark a file "Managers only" to hide it from staff. Max 50 MB per file.</p>
   ${list.length?fileRows(list,true):`<div class="empty card"><b>No files yet</b>Upload recipes, training guides, the employee handbook, cleaning checklists and so on.</div>`}`}
@@ -1501,7 +1505,7 @@ function redrawAvail(){const note=$('#av_note')?.value;drawSheet();if(note!=null
 document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if(!el)return;const f=ACT[el.dataset.act];if(!f)return;
   if(el.tagName!=='INPUT'&&el.tagName!=='LABEL')e.preventDefault();f(el.dataset,el)});
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.li.tap[data-act],.card.tap[data-act],[role=button][data-act]')){e.preventDefault();e.target.click()}if(e.key==='Escape'){if($('#viewer').innerHTML)$('#viewer').innerHTML='';else if(SH)closeSheet()}});
-document.addEventListener('input',e=>{const t=e.target;if(t.id==='file_q'){UI.fileQ=t.value;const pos=t.selectionStart;render(true);const n=$('#file_q');if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch{}}return}if(SH_ORDER&&(t.id==='o_fee'||/^ol_[qp]\d+$/.test(t.id))){grabOrderLines();const el=$('#o_totals');if(el)el.innerHTML=orderTotalsHtml(SH_ORDER)}});
+document.addEventListener('input',e=>{const t=e.target;if(t.id==='how_q'){UI.howQ=t.value;const pos=t.selectionStart;render(true);const n=$('#how_q');if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch{}}return}if(t.id==='file_q'){UI.fileQ=t.value;const pos=t.selectionStart;render(true);const n=$('#file_q');if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch{}}return}if(SH_ORDER&&(t.id==='o_fee'||/^ol_[qp]\d+$/.test(t.id))){grabOrderLines();const el=$('#o_totals');if(el)el.innerHTML=orderTotalsHtml(SH_ORDER)}});
 document.addEventListener('change',async e=>{const t=e.target;
   if(t.matches('select[data-act=orderLoc]')){const id=t.dataset.id;if(await W(A.db.doc('orders/'+id).update({loc:t.value}))){toast('Moved to '+locName(t.value));closeSheet()}return}
   if((t.id==='as_from'||t.id==='as_to')&&AS){asGrab();const f=$('#as_from').value,to=$('#as_to').value;if(!f)return;let n=to?diffDays(f,to)+1:AS.n;if(t.id==='as_from'&&to&&to<f)n=AS.n;n=Math.max(1,Math.min(21,n));AS.ws=f;AS.n=n;asLoadDraft();drawSheet();return}
@@ -1520,6 +1524,7 @@ document.addEventListener('change',async e=>{const t=e.target;
   if(t.type!=='file'||!t.dataset.up)return;const kind=t.dataset.up;
   if(kind==='task'){await onTaskUpload(t)}
   else if(kind==='files'){await onFilesUpload(t);t.value=''}
+  else if(kind==='tguide'){const fs=[...(t.files||[])];if(!fs.length||!TR)return;tgGrab();toast('Uploading…');for(const f of fs){const id=await uploadImg(f);if(id)TR.S[TR.cur].items[TR.gi].photos.push(id)}drawSheet()}
   else if(kind==='tref'){const f=t.files?.[0];if(!f||!TK)return;tkGrab();toast('Uploading example…');const id=await uploadImg(f);if(!id)return;const x=tkList()[+t.dataset.i];if(x){x.ref=id;drawSheet()}}
   else if(kind==='selfie'){const f=t.files?.[0];if(!f)return;const t0=new Date();const lab=t.closest('label');if(lab){lab.style.opacity=.6;lab.firstChild&&0}toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(lab)lab.style.opacity='';if(!id)return;await doClockIn(id,t0)}
   else if(kind==='shot'){const fs=[...(t.files||[])];if(!fs.length)return;grabOrderLines();for(const f of fs){const blob=await compress(f);SH_ORDER.shots.push({blob,url:URL.createObjectURL(blob)})}SH_ORDER.msg='';drawSheet()}
@@ -1955,15 +1960,15 @@ Object.assign(ACT,{
 
 /* ---------- edit the training checklist: sections and items ---------- */
 let TR=null;
-function trGrab(){if(!TR)return;const sec=TR.S[TR.cur];if(!sec)return;const t=$('#tr_title');if(t)sec.title=t.value;const dl=$('#tr_done');if(dl)sec.doneLabel=dl.value.trim();
+function trGrab(){if(!TR)return;const sec=TR.S[TR.cur];if(!sec)return;const t=$('#tr_title');if(t)sec.title=t.value;const dl=$('#tr_done');if(dl)sec.doneLabel=dl.value.trim();const hh=$('#tr_hours');if(hh)sec.hours=hh.value===''?undefined:+hh.value;
   document.querySelectorAll('[data-trn]').forEach(el=>{const it=sec.items[+el.dataset.trn];if(it)it.name=el.value});
   document.querySelectorAll('[data-trs]').forEach(el=>{const x=TR.S[+el.dataset.trs];if(x)x.title=el.value})}
 function trainEditSheet(){TR={S:JSON.parse(JSON.stringify(D.trainCfg.sections||[])),cur:0,del:null};TR.S.forEach(x=>{x.items=x.items||[]});
   openSheet({title:()=>'Training checklist',body:()=>{const sec=TR.S[TR.cur];const used=k=>Object.values(D.training).filter(t=>t.status?.[k]).length;
-   return `<p class="small muted">Sections and items every trainee works through. Drag ⋮⋮ to reorder. Removing an item hides it; progress already recorded is kept if you add it back with the same name.</p>
+   return `<div class="row wrapr"><span class="small muted grow">Sections and items every trainee works through. Tap 📖 to write the how-to for an item.</span><button class="btn sm" data-act="trImport">${ic('dl')} Import file</button></div><p class="small muted">Drag ⋮⋮ to reorder. Removing an item hides it; progress already recorded is kept if you add it back with the same name.</p>
    <div class="chips">${TR.S.map((x,i)=>`<button class="${i===TR.cur?'on':''}" data-act="trPick" data-i="${i}"><span>${x.items.length} item${x.items.length===1?'':'s'}</span><b style="font-size:13px">${esc(x.title||'Section')}</b></button>`).join('')}<button data-act="trSecAdd"><span>New</span><b>${ic('plus')}</b></button></div>
-   ${sec?`<div class="card stack"><div class="g2"><label class="f">Section name<input class="in" id="tr_title" maxlength="40" value="${esc(sec.title||'')}"></label><label class="f">"Done" word<input class="in" id="tr_done" maxlength="20" value="${esc(sec.doneLabel||'')}" placeholder="Fluent"></label></div>
-    <div class="card flush list" data-sortable="tritems">${sec.items.map((it,i)=>`<div class="li" style="gap:8px;padding-left:6px" data-sid="${i}">${DRAG_H}<input class="in grow" data-trn="${i}" maxlength="80" value="${esc(it.name)}" aria-label="Item name">${used(sec.id+'__'+it.id)?`<span class="tiny muted" title="trainees with progress">${used(sec.id+'__'+it.id)}✓</span>`:''}<button class="btn sm" data-act="trItemDel" data-i="${i}" aria-label="Remove item">${ic('x')}</button></div>`).join('')||'<div class="empty">No items yet.</div>'}</div>
+   ${sec?`<div class="card stack"><div class="g2"><label class="f">Section name<input class="in" id="tr_title" maxlength="40" value="${esc(sec.title||'')}"></label><label class="f">"Done" word<input class="in" id="tr_done" maxlength="20" value="${esc(sec.doneLabel||'')}" placeholder="Fluent"></label></div><label class="f">Training hours<input class="in" type="number" min="0" step="0.5" id="tr_hours" value="${esc(sec.hours??'')}" placeholder="e.g. 3"></label>
+    <div class="card flush list" data-sortable="tritems">${sec.items.map((it,i)=>`<div class="li" style="gap:8px;padding-left:6px" data-sid="${i}">${DRAG_H}<input class="in grow" data-trn="${i}" maxlength="80" value="${esc(it.name)}" aria-label="Item name"><button class="btn sm" data-act="trGuide" data-i="${i}" title="How-to text and photos">${it.body||(it.photos||[]).length?'📖':'+ How-to'}</button>${used(sec.id+'__'+it.id)?`<span class="tiny muted" title="trainees with progress">${used(sec.id+'__'+it.id)}✓</span>`:''}<button class="btn sm" data-act="trItemDel" data-i="${i}" aria-label="Remove item">${ic('x')}</button></div>`).join('')||'<div class="empty">No items yet.</div>'}</div>
     <div class="row"><input class="in grow" id="tr_new" maxlength="80" placeholder="New item, e.g. Make a strawberry matcha latte"><button class="btn" data-act="trItemAdd">${ic('plus')} Add</button></div>
     <button class="btn bad sm" data-act="trSecDel">${TR.del===TR.cur?`Tap again to remove "${esc(sec.title||'Section')}" and its ${sec.items.length} items`:'Remove this section'}</button></div>`:'<div class="empty card">No sections. Tap New to add one.</div>'}
    ${TR.S.length>1?`<details class="card"><summary style="cursor:pointer;font-weight:600">Order of sections</summary><div class="list" data-sortable="trsec" style="margin-top:8px">${TR.S.map((x,i)=>`<div class="li" style="gap:8px;padding-left:6px" data-sid="${i}">${DRAG_H}<input class="in grow" data-trs="${i}" maxlength="40" value="${esc(x.title||'')}" aria-label="Section name"></div>`).join('')}</div></details>`:''}`},
@@ -1982,6 +1987,55 @@ Object.assign(ACT,{
 Object.assign(SORT,{
  tritems:ids=>{if(!TR)return;trGrab();const L0=TR.S[TR.cur].items;TR.S[TR.cur].items=ids.map(i=>L0[+i]);drawSheet()},
  trsec:ids=>{if(!TR)return;trGrab();const cur=TR.S[TR.cur];const L0=TR.S;TR.S=ids.map(i=>L0[+i]);TR.cur=Math.max(0,TR.S.indexOf(cur));drawSheet()}});
+
+/* ---------- training how-to pages: tap an item to read how to do it ---------- */
+// Body format: "## " heading · "- " bullet · "1. " step · "! " important · "| a | b |" table (first row is the header)
+function guideHtml(body){const L0=String(body||'').split('\n');let h='',list=null,tbl=null;
+  const inl=t=>esc(t).replace(/\*\*(.+?)\*\*/g,'<b>$1</b>');
+  const close=()=>{if(list){h+=`</${list}>`;list=null}if(tbl){h+=`<div style="overflow-x:auto"><table class="gtbl"><thead><tr>${tbl[0].map(c=>`<th>${inl(c)}</th>`).join('')}</tr></thead><tbody>${tbl.slice(1).map(r=>`<tr>${r.map(c=>`<td>${inl(c)}</td>`).join('')}</tr>`).join('')}</tbody></table></div>`;tbl=null}};
+  for(const raw of L0){const l=raw.trim();
+    if(/^\|.*\|$/.test(l)){if(list){h+=`</${list}>`;list=null}(tbl=tbl||[]).push(l.slice(1,-1).split('|').map(c=>c.trim()));continue}
+    if(tbl)close();
+    if(l.startsWith('- ')){if(list!=='ul'){close();h+='<ul class="gl">';list='ul'}h+=`<li>${inl(l.slice(2))}</li>`;continue}
+    if(/^\d+\.\s/.test(l)){if(list!=='ol'){close();h+='<ol class="gl">';list='ol'}h+=`<li>${inl(l.replace(/^\d+\.\s/,''))}</li>`;continue}
+    close();if(!l)continue;
+    if(l.startsWith('## '))h+=`<h4 class="gh">${inl(l.slice(3))}</h4>`;else if(l.startsWith('! '))h+=`<div class="gwarn">⚠️ ${inl(l.slice(2))}</div>`;else h+=`<p>${inl(l)}</p>`}
+  close();return h}
+const guideItems=()=>D.trainCfg.sections.flatMap((sec,si)=>(sec.items||[]).map(it=>({sec,it,si})));
+function guideSheet(secId,itemId,emp){openSheet({live:true,title:()=>{const g=guideItems().find(x=>x.sec.id===secId&&x.it.id===itemId);return g?esc(g.it.name):'How-to'},body:()=>{const all=guideItems();const i=all.findIndex(x=>x.sec.id===secId&&x.it.id===itemId);const g=all[i];if(!g)return'<div class="empty">This item was removed.</div>';
+   const k=secId+'__'+itemId;const v=emp?tStat(emp,k):null;const mgr=mode()==='mgr';const done=g.sec.doneLabel||'Fluent';
+   return `<div class="row wrapr" style="gap:6px"><span class="chip" style="background:${GC[g.si%GC.length]};color:#fff">${esc(g.sec.title)}</span>${g.sec.hours?`<span class="small muted">${g.sec.hours} h section</span>`:''}</div>
+   ${g.it.check?`<div class="card" style="border-left:4px solid var(--ok)"><div class="eyebrow">You're ${esc(done.toLowerCase())} when</div><div>${esc(g.it.check)}</div></div>`:''}
+   <div class="card guide">${g.it.body?guideHtml(g.it.body):'<p class="muted">No how-to written yet.'+(isMgr?' Add one in Team → Training → Edit checklist.':'')+'</p>'}</div>
+   ${(g.it.photos||[]).length?`<div class="grid-ph">${g.it.photos.map(pid=>`<img src="${BLOB}${esc(pid)}" alt="${esc(g.it.name)}" data-act="viewPh" data-pid="${esc(pid)}" data-cap="${esc(g.it.name)}" style="cursor:zoom-in">`).join('')}</div>`:''}
+   ${emp?`<div class="card row wrapr"><div class="grow"><div class="eyebrow">${esc(empName(emp))}</div><div class="t">${v===2?esc(done):v===1?'Shown':'Not started'}</div></div>${mgr?`<button class="btn sm" data-act="guideSet" data-emp="${emp}" data-k="${k}" data-v="1">Shown</button><button class="btn sm pri" data-act="guideSet" data-emp="${emp}" data-k="${k}" data-v="2">${esc(done)}</button>`:v<2?`<button class="btn sm ${v?'':'pri'}" data-act="trainSelf" data-emp="${emp}" data-k="${k}">${v?'Undo shown':"I've been shown this"}</button>`:''}</div>`:''}
+   <div class="g2">${i>0?`<button class="btn" data-act="guideGo" data-s="${all[i-1].sec.id}" data-i="${all[i-1].it.id}" data-emp="${emp||''}">${ic('left')} ${esc(all[i-1].it.name)}</button>`:'<span></span>'}${i<all.length-1?`<button class="btn" data-act="guideGo" data-s="${all[i+1].sec.id}" data-i="${all[i+1].it.id}" data-emp="${emp||''}" style="justify-content:flex-end">${esc(all[i+1].it.name)} ${ic('chev')}</button>`:'<span></span>'}</div>`}})}
+// Search box: every staff member can look up any how-to (Files tab).
+function howtoCard(){const all=guideItems().filter(x=>x.it.body);if(!all.length)return'';const q=(UI.howQ||'').trim().toLowerCase();
+  const hits=q?all.filter(x=>(x.it.name+' '+x.sec.title+' '+x.it.body).toLowerCase().includes(q)):[];
+  return `<div class="card stack"><h3>How-to</h3><input class="in" id="how_q" type="search" placeholder="Search: steamer, boba, sweetness, refund…" value="${esc(UI.howQ||'')}" autocomplete="off">
+   ${q?(hits.length?`<div class="list">${hits.slice(0,12).map(x=>`<div class="li tap" data-act="guideGo" data-s="${x.sec.id}" data-i="${x.it.id}" tabindex="0" style="padding-inline:0"><div class="grow"><div class="t">${esc(x.it.name)}</div><div class="small muted">${esc(x.sec.title)}</div></div>${ic('chev')}</div>`).join('')}</div>`:'<div class="small muted">Nothing found.</div>')
+    :`<div class="chips">${D.trainCfg.sections.map((sec,si)=>`<button data-act="howSec" data-s="${sec.id}" class="${UI.howSec===sec.id?'on':''}"><span>${(sec.items||[]).length} topics</span><b style="font-size:13px">${esc(sec.title)}</b></button>`).join('')}</div>
+     ${UI.howSec?`<div class="list">${(D.trainCfg.sections.find(x=>x.id===UI.howSec)?.items||[]).map(it=>`<div class="li tap" data-act="guideGo" data-s="${UI.howSec}" data-i="${it.id}" tabindex="0" style="padding-inline:0"><div class="grow t">${esc(it.name)}</div>${ic('chev')}</div>`).join('')}</div>`:''}`}</div>`}
+// Editor: how-to text, "done when", photos for one item.
+function itemGuideEdit(i){trGrab();const back=SH;const sec=TR.S[TR.cur];const it=sec.items[i];it.photos=it.photos||[];TR.gi=i;
+  openSheet({title:()=>`How-to · ${esc(it.name||'Item')}`,body:()=>`<label class="f">You're done when (what the trainer checks)<input class="in" id="tg_check" maxlength="200" value="${esc(it.check||'')}" placeholder="e.g. Whisks on their own with no clumps"></label>
+   <label class="f">How to do it<textarea class="in" id="tg_body" rows="14" style="font-family:inherit">${esc(it.body||'')}</textarea></label>
+   <div class="tiny muted">Start a line with <b>- </b> for a bullet, <b>1. </b> for a step, <b>## </b> for a heading, <b>! </b> for an important note. Tables: <b>| Shots | Matcha |</b> one row per line, first row is the header.</div>
+   <div class="eyebrow">Photos</div><div class="row wrapr">${it.photos.map((pid,j)=>`<div style="position:relative"><img src="${BLOB}${esc(pid)}" alt="" style="width:84px;height:84px;object-fit:cover;border-radius:10px"><button class="btn sm" style="position:absolute;top:2px;right:2px;padding:2px 6px" data-act="tgPhDel" data-j="${j}" aria-label="Remove photo">${ic('x')}</button></div>`).join('')}<label class="btn" style="cursor:pointer">${ic('cam')} Add photo<input type="file" accept="image/*" multiple data-up="tguide" hidden></label></div>
+   <div class="card guide"><div class="eyebrow">Preview</div><div id="tg_prev">${guideHtml(it.body)}</div></div>`,
+   foot:()=>`<button class="btn pri block" data-act="tgDone">Done</button>`,mount:()=>{const ta=$('#tg_body');ta&&ta.addEventListener('input',()=>{$('#tg_prev').innerHTML=guideHtml(ta.value)})}});SH.back=back}
+function tgGrab(){if(!TR||TR.gi==null)return;const it=TR.S[TR.cur].items[TR.gi];if(!it)return;const b=$('#tg_body');if(b)it.body=b.value;const c=$('#tg_check');if(c)it.check=c.value.trim()}
+Object.assign(ACT,{
+ guideGo:d=>guideSheet(d.s,d.i,d.emp||(mode()==='emp'?actor():null)),
+ guideSet:async d=>{const t=D.training[d.emp]||{};const st={...(t.status||{}),[d.k]:+d.v};const body={...t,status:st,statusAt:{...(t.statusAt||{}),[d.k]:new Date().toISOString()}};D.training[d.emp]=body;drawSheet();render();await W(A.db.doc('training/'+d.emp).set(body))},
+ howSec:d=>{UI.howSec=UI.howSec===d.s?null:d.s;render()},
+ trGuide:d=>itemGuideEdit(+d.i),
+ tgDone:()=>{tgGrab();const b=SH?.back;TR.gi=null;if(b){SH=b;drawSheet()}},
+ tgPhDel:d=>{tgGrab();TR.S[TR.cur].items[TR.gi].photos.splice(+d.j,1);drawSheet()},
+ trImport:()=>{const inp=document.createElement('input');inp.type='file';inp.accept='.json,application/json';inp.onchange=async()=>{try{const j=JSON.parse(await inp.files[0].text());const S=j.sections||j;if(!Array.isArray(S)||!S.every(x=>x.title&&Array.isArray(x.items)))throw 0;
+   trGrab();if(TR.S.length&&!confirm(`Replace the current ${TR.S.length} sections with the ${S.length} sections in this file? Nothing is saved until you tap Save checklist.`))return;TR.S=S.map(x=>({...x,id:x.id||slug(x.title)}));TR.cur=0;drawSheet();toast(`Loaded ${S.length} sections. Check them, then Save.`)}catch(e){toast("That file isn't a training checklist")}};inp.click()},
+});
 
 Object.assign(SORT,{
   fixed:ids=>ACT.fixedOrder(ids),
