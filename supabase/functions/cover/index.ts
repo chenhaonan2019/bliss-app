@@ -304,6 +304,26 @@ async function respondAs(org: string, cid: string, emp: string, via: string) {
   return r;
 }
 
+// Schedule review: tell owners a week is waiting; tell the store's managers it was approved or needs changes.
+async function notifySched(org: string, role: string, b: Json) {
+  const ctx = await orgCtx(org); const loc = String(b.loc || ""), ws = String(b.ws || "");
+  const week = `week of ${MONTHS[parseYmd(ws).getUTCMonth()]} ${parseYmd(ws).getUTCDate()}`; const where = ctx.locName(loc);
+  const link = `${(env("APP_URL") || "").replace(/\/$/, "")}/`; const note = b.note ? ` “${String(b.note).slice(0, 200)}”` : "";
+  const owners = ctx.members.filter((m) => m.role === "owner");
+  const mgrs = managersFor(ctx, loc);
+  let users: string[] = [], emails: string[] = [], title = "", text = "";
+  if (b.event === "submitted") { users = owners.map((m) => m.user_id); emails = owners.map((m) => m.email); title = "Schedule ready for your review"; text = `${where}, ${week}.${note}`; }
+  else if ((b.event === "approved" || b.event === "changes") && role === "owner") {
+    users = mgrs.map((e) => ctx.userOfEmp[e.id]); emails = mgrs.map((e) => e.email);
+    title = b.event === "approved" ? "Schedule approved" : "Owner asked for schedule changes";
+    text = b.event === "approved" ? `${where}, ${week} is published. Staff can see it now.` : `${where}, ${week}.${note}`;
+  } else return { skipped: true };
+  users = [...new Set(users.filter(Boolean))]; emails = [...new Set(emails.filter(Boolean))];
+  if (ctx.cfg.push) await sendPush(users, title, text, link);
+  if (ctx.cfg.email) for (const e of emails) await sendEmail(e, `BLISS: ${title}`, `${text}\n\n${link}`);
+  return { ok: true, to: users.length };
+}
+
 /* ───────────────────────── HTTP ───────────────────────── */
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -364,6 +384,7 @@ async function handle(req: Request): Promise<Response> {
   try {
     if (body.action === "open") return json(await notifyOpen(org, String(body.cid)));
     if (body.action === "responded" || body.action === "assigned") return json(await notifyChange(org, String(body.cid)));
+    if (body.action === "sched") return json(await notifySched(org, mem.role, body));
     if (body.action === "test") {
       if (mem.role === "staff") return json({ error: "forbidden" }, 403);
       const to = String(body.to || ""), ch = body.channel;

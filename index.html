@@ -400,7 +400,7 @@ function taskState(date,type,loc){
   return{st,label,filled,total,doc,deadline:dl};
 }
 const stChip=s=>({ontime:'ok',late:'warn',missed:'bad',progress:'info',todo:''}[s]||'');
-function shiftsOn(date,emp){return Object.values(D.shifts).filter(s=>s.date===date&&(emp?s.empId===emp:locOf(s.empId)===curLoc())).sort((a,b)=>toMin(a.start)-toMin(b.start))}
+function shiftsOn(date,emp){return Object.values(D.shifts).filter(s=>s.date===date&&shiftVisible(s)&&(emp?s.empId===emp:locOf(s.empId)===curLoc())).sort((a,b)=>toMin(a.start)-toMin(b.start))}
 const shiftHrs=s=>{let m=toMin(s.end)-toMin(s.start);if(m<0)m+=1440;return m/60};
 const openPunch=emp=>Object.values(D.punches).find(p=>p.empId===emp&&!p.out);
 const punchHrs=p=>p.out?Math.max(0,(new Date(p.out)-new Date(p.in))/36e5):0;
@@ -542,6 +542,7 @@ function attention(){const a=[];const t=bizDate();if(isOwner&&UI.pv!=='mgr'&&UI.
   if(t>availDue(t)){const nw=nextWk(t);emps().forEach(e=>{if(!D.avail[e.id]?.weeks?.[nw])a.push({k:'availMiss',e:e.id})})}
   Object.keys(D.pending).forEach(p=>{if(!D.links[p])a.push({k:'link',p})});
   Object.values(D.punches).forEach(p=>{if(!p.out&&p.date<t&&locOf(p.empId)===curLoc())a.push({k:'punch',p})});
+  a.unshift(...pubAttention());
   return a}
 
 /* ---------- image upload ---------- */
@@ -563,7 +564,7 @@ function vPick(){const es=emps().sort((a,b)=>a.name.localeCompare(b.name));
 /* ---------- employee views ---------- */
 function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op=openPunch(me);
   const todayP=Object.values(D.punches).filter(p=>p.empId===me&&p.date===d);
-  const next=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>d).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start))[0];
+  const next=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>d&&shiftVisible(s)).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start))[0];
   const cnt=C()[d];const pend=ORD().filter(o=>o.status==='ordered').sort((a,b)=>(a.expected||'').localeCompare(b.expected||''));const dueD=pend.filter(o=>!o.expected||o.expected<=d);const deliveries=pend.filter(o=>o.expected&&o.expected>d);
   return `<div class="stack">
   <div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})}</div><h2>${L('Hi','你好')}, ${esc(empName(me).split(' ')[0])}</h2></div>
@@ -588,7 +589,7 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
   ${deliveries.length?`<h3>Upcoming deliveries</h3><div class="card flush list">${deliveries.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">${esc(o.store||'')} · ${(o.lines||[]).length} ${L('items','项')}</div><div class="small muted">${L('Expected','预计')} ${o.expected?fmtD(o.expected):'—'}${o.window?' · '+esc(o.window):''}</div></div>${chip('info','Upcoming')}</div>`).join('')}</div>`:''}
   ${next?`<div class="card row">${ic('cal')}<div class="grow"><div class="small muted">${L('Next shift','下一班')}</div><div class="t">${fmtD(next.date)} · ${fmtT(next.start)} – ${fmtT(next.end)}</div></div></div>`:''}
   </div>`}
-function vEShift(){const me=actor(),d=today();const up=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=d).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start));
+function vEShift(){const me=actor(),d=today();const up=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=d&&shiftVisible(s)).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start));
   const ws=weekStart(d),we=addDays(ws,6);const wk=Object.values(D.punches).filter(p=>p.empId===me&&p.date>=ws&&p.date<=we);const hrs=wk.reduce((s,p)=>s+punchHrs(p),0);
   const a=D.avail[me];
   return `<div class="stack"><div class="row"><h2 class="grow">${L('My shifts','我的排班')}</h2>${A.downloads&&up.length?`<button class="btn sm" data-act="ics">${ic('dl')} ${L('Add to calendar','加入日历')}</button>`:''}</div>
@@ -638,7 +639,7 @@ function trainBoard(emp,editable){const cfg=D.trainCfg,tp=D.training[emp]||{};co
   </div>`}
 
 /* ---------- manager views ---------- */
-function attnList(att){att=att.filter(x=>x.k!=='review');return att.length?`<h3>${L('Needs your attention','需要处理')}</h3><div class="card flush list">${att.slice(0,12).map(x=>{
+function attnList(att){att=att.filter(x=>x.k!=='review');return att.length?`<h3>${L('Needs your attention','需要处理')}</h3><div class="card flush list">${att.slice(0,12).map(x=>{if(x.html)return x.html;
     if(x.k==='revIssue')return `<div class="li tap" data-act="issueView" data-d="${x.d}" data-type="${x.type}" data-l="${x.loc}">${chip('bad','Issue found')}<div class="grow"><div>${esc(taskName(x.type))} · ${fmtD(x.d,{month:'short',day:'numeric'})}${LOCS().length>1?' · '+esc(locName(x.loc)):''}</div>${x.doc.review.note?`<div class="small muted">“${esc(x.doc.review.note)}”${whoName(x.doc.review,x.doc)?' · '+esc(whoName(x.doc.review,x.doc)):''}</div>`:''}</div>${ic('chev')}</div>`;
 if(x.k==='review')return `<div class="li tap" data-act="goPhotos" data-d="${x.d}">${chip('info',L('Review','待检查'))}<div class="grow">${esc(taskName(x.type))} · ${fmtD(x.d,{month:'short',day:'numeric'})}</div>${ic('chev')}</div>`;
     if(x.k==='late')return `<div class="li tap" data-act="orderView" data-id="${x.o.id}">${chip('warn','Delivery')}<div class="grow">${esc(x.o.store)} · due ${fmtD(x.o.expected,{month:'short',day:'numeric'})}, not received yet</div>${ic('chev')}</div>`;
@@ -733,6 +734,7 @@ function schedPlan(){const ws=UI.week||weekStart(today());const day=UI.day&&UI.d
   const days=[...Array(7)].map((_,i)=>addDays(ws,i));const list=shiftsOn(day);
   const ems=emps();const wkH={};Object.values(D.shifts).forEach(s=>{if(s.date>=ws&&s.date<=addDays(ws,6))wkH[s.empId]=(wkH[s.empId]||0)+shiftHrs(s)});
   return `<div class="row"><button class="btn sm" data-act="wk" data-n="-7" aria-label="${L('Previous week','上一周')}">${ic('left')}</button><div class="grow" style="text-align:center;font-weight:700">${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(addDays(ws,6),{month:'short',day:'numeric'})}</div><button class="btn sm" data-act="wk" data-n="7" aria-label="${L('Next week','下一周')}">${ic('chev')}</button></div>
+  ${pubBar(ws)}
   <div class="chips">${days.map(x=>{const n=shiftsOn(x).length;return `<button class="${x===day?'on':''}" data-act="day" data-d="${x}"><span>${WD()[parseYmd(x).getDay()]} ${parseYmd(x).getDate()}</span><b>${n||'·'}</b>${noBackupCount([x])?'<i class="nobk" title="A shift has no backup"></i>':''}</button>`}).join('')}</div>
   ${(()=>{const n=noBackupCount(days);return n?`<div class="hint warn">⚠ ${n} shift${n===1?' has':'s have'} no backup this week: no one else is free then. Ask someone to open up their availability, or move the shift.</div>`:days.some(x=>shiftsOn(x).length)?`<div class="small muted">✓ Every upcoming shift this week has a backup person.</div>`:''})()}
   <div class="card flush list"><div class="li" style="background:var(--sunk);min-height:0;padding-block:10px"><span class="eyebrow grow">${fmtD(day,{weekday:'long',month:'short',day:'numeric'})}</span><button class="btn sm pri" data-act="shiftEdit" data-d="${day}">${ic('plus')} ${L('Add shift','加班次')}</button></div>
@@ -824,6 +826,7 @@ function teamSet(){const s=D.settings;
   return `${isOwner?`<div class="card stack"><h3>Preview other views</h3><p class="small muted">See the app the way a store manager or a staff member sees it. Nothing changes for anyone else. Tap "Exit preview" to come back.</p><div class="g2"><button class="btn" data-act="pvStart" data-k="mgr">${ic('users')} Preview as manager</button><button class="btn" data-act="pvStart" data-k="emp">${ic('clock')} Preview as staff</button></div></div>`:''}
   ${accountCard()}
   ${isOwner&&!UI.pv?businessCard():''}
+  ${pubSetCard()}
   ${coverSetCard()}
   <div class="card stack"><h3>Time rules</h3>
    <div class="row wrapr"><span class="small muted grow">Task names, items and due times (prep, closing, deep cleaning and your own tasks) are set in Tasks.</span><button class="btn sm" data-act="slotEdit">${ic('list')} Edit tasks & times</button></div>
@@ -1689,7 +1692,7 @@ function exportPay(ps,pl){const R=payroll(ps,pl);const TRX=Object.values(R).some
   Object.values(R).forEach(r=>lines.push([r.e.name,r.type,fmtH(r.hrs),fmtH(r.ot),fmtH(r.pH),r.W.pay,r.payPay.toFixed(2),fmtH(r.cH),r.W.cash,r.cashPay.toFixed(2),(Math.round(r.pay*100)/100).toFixed(2),fmtH(r.trH||0),r.trH?r.TR.rate:'',(r.trPay||0).toFixed(2),r.late,r.lateMin,fmtH(r.sched),r.tasks,r.onT,r.open]));
   lines.push([]);lines.push(['Employee','Date','In','Out','Hours','Late min']);Object.values(R).forEach(r=>r.P.forEach(p=>lines.push([r.e.name,p.date,p.in?hm(new Date(p.in)):'',p.out?hm(new Date(p.out)):'',fmtH(punchHrs(p)),p.late||0])));
   save(`BLISS-payroll-${ps}.csv`,lines.map(l=>l.map(csvCell).join(',')).join('\n'))}
-function exportIcs(){const me=actor();const up=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=today());const f=(date,t)=>date.replace(/-/g,'')+'T'+t.replace(':','')+'00';
+function exportIcs(){const me=actor();const up=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=today()&&shiftVisible(s));const f=(date,t)=>date.replace(/-/g,'')+'T'+t.replace(':','')+'00';
   const ev=up.map(s=>{let ed=s.date;if(toMin(s.end)<toMin(s.start))ed=addDays(s.date,1);return['BEGIN:VEVENT',`UID:bliss-${s.id}@bliss`,`DTSTAMP:${new Date().toISOString().replace(/[-:]/g,'').slice(0,15)}Z`,`DTSTART:${f(s.date,s.start)}`,`DTEND:${f(ed,s.end)}`,'SUMMARY:BLISS shift','BEGIN:VALARM','TRIGGER:-PT60M','ACTION:DISPLAY','DESCRIPTION:BLISS shift in 1 hour','END:VALARM','END:VEVENT'].join('\r\n')});
   save('BLISS-shifts.ics',['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//BLISS//Shifts//EN',...ev,'END:VCALENDAR'].join('\r\n'))}
 
@@ -1712,12 +1715,14 @@ async function boot(){
   subscribe(db.collection('shifts').where('date','>=',from),s=>{D.shifts=mapDocs(s)});
   subscribe(db.collection('punches').where('date','>=',from),s=>{D.punches=mapDocs(s)});
   subscribe(db.collection('availability'),s=>{D.avail=mapDocs(s)});
+  let autoPub=false;subscribe(db.collection('schedpub'),s=>{const d=s.docs.find(x=>x.id==='state');D.schedPub=d?d.data():null;
+    if(!d&&isOwner&&!autoPub){autoPub=true;setTimeout(()=>{if(!D.schedPub)A.db.doc('schedpub/state').set({on:true,from:pubFrom(),weeks:{}}).catch(e=>console.warn(e))},2500)}});
   subscribe(db.collection('cover').where('date','>=',addDays(today(),-14)),s=>{D.cover=mapDocs(s)});
   subscribe(db.collection('training'),s=>{D.training=mapDocs(s)});
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
@@ -1762,7 +1767,7 @@ function cantSheet(sid){const s=D.shifts[sid];if(!s)return;const forOther=mode()
 
 function coverStaffCard(me){if(!me)return'';const loc=locOf(me);
   const mine=covers().filter(c=>c.empId===me&&cvStart(c)>Date.now()-36e5&&['open','filled'].includes(c.status)&&c.date>=addDays(today(),-1));
-  const ask=coverOpen().filter(c=>c.empId!==me&&c.loc===loc&&(c.kind==='swap'?c.swapTo===me:((c.elig||[]).includes(me)||!cvClash(me,c))));
+  const ask=coverOpen().filter(c=>shiftVisible(c)&&c.empId!==me&&c.loc===loc&&(c.kind==='swap'?c.swapTo===me:((c.elig||[]).includes(me)||!cvClash(me,c))));
   if(!ask.length&&!mine.length)return'';
   return `${ask.length?`<div class="card stack" style="border-left:4px solid var(--warn)"><div class="row"><span style="font-size:20px">🙋</span><h3 class="grow">${ask.length===1?'A shift needs cover':ask.length+' shifts need cover'}</h3></div>
    <div class="list">${ask.map(c=>{const vol=c.volunteers?.[me];const urg=coverUrgent(c)&&c.kind!=='swap';return `<div class="li" style="padding-inline:0;align-items:flex-start"><div class="grow tap" data-act="cvOpen" data-id="${esc(c.id)}"><div class="t">${cvWhen(c)}</div><div class="small muted">${c.kind==='swap'?`${esc(first(c.empId))} asked you to take this shift`:`${esc(first(c.empId))} can't make it`}${urg?' · first to accept gets it':''}</div></div>
@@ -1846,8 +1851,76 @@ function backupCands(s){const loc=s.loc||locOf(s.empId);const ws=weekStart(s.dat
 function backupOf(s){const c=backupCands(s);if(s.backup&&c.includes(s.backup))return s.backup;return c[0]||null}
 const backupLine=s=>{const b=backupOf(s);return b?`<span class="tiny muted">Backup: ${esc(first(b))}${s.backup===b?'':' (auto)'}</span>`:`<span class="tiny" style="color:var(--bad);font-weight:600">⚠ No backup: no one else is free then</span>`};
 function noBackupCount(days){return days.reduce((n,d)=>n+shiftsOn(d).filter(s=>atTime(s.date,s.start).getTime()>Date.now()&&!backupOf(s)).length,0)}
-function backupDuty(me){const up=Object.values(D.shifts).filter(s=>s.empId!==me&&s.date>=today()&&s.date<=addDays(today(),13)&&atTime(s.date,s.start).getTime()>Date.now()&&backupOf(s)===me).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start));
+function backupDuty(me){const up=Object.values(D.shifts).filter(s=>shiftVisible(s)&&s.empId!==me&&s.date>=today()&&s.date<=addDays(today(),13)&&atTime(s.date,s.start).getTime()>Date.now()&&backupOf(s)===me).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start));
   return up.length?`<div class="card stack"><h3>You're the backup</h3><p class="small muted">You're free at these times, so if someone can't come you'll be asked first.</p><div class="list">${up.slice(0,6).map(s=>`<div class="li" style="padding-inline:0"><div class="grow"><div class="t">${fmtD(s.date)} · ${fmtT(s.start)}–${fmtT(s.end)}</div><div class="small muted">for ${esc(first(s.empId))}</div></div></div>`).join('')}</div></div>`:''}
+
+/* ---------- schedule review: managers send a week to the owner; staff see it once the owner approves ---------- */
+const ownerAct=()=>isOwner&&!UI.pv;
+const PUB=()=>D.schedPub||{};
+const pubOn=()=>PUB().on===true;
+const pubKey=(loc,ws)=>`${loc}_${ws}`;
+const pubShifts=(loc,ws)=>{const we=addDays(ws,6);return Object.values(D.shifts).filter(s=>(s.loc||locOf(s.empId))===loc&&s.date>=ws&&s.date<=we)};
+const shSnap=s=>({id:s.id,e:s.empId,d:s.date,s:s.start,t:s.end});
+function weekState(loc,ws){if(!pubOn()||ws<(PUB().from||'9999'))return'live';const k=pubKey(loc,ws);const p=PUB().weeks?.[k];const s=D.schedSub?.[k];
+  if(p?.status==='published')return'published';if(s?.at&&(!p?.at||s.at>p.at))return'submitted';if(p?.status==='changes')return'changes';return'draft'}
+// Staff only see weeks that are live or approved.
+const shiftVisible=s=>mode()!=='emp'||['live','published'].includes(weekState(s.loc||locOf(s.empId),weekStart(s.date)));
+function pubDiff(loc,ws){const p=PUB().weeks?.[pubKey(loc,ws)];if(p?.status!=='published'||!p.snap)return[];const old=Object.fromEntries(p.snap.map(x=>[x.id,x]));const now=pubShifts(loc,ws).map(shSnap);const cur=Object.fromEntries(now.map(x=>[x.id,x]));const out=[];
+  now.forEach(x=>{const o=old[x.id];if(!o)out.push({k:'add',n:x});else if(o.e!==x.e||o.d!==x.d||o.s!==x.s||o.t!==x.t)out.push({k:'chg',o,n:x})});
+  p.snap.forEach(o=>{if(!cur[o.id])out.push({k:'del',o})});return out.sort((a,b)=>((a.n||a.o).d+(a.n||a.o).s).localeCompare((b.n||b.o).d+(b.n||b.o).s))}
+const PUBST={live:['','Published'],draft:['','Draft · staff can\'t see it yet'],submitted:['warn','Waiting for owner review'],changes:['bad','Owner asked for changes'],published:['ok','Approved · staff can see it']};
+function pubWeeks(){const ws=weekStart(today());return [0,7,14,21].map(n=>addDays(ws,n))}
+function pubAttention(){const a=[];if(!pubOn())return a;const locs=ownerAct()?LOCS().map(l=>l.id):[curLoc()];
+  for(const loc of locs)for(const ws of pubWeeks()){const st=weekState(loc,ws);
+    if(ownerAct()&&st==='submitted')a.push({k:'pub',loc,ws,html:pubRow(loc,ws,chip('warn','Schedule'),`${esc(locName(loc))} · week of ${fmtD(ws,{month:'short',day:'numeric'})} is waiting for your review`)});
+    if(ownerAct()&&st==='published'&&addDays(ws,6)>=today()){const n=pubDiff(loc,ws).length;if(n)a.push({k:'pub',loc,ws,html:pubRow(loc,ws,chip('info','Changed'),`${esc(locName(loc))} · week of ${fmtD(ws,{month:'short',day:'numeric'})}: ${n} change${n>1?'s':''} since you approved`)})}
+    if(!ownerAct()&&st==='changes')a.push({k:'pub',loc,ws,html:pubRow(loc,ws,chip('bad','Schedule'),`Owner asked for changes · week of ${fmtD(ws,{month:'short',day:'numeric'})}${PUB().weeks?.[pubKey(loc,ws)]?.note?`<div class="small muted">“${esc(PUB().weeks[pubKey(loc,ws)].note)}”</div>`:''}`)})}
+  return a}
+const pubRow=(loc,ws,c,t)=>`<div class="li tap" data-act="pubOpen" data-l="${esc(loc)}" data-ws="${ws}">${c}<div class="grow">${t}</div>${ic('chev')}</div>`;
+
+// Bar at the top of Schedule for the week being planned.
+function pubBar(ws){if(!pubOn())return ownerAct()?`<div class="small muted row wrapr"><span class="grow">Owner review is off: schedules go to staff right away.</span><button class="btn sm" data-act="pubToggle" data-on="1">Turn on review</button></div>`:'';
+  const loc=curLoc();const st=weekState(loc,ws);if(st==='live')return'';const [k,t]=PUBST[st];const n=st==='published'?pubDiff(loc,ws).length:0;const sub=D.schedSub?.[pubKey(loc,ws)];const p=PUB().weeks?.[pubKey(loc,ws)];
+  const btn=ownerAct()?(st==='published'?(n?`<button class="btn sm" data-act="pubOpen" data-l="${loc}" data-ws="${ws}">See ${n} change${n>1?'s':''}</button>`:''):`<button class="btn sm pri" data-act="pubOpen" data-l="${loc}" data-ws="${ws}">Review & publish</button>`)
+    :(st==='draft'||st==='changes'?`<button class="btn sm pri" data-act="pubOpen" data-l="${loc}" data-ws="${ws}">Send to owner</button>`:`<button class="btn sm" data-act="pubOpen" data-l="${loc}" data-ws="${ws}">Details</button>`);
+  return `<div class="card row wrapr" style="border-left:4px solid var(--${k||'line'})"><div class="grow"><div class="t">${chip(k,t)}</div><div class="small muted" style="margin-top:4px">${st==='submitted'?`Sent ${sub?.byName?'by '+esc(sub.byName)+' ':''}${fmtDT(sub?.at)}`:st==='published'?`Approved ${p?.byName?'by '+esc(p.byName)+' ':''}${fmtDT(p?.at)}${n?` · ${n} change${n>1?'s':''} since`:''}`:st==='changes'&&p?.note?`“${esc(p.note)}”`:'Staff will see this week after the owner approves it.'}</div></div>${btn}</div>`}
+
+function pubSheet(loc,ws){openSheet({live:true,title:()=>`${esc(locName(loc))} · week of ${fmtD(ws,{month:'short',day:'numeric'})}`,body:()=>{const st=weekState(loc,ws);const sh=pubShifts(loc,ws).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start));const [k,t]=PUBST[st];const sub=D.schedSub?.[pubKey(loc,ws)];const p=PUB().weeks?.[pubKey(loc,ws)];
+  const hrs={};sh.forEach(s=>{hrs[s.empId]=(hrs[s.empId]||0)+shiftHrs(s)});const tot=Object.values(hrs).reduce((a,b)=>a+b,0);
+  const cost=seePay()?Object.entries(hrs).reduce((a,[e,h])=>{const W_=wageOf(e);return a+h*(W_.pay||W_.cash||trainOf(e).rate||0)},0):null;
+  const future=sh.filter(s=>atTime(s.date,s.start).getTime()>Date.now());const nobk=future.filter(s=>!backupOf(s));const unav=sh.filter(s=>['no','off'].includes(availFor(s.empId,s.date,s.start,s.end)));const dbl=sh.filter(s=>sh.some(x=>x!==s&&x.empId===s.empId&&ovl(x,s)));
+  const max=D.schedCfg?.maxHrs||{};const over=Object.entries(hrs).filter(([e,h])=>num(max[e])&&h>num(max[e]));
+  const diff=st==='published'?pubDiff(loc,ws):[];const line=x=>`${esc(empName(x.e))} · ${fmtD(x.d,{weekday:'short',month:'numeric',day:'numeric'})} ${fmtT(x.s)}–${fmtT(x.t)}`;
+  return `<div class="card stack"><div>${chip(k,t)}</div>${sub?.at?`<div class="small muted">Sent by ${esc(sub.byName||'manager')} · ${fmtDT(sub.at)}${sub.note?`<br>“${esc(sub.note)}”`:''}</div>`:''}${p?.at?`<div class="small muted">${p.status==='published'?'Approved':'Changes asked'} by ${esc(p.byName||'owner')} · ${fmtDT(p.at)}${p.status==='changes'&&p.note?`<br>“${esc(p.note)}”`:''}</div>`:''}</div>
+   ${diff.length?`<div class="card stack" style="border-left:4px solid var(--info)"><h3>Changed since you approved</h3>${diff.map(x=>`<div class="small">${x.k==='add'?`<b style="color:var(--ok)">Added</b> ${line(x.n)}`:x.k==='del'?`<b style="color:var(--bad)">Removed</b> ${line(x.o)}`:`<b style="color:var(--warn)">Changed</b> ${line(x.o)} → ${x.n.e!==x.o.e?esc(empName(x.n.e))+' · ':''}${fmtD(x.n.d,{weekday:'short'})} ${fmtT(x.n.s)}–${fmtT(x.n.t)}${D.shifts[x.n.id]?.coverId?' <span class="muted">(shift cover)</span>':''}`}</div>`).join('')}${ownerAct()?`<button class="btn" data-act="pubAck" data-l="${loc}" data-ws="${ws}">${ic('check')} Got it</button>`:''}</div>`:''}
+   <div class="stats" style="grid-template-columns:repeat(${cost!=null?3:2},1fr)"><div class="stat"><b>${sh.length}</b><span>Shifts</span></div><div class="stat"><b>${fmtH(tot)}</b><span>Total hours</span></div>${cost!=null?`<div class="stat"><b>${money(cost)}</b><span>Est. labor</span></div>`:''}</div>
+   ${[[nobk,'bad',x=>`No backup: ${esc(empName(x.empId))} ${fmtD(x.date,{weekday:'short'})} ${fmtT(x.start)}–${fmtT(x.end)}`],[unav,'warn',x=>`Not available then: ${esc(empName(x.empId))} ${fmtD(x.date,{weekday:'short'})} ${fmtT(x.start)}–${fmtT(x.end)}`],[dbl,'bad',x=>`Double-booked: ${esc(empName(x.empId))} ${fmtD(x.date,{weekday:'short'})}`],[over,'warn',([e,h])=>`Over max hours: ${esc(empName(e))} ${fmtH(h)} h (max ${fmtH(num(max[e]))})`]].filter(([l])=>l.length).map(([l,c,f])=>`<div class="hint ${c==='bad'?'warn':''}">${l.slice(0,8).map(f).join('<br>')}${l.length>8?`<br>+${l.length-8} more`:''}</div>`).join('')||(sh.length?'<div class="small" style="color:var(--ok)">✓ No problems found: everyone is available, no double-booking, every shift has a backup.</div>':'')}
+   ${sh.length?schedChart(sh,ws,7,[]):'<div class="empty card">No shifts this week yet.</div>'}
+   <div class="card stack"><h3>Hours per person</h3>${Object.entries(hrs).sort((a,b)=>b[1]-a[1]).map(([e,h])=>`<div class="row">${avatar(e)}<span class="grow">${esc(empName(e))}</span><b>${fmtH(h)} h</b></div>`).join('')||'<div class="small muted">—</div>'}</div>
+   ${ownerAct()&&st!=='published'||(!ownerAct()&&['draft','changes','submitted'].includes(st))?`<label class="f">${ownerAct()?'Note for the manager (needed if you ask for changes)':'Note for the owner (optional)'}<textarea class="in" id="pub_note" rows="2" placeholder="${ownerAct()?'e.g. Too many hours on Monday':'e.g. Bella is off Friday'}"></textarea></label>`:''}`},
+  foot:()=>{const st=weekState(loc,ws);if(ownerAct())return st==='published'?`<button class="btn" data-act="pubUnpub" data-l="${loc}" data-ws="${ws}">Hide from staff</button><button class="btn pri" data-act="closeSheet">Close</button>`:`<button class="btn" data-act="pubChanges" data-l="${loc}" data-ws="${ws}">Ask for changes</button><button class="btn pri" data-act="pubApprove" data-l="${loc}" data-ws="${ws}">${ic('check')} Approve & publish</button>`;
+   return st==='published'?`<button class="btn pri" data-act="closeSheet">Close</button>`:`<button class="btn" data-act="closeSheet">Close</button><button class="btn pri" data-act="pubSubmit" data-l="${loc}" data-ws="${ws}">${st==='submitted'?'Send again':'Send to owner for review'}</button>`}})}
+
+async function pubSave(key,val){const cur=PUB();const weeks={...(cur.weeks||{}),[key]:val};const doc={...cur,weeks};delete doc.id;if(await W(A.db.doc('schedpub/state').set(doc))){D.schedPub={...doc};return true}return false}
+const pubNotify=(event,loc,ws,note)=>window.blissCover?.notifySched?.(event,loc,ws,note).catch(e=>console.warn('sched notify',e));
+Object.assign(ACT,{
+ pubOpen:d=>pubSheet(d.l,d.ws),
+ pubSubmit:async d=>{const note=$('#pub_note')?.value.trim()||'';const k=pubKey(d.l,d.ws);const v={at:new Date().toISOString(),byName:myName(),note};
+   if(await W(A.db.doc('mgr/schedsub').set({...(D.schedSub||{}),[k]:v}))){D.schedSub={...(D.schedSub||{}),[k]:v};toast('Sent to the owner for review');pubNotify('submitted',d.l,d.ws,note);closeSheet()}},
+ pubApprove:async d=>{const v={status:'published',at:new Date().toISOString(),byName:myName(),snap:pubShifts(d.l,d.ws).map(shSnap)};
+   if(await pubSave(pubKey(d.l,d.ws),v)){celebrate('Schedule published','Staff can see this week now.');pubNotify('approved',d.l,d.ws,'');closeSheet()}},
+ pubChanges:async d=>{const note=$('#pub_note')?.value.trim()||'';if(!note){toast('Write a note so the manager knows what to change');$('#pub_note')?.focus();return}
+   if(await pubSave(pubKey(d.l,d.ws),{status:'changes',at:new Date().toISOString(),byName:myName(),note})){toast('Sent back to the manager');pubNotify('changes',d.l,d.ws,note);closeSheet()}},
+ pubAck:async d=>{const k=pubKey(d.l,d.ws);const p=PUB().weeks?.[k];if(await pubSave(k,{...p,snap:pubShifts(d.l,d.ws).map(shSnap),ackAt:new Date().toISOString()})){toast('Marked as seen');closeSheet()}},
+ pubUnpub:async d=>{if(!confirm('Hide this week from staff until you approve it again?'))return;if(await pubSave(pubKey(d.l,d.ws),{status:'draft',at:new Date().toISOString(),byName:myName()})){toast('Hidden from staff');closeSheet()}},
+ pubToggle:async d=>{const on=d.on==='1';const cur=PUB();const doc={...cur,on,from:on?(cur.from&&cur.on?cur.from:pubFrom()):cur.from||pubFrom(),weeks:cur.weeks||{}};delete doc.id;
+   if(on&&!cur.from){/* weeks already planned before turning this on stay visible */}
+   if(await W(A.db.doc('schedpub/state').set(doc))){D.schedPub=doc;toast(on?`Review is on, starting the week of ${fmtD(doc.from,{month:'short',day:'numeric'})}`:'Review is off');render()}},
+});
+function pubSetCard(){if(!ownerAct())return'';const on=pubOn();
+  return `<div class="card stack"><h3>Schedule review</h3><p class="small muted">${on?`Managers send each week to you. Staff only see a week after you approve it. Changes after you approve go live right away, and you get a "Schedule changed" alert. Applies from the week of ${fmtD(PUB().from,{month:'short',day:'numeric'})}.`:'Turn this on to approve each week\'s schedule before staff can see it.'}</p><button class="btn ${on?'':'pri'}" data-act="pubToggle" data-on="${on?'0':'1'}">${on?'Turn off review':'Turn on review'}</button></div>`}
+// First week with nothing scheduled yet (any store), so weeks already planned stay visible to staff.
+function pubFrom(){let ws=nextWk();for(let i=0;i<8;i++){if(!Object.values(D.shifts).some(s=>s.date>=ws&&s.date<=addDays(ws,6)))return ws;ws=addDays(ws,7)}return ws}
 
 Object.assign(SORT,{
   fixed:ids=>ACT.fixedOrder(ids),

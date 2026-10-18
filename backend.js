@@ -186,6 +186,7 @@
       cancel: (cid, by_name) => crpc("cover_cancel", { cid, by_name }),
       notify: (action, cid) => coverFn({ action, cid }),
       test: (channel, to) => coverFn({ action: "test", channel, to }),
+      notifySched: (event, loc, ws, note) => coverFn({ action: "sched", event, loc, ws, note }),
       // Phone notifications ("web push"). On iPhone this needs the app added to the Home Screen first.
       pushSupported: () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
       pushState: async () => {

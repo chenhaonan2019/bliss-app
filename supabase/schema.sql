@@ -63,7 +63,7 @@ $$;
 create or replace function public.write_level(p text) returns int
 language sql stable as $$
   select case
-    when split_part(p, '/', 1) = 'owner' or p = 'mgr/wages' then 4
+    when split_part(p, '/', 1) in ('owner','schedpub') or p = 'mgr/wages' then 4   -- schedpub: only owners publish schedules
     when split_part(p, '/', 1) in ('mgr','config','employees','links','shifts','training','cover') then 3
     when split_part(p, '/', 1) = 'trainreq'
       then case when split_part(p, '/', 2) = auth.uid()::text then 2 else 4 end

@@ -105,3 +105,10 @@ Staff need a phone number in Team → People for texts and calls.
 
 ### Phone notifications on iPhone
 iPhone only allows them for apps added to the Home Screen: Safari → Share → **Add to Home Screen**, open BLISS from the Home Screen, then tap **Turn on notifications** on Today.
+
+## Schedule review (owner approves before staff see it)
+- Managers build the week in Schedule, then tap **Send to owner**. Until the owner approves, staff don't see that week.
+- Owners get a "waiting for your review" item on Today (and a phone notification/email if the `cover` function is set up). The review shows hours, estimated labor cost, and problems (no backup, not available, double-booked, over max hours). **Approve & publish**, or **Ask for changes** with a note.
+- After approval, changes go live right away and the owner sees "N changes since you approved" with the list, until they tap **Got it**.
+- Turn it on or off in Team → Settings → Schedule review. Weeks that already had shifts when it was turned on stay visible.
+- Needs `schema.sql` run again (only owners can publish).
