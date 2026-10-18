@@ -488,13 +488,21 @@ function spotNext(){if(!SQ)return;const x=SQ.list[SQ.i];if(!x){const n=SQ.n;SQ=n
       :doc.checks?.[sl.id]?`<div class="tile has" style="display:grid;place-items:center;text-align:center;padding:10px"><div><div style="font-size:26px;color:var(--ok)">✓</div><b>${esc(sl.name)}</b></div></div>`:`<div class="tile">${esc(sl.name)}<br>missing</div>`}).join('')}</div>
     <label class="f">Note to the manager (optional)<textarea class="in" id="sp_note" placeholder="e.g. this should not have passed, the drain is dirty">${esc(doc.audit?.note||'')}</textarea></label>`}),
    foot:()=>`<button class="btn bad" data-act="spotSave" data-st="disagree">Disagree</button><button class="btn pri" data-act="spotSave" data-st="agree">${ic('check')} Agree${SQ&&SQ.i<SQ.list.length-1?' · next':''}</button>`})}
+function issueSheet(date,type,l){openSheet({title:()=>`Issue found · ${esc(taskName(type))}`,body:()=>withLoc(l,()=>{const doc=photoDoc(date,type)||{};const rv=doc.review||{};const slots=slotsOf(type,date);
+   return `<div class="small muted">${fmtD(date)}${LOCS().length>1?' · '+esc(locName(l)):''}${doc.completedBy?' · done by '+esc(empName(doc.completedBy)):''}</div>
+   <div class="hint warn"><b>Manager review: has issues</b>${rv.by&&D.employees[rv.by]?' · '+esc(empName(rv.by)):''}${rv.at?' · '+fmtDT(rv.at):''}${rv.note?`<br>“${esc(rv.note)}”`:''}</div>
+   <div class="tiles">${slots.map(sl=>{const p=doc.photos?.[sl.id];const fl=doc.flags?.[sl.id];return p?`<div class="tile has" style="cursor:default"><img src="${BLOB}${esc(p.id)}" alt="" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)}" style="cursor:zoom-in"><span class="cap"><b>${esc(sl.name)}</b></span>${fl?`<span class="flag">${chip('bad','Flagged')}</span>`:''}</div>`
+     :doc.checks?.[sl.id]?`<div class="tile has" style="display:grid;place-items:center;text-align:center;padding:10px"><div><div style="font-size:26px;color:var(--ok)">✓</div><b>${esc(sl.name)}</b></div></div>`:`<div class="tile">${esc(sl.name)}<br>missing</div>`}).join('')}</div>`}),
+   foot:()=>`<button class="btn" data-act="goPhotosL" data-d="${date}" data-l="${l}">Open photos</button><button class="btn pri" data-act="issueSeen" data-d="${date}" data-type="${type}" data-l="${l}">${ic('check')} Got it</button>`})}
 function reviewCard(){const q=toReview(),m=missedTasks();if(!q.length&&!m.length)return `<div class="card row" style="gap:12px;border-left:4px solid var(--ok)"><span style="font-size:22px;color:var(--ok)">✓</span><div class="grow"><div class="t">All photo tasks reviewed</div><div class="small muted">Nothing waiting from the last 7 days.</div></div></div>`;
   return `<div class="card stack" style="gap:10px;border:2px solid ${q.length?'var(--brand)':'var(--warn)'}">
    <div class="row" style="gap:12px">${ic('cam')}<div class="grow"><div style="font-weight:700;font-size:17px">Review photos & tasks</div><div class="small muted">${q.length?`${q.length} task${q.length>1?'s':''} waiting for your review`:'Nothing to review'}${m.length?` · ${m.length} not done`:''}</div></div>${q.length?chip('info',String(q.length)):''}</div>
    ${q.length?`<div class="small">${q.slice(0,4).map(x=>`${esc(taskName(x.type))} · ${fmtD(x.d,{weekday:'short',month:'short',day:'numeric'})}${x.st==='late'?' (late)':x.st==='missed'?' (incomplete)':''}`).join('<br>')}${q.length>4?`<br>+ ${q.length-4} more`:''}</div>
     <button class="btn pri big block" data-act="reviewStart">${ic('check')} Start review</button>`:''}
    ${m.length?`<details><summary class="small" style="cursor:pointer;color:var(--warn);font-weight:600">${m.length} task${m.length>1?'s were':' was'} not done at all</summary><div class="small" style="margin-top:6px">${m.map(x=>`${esc(taskName(x.type))} · ${fmtD(x.d,{weekday:'short',month:'short',day:'numeric'})}`).join('<br>')}</div></details>`:''}</div>`}
-function attention(){const a=[];const t=bizDate();
+// Reviews where the manager found a problem, not yet acknowledged by an owner (last 14 days).
+function reviewIssues(){const t=bizDate();const r=[];for(let i=0;i<14;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const doc=photoDoc(d,T.type);if(doc?.review?.status==='issue'&&!doc.review.ownerSeen)r.push({k:'revIssue',d,type:T.type,doc,loc:curLoc()})})}return r}
+function attention(){const a=[];const t=bizDate();if(isOwner&&UI.pv!=='mgr'&&UI.pv!=='emp')a.push(...reviewIssues());
   ORD().forEach(o=>{if(o.status==='issue'&&!o.issueSeen)a.push({k:'order',o});if(o.status==='ordered'&&o.expected&&o.expected<t)a.push({k:'late',o})});
   const seen=+(ls.get('availSeen')||0);Object.entries(D.avail).forEach(([e,v])=>{if(v.updatedAt&&new Date(v.updatedAt).getTime()>seen&&D.employees[e]&&locOf(e)===curLoc())a.push({k:'avail',e})});
   if(t>availDue(t)){const nw=nextWk(t);emps().forEach(e=>{if(!D.avail[e.id]?.weeks?.[nw])a.push({k:'availMiss',e:e.id})})}
@@ -595,6 +603,15 @@ function trainBoard(emp,editable){const cfg=D.trainCfg,tp=D.training[emp]||{};co
   </div>`}
 
 /* ---------- manager views ---------- */
+function attnList(att){att=att.filter(x=>x.k!=='review');return att.length?`<h3>${L('Needs your attention','需要处理')}</h3><div class="card flush list">${att.slice(0,12).map(x=>{
+    if(x.k==='revIssue')return `<div class="li tap" data-act="issueView" data-d="${x.d}" data-type="${x.type}" data-l="${x.loc}">${chip('bad','Issue found')}<div class="grow"><div>${esc(taskName(x.type))} · ${fmtD(x.d,{month:'short',day:'numeric'})}${LOCS().length>1?' · '+esc(locName(x.loc)):''}</div>${x.doc.review.note?`<div class="small muted">“${esc(x.doc.review.note)}”${x.doc.review.by&&D.employees[x.doc.review.by]?' · '+esc(empName(x.doc.review.by)):''}</div>`:''}</div>${ic('chev')}</div>`;
+if(x.k==='review')return `<div class="li tap" data-act="goPhotos" data-d="${x.d}">${chip('info',L('Review','待检查'))}<div class="grow">${esc(taskName(x.type))} · ${fmtD(x.d,{month:'short',day:'numeric'})}</div>${ic('chev')}</div>`;
+    if(x.k==='late')return `<div class="li tap" data-act="orderView" data-id="${x.o.id}">${chip('warn','Delivery')}<div class="grow">${esc(x.o.store)} · due ${fmtD(x.o.expected,{month:'short',day:'numeric'})}, not received yet</div>${ic('chev')}</div>`;
+    if(x.k==='order')return `<div class="li tap" data-act="orderView" data-id="${x.o.id}">${chip('bad',L('Delivery','收货'))}<div class="grow">${esc(x.o.store)} · ${x.o.diffs?`${x.o.diffs} item${x.o.diffs>1?'s':''} counted differently than ordered`:'problem reported'}</div>${ic('chev')}</div>`;
+    if(x.k==='avail')return `<div class="li tap" data-act="goAvail">${chip('warn',L('Availability','可上班时间'))}<div class="grow">${esc(empName(x.e))} ${L('updated','已更新')}</div>${ic('chev')}</div>`;
+    if(x.k==='availMiss')return `<div class="li tap" data-act="goAvail">${chip('bad','Availability')}<div class="grow">${esc(empName(x.e))} hasn't submitted next week's availability</div>${ic('chev')}</div>`;
+    if(x.k==='link')return `<div class="li tap" data-act="goTeam">${chip('info',L('New account','新账号'))}<div class="grow">${L('Someone is waiting to be linked','有员工等待关联账号')}</div>${ic('chev')}</div>`;
+    if(x.k==='punch')return `<div class="li tap" data-act="punchEdit" data-id="${x.p.id}">${chip('bad',L('Clock-out','下班卡'))}<div class="grow">${esc(empName(x.p.empId))} · ${fmtD(x.p.date,{month:'short',day:'numeric'})} ${L('missing clock-out','忘记下班打卡')}</div>${ic('chev')}</div>`;return''}).join('')}</div>`:''}
 function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();const lc=latestCount();
   const low=D.items.filter(it=>{const s=stockStatus(it,stockQty(it.id)?.q)[0];return s==='bad'||s==='warn'}).length;
   const onNow=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&locOf(p.empId)===curLoc()).length;const tdone=tasksOn(d).filter(T=>['ontime','late'].includes(taskState(d,T.type).st)).length+(C()[d]?1:0);
@@ -602,6 +619,7 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
   return `<div class="stack">${isMgr&&!isOwner&&!D.links[uid]?`<div class="hint warn">Your account isn't linked to a store yet. Ask the owner to link you in Team → People, then you'll only see your store.</div>`:''}<div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${esc(locName(curLoc()))}</div><h2>${L('Today at BLISS','BLISS 今日')}</h2></div>
   <div class="stats"><div class="stat"><b>${onNow}</b><span>${L('Clocked in now','正在上班')}</span></div><div class="stat"><b>${tdone}/${tasksOn(d).length+1}</b><span>${L('Tasks done','任务完成')}</span></div><div class="stat"><b style="color:${low?'var(--warn)':'inherit'}">${low}</b><span>${L('Low / out items','库存偏低')}</span></div><div class="stat"><b>${arriving}</b><span>${L('Deliveries due','待到货')}</span></div></div>
   ${actor()?(openPunch(actor())?`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock out (me)</button>`:`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock in (me)</button>`):''}
+  ${attnList(att)}
   ${reviewCard()}
   <h3>${L('Shifts today','今日班次')}</h3>
   ${sh.length?`<div class="card flush list">${sh.map(s=>{const ps=Object.values(D.punches).filter(p=>p.empId===s.empId&&p.date===d);const p=ps[0];let c;
@@ -614,14 +632,7 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
   <h3>${L('Checklists','每日检查')}</h3>
   <div class="card flush list">${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" data-d="${d}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time())}</div><div class="small muted">${s.doc?.completedBy?esc(empName(s.doc.completedBy)):''}${s.doc?.review?' · '+(s.doc.review.status==='ok'?L('Passed','已合格'):L('Issue flagged','有问题')):''}</div></div>${chip(stChip(s.st),s.label)}</div>`}).join('')}
   ${countRows(d,1)}</div>
-  ${att.length?`<h3>${L('Needs your attention','需要处理')}</h3><div class="card flush list">${att.slice(0,12).map(x=>{
-    if(x.k==='review')return `<div class="li tap" data-act="goPhotos" data-d="${x.d}">${chip('info',L('Review','待检查'))}<div class="grow">${esc(taskName(x.type))} · ${fmtD(x.d,{month:'short',day:'numeric'})}</div>${ic('chev')}</div>`;
-    if(x.k==='late')return `<div class="li tap" data-act="orderView" data-id="${x.o.id}">${chip('warn','Delivery')}<div class="grow">${esc(x.o.store)} · due ${fmtD(x.o.expected,{month:'short',day:'numeric'})}, not received yet</div>${ic('chev')}</div>`;
-    if(x.k==='order')return `<div class="li tap" data-act="orderView" data-id="${x.o.id}">${chip('bad',L('Delivery','收货'))}<div class="grow">${esc(x.o.store)} · ${x.o.diffs?`${x.o.diffs} item${x.o.diffs>1?'s':''} counted differently than ordered`:'problem reported'}</div>${ic('chev')}</div>`;
-    if(x.k==='avail')return `<div class="li tap" data-act="goAvail">${chip('warn',L('Availability','可上班时间'))}<div class="grow">${esc(empName(x.e))} ${L('updated','已更新')}</div>${ic('chev')}</div>`;
-    if(x.k==='availMiss')return `<div class="li tap" data-act="goAvail">${chip('bad','Availability')}<div class="grow">${esc(empName(x.e))} hasn't submitted next week's availability</div>${ic('chev')}</div>`;
-    if(x.k==='link')return `<div class="li tap" data-act="goTeam">${chip('info',L('New account','新账号'))}<div class="grow">${L('Someone is waiting to be linked','有员工等待关联账号')}</div>${ic('chev')}</div>`;
-    if(x.k==='punch')return `<div class="li tap" data-act="punchEdit" data-id="${x.p.id}">${chip('bad',L('Clock-out','下班卡'))}<div class="grow">${esc(empName(x.p.empId))} · ${fmtD(x.p.date,{month:'short',day:'numeric'})} ${L('missing clock-out','忘记下班打卡')}</div>${ic('chev')}</div>`;return''}).join('')}</div>`:''}
+
   </div>`}
 
 function vStock(){const s=curSub('stock','now');
@@ -767,8 +778,8 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
   const perBar=`<div class="seg" role="tablist">${[['week','Week'],['2w','2 Weeks'],['month','Month']].map(([k,n])=>`<button role="tab" class="${(UI.opm||'week')===k?'on':''}" data-act="ownerPer" data-k="${k}">${n}</button>`).join('')}</div>
   <div class="row"><button class="btn sm" data-act="ownerWk" data-n="-1" aria-label="Previous period">${ic('left')}</button><span class="grow small" style="font-weight:700;text-align:center">${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(PE,{month:'short',day:'numeric',year:'numeric'})}</span><button class="btn sm" data-act="ownerWk" data-n="1" aria-label="Next period">${ic('chev')}</button></div>`;
   let body='';
-  if(sub==='today'){
-    body=`<div class="g2">${L2.map(l=>{const t=storeToday(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
+  if(sub==='today'){const iss=L2.flatMap(l=>withLoc(l.id,()=>reviewIssues()));
+    body=`${iss.length?attnList(iss):''}<div class="g2">${L2.map(l=>{const t=storeToday(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
       <div class="small"><b>${t.on}</b> clocked in · <b>${t.sh.length}</b> shifts${t.late?` · <span style="color:var(--warn)">${t.late} late</span>`:''}</div>
       <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
       <div class="small muted">${t.low==null?'No count yet':`${t.low} low / out`} · ${t.arriving} deliveries due</div></div>`}).join('')}</div>
@@ -1283,6 +1294,10 @@ const ACT={
  reviewSave:async d=>{const flags=SH.flags,date=SH.date,type=SH.type;const status=d.st==='ok'&&Object.values(flags).some(Boolean)?'issue':d.st;
    const cur={...photoDoc(date,type)};delete cur.id;const review={status,note:$('#rv_note').value.trim(),at:new Date().toISOString(),by:actor()||uid||'manager'};const ok=await W(A.db.doc(`photoLogs/${curLoc()}_${date}_${type}`).set({...cur,loc:curLoc(),date,type,flags,review}));
    if(ok){const k=`${curLoc()}_${date}_${type}`;D.photos[k]={...(D.photos[k]||{}),flags,review};if(RQ){RQ.done++;RQ.i++;reviewNext()}else closeSheet()}},
+ issueView:d=>issueSheet(d.d,d.type,d.l||curLoc()),
+ issueSeen:async d=>{const k=`${d.l}_${d.d}_${d.type}`;const cur=D.photos[k];if(!cur)return closeSheet();const review={...cur.review,ownerSeen:true,ownerSeenAt:new Date().toISOString()};
+   if(await W(A.db.doc('photoLogs/'+k).update({review}))){D.photos[k]={...cur,review};closeSheet();toast('Marked as seen')}},
+ goPhotosL:d=>{if(d.l){UI.loc=d.l;ls.set('loc',d.l)}closeSheet();UI.tab='photos';UI.pDate=d.d;render();window.scrollTo(0,0)},
  spotStart:d=>spotStart(d.l),spotSkip:()=>{if(SQ){SQ.i++;spotNext()}},
  spotSave:async d=>{if(!SQ)return;const x=SQ.list[SQ.i],l=SQ.l;const cur={...(withLoc(l,()=>photoDoc(x.d,x.type))||{})};delete cur.id;const audit={status:d.st,note:($('#sp_note')?.value||'').trim(),at:new Date().toISOString(),by:uid||'owner'};
    if(await W(A.db.doc(`photoLogs/${l}_${x.d}_${x.type}`).set({...cur,loc:l,date:x.d,type:x.type,audit}))){const k=`${l}_${x.d}_${x.type}`;D.photos[k]={...(D.photos[k]||{}),audit};SQ.n++;SQ.i++;spotNext()}},
