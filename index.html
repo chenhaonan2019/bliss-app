@@ -499,7 +499,7 @@ function countRows(d,mgr){return usedFreqs().filter(f=>mgr||!MGR_ONLY_FREQ.inclu
   return `<div class="li tap" data-act="countSheet" data-f="${f}" tabindex="0">${ic('list')}<div class="grow"><div class="t">${t}${MGR_ONLY_FREQ.includes(f)?' <span class="chip" style="vertical-align:1px">Manager</span>':''}</div><div class="small muted">${sub}</div></div>${c}${ic('chev')}</div>`}).join('')}
 function badgeCount(){if(mode()!=='mgr')return 0;return attention().length+coverOpen().filter(c=>c.loc===curLoc()).length}
 // Tasks from the last 7 days that staff finished (or ran out of time on) and no manager has reviewed yet.
-function toReview(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.filled&&['ontime','late','missed'].includes(s.st)&&!s.doc?.review)r.push({d,type:T.type,st:s.st})})}return r.sort((a,b)=>a.d.localeCompare(b.d))}
+function toReview(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.filled&&['ontime','late','missed'].includes(s.st)&&!s.doc?.review)r.push({d,type:T.type,st:s.st,ai:aiIssues(s.doc)})})}return r.sort((a,b)=>(b.ai>0)-(a.ai>0)||a.d.localeCompare(b.d))}
 function missedTasks(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.st==='missed'&&!s.filled)r.push({d,type:T.type})})}return r}
 function reviewStats(l){return withLoc(l,()=>{const t=bizDate();let done=0,reviewed=0,issues=0,missed=0,audited=0,disagree=0,last=null,lastDoc=null;
   for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.st==='missed'&&!s.filled){missed++;return}if(!s.filled||!['ontime','late','missed'].includes(s.st))return;done++;const rv=s.doc?.review;
@@ -528,7 +528,7 @@ function issueSheet(date,type,l){openSheet({title:()=>`Issue found · ${esc(task
 function reviewCard(){const q=toReview(),m=missedTasks();if(!q.length&&!m.length)return `<div class="card row" style="gap:12px;border-left:4px solid var(--ok)"><span style="font-size:22px;color:var(--ok)">✓</span><div class="grow"><div class="t">All photo tasks reviewed</div><div class="small muted">Nothing waiting from the last 7 days.</div></div></div>`;
   return `<div class="card stack" style="gap:10px;border:2px solid ${q.length?'var(--brand)':'var(--warn)'}">
    <div class="row" style="gap:12px">${ic('cam')}<div class="grow"><div style="font-weight:700;font-size:17px">Review photos & tasks</div><div class="small muted">${q.length?`${q.length} task${q.length>1?'s':''} waiting for your review`:'Nothing to review'}${m.length?` · ${m.length} not done`:''}</div></div>${q.length?chip('info',String(q.length)):''}</div>
-   ${q.length?`<div class="small">${q.slice(0,4).map(x=>`${esc(taskName(x.type))} · ${fmtD(x.d,{weekday:'short',month:'short',day:'numeric'})}${x.st==='late'?' (late)':x.st==='missed'?' (incomplete)':''}`).join('<br>')}${q.length>4?`<br>+ ${q.length-4} more`:''}</div>
+   ${q.length?`<div class="small">${q.slice(0,4).map(x=>`${esc(taskName(x.type))} · ${fmtD(x.d,{weekday:'short',month:'short',day:'numeric'})}${x.st==='late'?' (late)':x.st==='missed'?' (incomplete)':''}${x.ai?` · <span style="color:var(--warn);font-weight:600">AI: ${x.ai} to check</span>`:''}`).join('<br>')}${q.length>4?`<br>+ ${q.length-4} more`:''}</div>
     <button class="btn pri big block" data-act="reviewStart">${ic('check')} Start review</button>`:''}
    ${m.length?`<details><summary class="small" style="cursor:pointer;color:var(--warn);font-weight:600">${m.length} task${m.length>1?'s were':' was'} not done at all</summary><div class="small" style="margin-top:6px">${m.map(x=>`${esc(taskName(x.type))} · ${fmtD(x.d,{weekday:'short',month:'short',day:'numeric'})}`).join('<br>')}</div></details>`:''}</div>`}
 // Reviews where the manager found a problem, not yet acknowledged by an owner (last 14 days).
@@ -667,6 +667,7 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
   const arriving=ORD().filter(o=>o.status==='ordered'&&(!o.expected||o.expected<=d)).length;
   return `<div class="stack">${isMgr&&!isOwner&&!D.links[uid]?`<div class="hint warn">Your account isn't linked to a store yet. Ask the owner to link you in Team → People, then you'll only see your store.</div>`:''}<div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${esc(locName(curLoc()))}</div><h2>${L('Today at BLISS','BLISS 今日')}</h2></div>
   <div class="stats"><div class="stat"><b>${onNow}</b><span>${L('Clocked in now','正在上班')}</span></div><div class="stat"><b>${tdone}/${tasksOn(d).length+1}</b><span>${L('Tasks done','任务完成')}</span></div><div class="stat"><b style="color:${low?'var(--warn)':'inherit'}">${low}</b><span>${L('Low / out items','库存偏低')}</span></div><div class="stat"><b>${arriving}</b><span>${L('Deliveries due','待到货')}</span></div></div>
+  ${fcTodayCard()}
   ${actor()?(openPunch(actor())?`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock out (me)</button>`:`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock in (me)</button>`):''}
   ${coverMgrCard()}
   ${attnList(att)}
@@ -680,7 +681,7 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
    :`<div class="card empty"><b>${L('No shifts scheduled today','今天没有排班')}</b><button class="btn sm" data-act="tab" data-k="sched">${L('Open schedule','去排班')}</button></div>`}
   ${(()=>{const dd=ORD().filter(o=>o.status==='ordered'&&(!o.expected||o.expected<=d));return dd.length?`<h3>Deliveries to receive today</h3><div class="card flush list">${dd.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · shows on staff Today tasks</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}</div>`:''})()}
   <h3>${L('Checklists','每日检查')}</h3>
-  <div class="card flush list">${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" data-d="${d}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time(d))}</div><div class="small muted">${s.doc?.completedBy?esc(empName(s.doc.completedBy)):''}${s.doc?.review?' · '+(s.doc.review.status==='ok'?L('Passed','已合格'):L('Issue flagged','有问题')):''}</div></div>${chip(stChip(s.st),s.label)}</div>`}).join('')}
+  <div class="card flush list">${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" data-d="${d}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time(d))}</div><div class="small muted">${s.doc?.completedBy?esc(empName(s.doc.completedBy)):''}${s.doc?.review?' · '+(s.doc.review.status==='ok'?L('Passed','已合格'):L('Issue flagged','有问题')):''}${!s.doc?.review&&aiIssues(s.doc)?` · <span style="color:var(--warn)">AI: ${aiIssues(s.doc)} to check</span>`:''}</div></div>${chip(stChip(s.st),s.label)}</div>`}).join('')}
   ${countRows(d,1)}</div>
 
   </div>`}
@@ -996,18 +997,64 @@ function photoTaskSheet(type,date){date=date||bizDate();const T=TASKS().find(x=>
     ${A.assets?'':`<div class="hint warn">${L('Photo upload is not turned on for this account. Ask the manager.','此账号没有开通照片上传，请联系经理。')}</div>`}
     ${slots.length?`<div class="tiles">${slots.map(sl=>{const p=s.doc?.photos?.[sl.id];const ex=sl.ref?`<button class="chip info" style="position:absolute;top:6px;left:6px;border:0;cursor:pointer;z-index:2" data-act="viewPh" data-pid="${esc(sl.ref)}" data-cap="Example: ${esc(sl.name)}">Example</button>`:'';
       if(sl.photo===false){const c=s.doc?.checks?.[sl.id];return `<button class="tile ${c?'has':''}" style="position:relative;display:grid;place-items:center;text-align:center;padding:12px;cursor:pointer" data-act="taskCheck" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-pressed="${c?'true':'false'}">${ex}<div><div style="font-size:30px;line-height:1;color:${c?'var(--ok)':'var(--muted)'}">${c?'✓':'☐'}</div><b>${esc(sl.name)}</b><div class="tiny muted">${c?`${esc(empName(c.by))} · ${fmtT(hm(new Date(c.at)))}`:'Tap when done'}</div></div></button>`}
-      return (p?`<label class="tile has"><img src="${BLOB}${esc(p.id)}" alt=""><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}</span>${s.doc?.flags?.[sl.id]?`<span class="flag">${chip('bad',L('Redo','需重拍'))}</span>`:''}<input type="file" accept="image/*" capture="environment" data-up="task" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-label="${L('Retake','重拍')} ${esc(sl.name)}"></label>`
+      return (p?`<label class="tile has"><img src="${BLOB}${esc(p.id)}" alt=""><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}${aiChip(s.doc,sl.id)?'<br>'+aiChip(s.doc,sl.id):''}</span>${s.doc?.flags?.[sl.id]?`<span class="flag">${chip('bad',L('Redo','需重拍'))}</span>`:''}<input type="file" accept="image/*" capture="environment" data-up="task" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-label="${L('Retake','重拍')} ${esc(sl.name)}"></label>`
       :`<label class="tile">${ic('cam')}<span>${esc(sl.name)}</span><input type="file" accept="image/*" capture="environment" data-up="task" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-label="${esc(sl.name)}"></label>`).replace('<label class="tile','<label style="position:relative" class="tile').replace(/(<label[^>]*>)/,'$1'+ex)}).join('')}</div>`:`<div class="empty">Nothing to do for this task today.</div>`}
     ${s.doc?.review?`<div class="card">${chip(s.doc.review.status==='ok'?'ok':'bad',s.doc.review.status==='ok'?'Passed':'Needs work')} <span class="small">${whoName(s.doc.review)?'<b>'+esc(whoName(s.doc.review))+':</b> ':''}${esc(s.doc.review.note||'')}</span></div>`:''}`},
     foot:()=>`<button class="btn pri" data-act="closeSheet">${L('Done','完成')}</button>`})}
+/* ---------- AI photo check ----------
+   After a task photo is saved, Claude looks at it (with the item's example photo when there is one) and says whether
+   the item looks done; a fingerprint of the picture also catches the same photo being reused. Results are saved on the
+   photo log as ai[slot] = {photo, ok, issue, dup, at} and shown to staff right away and to managers in Review.
+   AI only points things out; the manager still decides Passed / Has issues. */
+const AIC={};                       // running checks: photo id → true
+async function photoHash(blob){     // 64-bit difference hash, as 16 hex chars
+  try{const bm=await createImageBitmap(blob);const c=document.createElement('canvas');c.width=9;c.height=8;const x=c.getContext('2d');x.drawImage(bm,0,0,9,8);
+    const px=x.getImageData(0,0,9,8).data;const g=i=>px[i*4]*.299+px[i*4+1]*.587+px[i*4+2]*.114;let bits='';
+    for(let r=0;r<8;r++)for(let k=0;k<8;k++)bits+=g(r*9+k)>g(r*9+k+1)?'1':'0';
+    return bits.match(/.{4}/g).map(b=>parseInt(b,2).toString(16)).join('')}catch(e){return null}}
+const hamming=(a,b)=>{let n=0;for(let i=0;i<a.length;i++){let v=parseInt(a[i],16)^parseInt(b[i],16);while(v){n+=v&1;v>>=1}}return n};
+// same picture already used for this item on another day (last ~30 days of logs)
+function photoDup(hash,type,slot,date,id){if(!hash)return null;const ones=hamming(hash,'0000000000000000');if(ones<8||ones>56)return null;   // blank/very dark pictures look alike
+  let best=null;
+  Object.values(D.photos||{}).forEach(doc=>{if(doc.type!==type||doc.date===date)return;Object.entries(doc.photos||{}).forEach(([sl,p])=>{if(p.id===id||!p.hash||p.hash.length!==hash.length)return;
+    if(hamming(hash,p.hash)<=5&&(!best||doc.date>best))best=doc.date})});return best}
+async function blobOf(id){try{const r=await fetch(BLOB+id);return r.ok?await r.blob():null}catch(e){return null}}
+async function aiCheckPhoto({type,slot,date,loc,id,blob,hash}){
+  if(!A.sample||AIC[id])return;AIC[id]=true;drawSheet();
+  try{const sl=slotsOf(type,date).find(x=>x.id===slot)||{name:slot};const T=TASKS().find(t=>t.type===type);
+    blob=blob||await blobOf(id);if(!blob)return;hash=hash||await photoHash(blob);
+    const refB=sl.ref?await blobOf(sl.ref):null;
+    const prompt=`You check checklist photos for a matcha / bubble tea shop. Task: "${T?T.name():type}". Item: "${sl.name}".
+Image 1 is the photo a staff member just took for this item.${refB?' Image 2 is the manager\'s example of how it should look when done properly.':''}
+Decide if image 1 shows this item clearly and done to a reasonable shop standard${refB?' (compare with the example)':''}.
+Flag only real problems a manager would care about: the photo doesn't show this item, it's too dark/blurry/close to judge, visible dirt, spills, sticky residue, trash, food or cups left out, items not put away, overflowing bins, wrong setup compared with the example.
+Do not flag normal wear, lighting colour, or angle if the item is still clearly visible and clean.
+Return JSON only: {"ok": true|false, "issue": "if not ok, what is wrong in at most 12 plain words, else empty", "sure": true|false}`;
+    const r=await A.sample.json(prompt,{images:refB?[blob,refB]:[blob],modelTier:'quick'});
+    const dup=photoDup(hash,type,slot,date,id);
+    const res={photo:id,ok:r?.ok!==false&&!dup,issue:dup?`Looks like the same photo as ${fmtD(dup,{month:'short',day:'numeric'})}`:String(r?.issue||'').slice(0,120),sure:r?.sure!==false,at:new Date().toISOString(),...(dup?{dup}:{})};
+    const k=`${loc}_${date}_${type}`;const cur=D.photos[k];if(cur?.photos?.[slot]?.id!==id)return;   // replaced meanwhile
+    await A.db.doc(`photoLogs/${k}`).update({ai:{[slot]:res}});
+    D.photos[k]={...cur,ai:{...(cur.ai||{}),[slot]:res}};
+    if(!res.ok&&SH)toast(`AI: ${sl.name} — ${res.issue}`);
+  }catch(e){console.warn('ai photo',e)}finally{delete AIC[id];if(SH)drawSheet();render()}}
+// what to show on a tile
+function aiChip(doc,slot){const p=doc?.photos?.[slot];if(!p)return '';if(AIC[p.id])return `<span class="chip" style="border:0">AI checking…</span>`;
+  const a=doc?.ai?.[slot];if(!a||a.photo!==p.id)return '';
+  return a.ok?`<span class="chip ok" style="border:0" title="AI found no problem">AI ✓</span>`:`<span class="chip warn" style="border:0;white-space:normal;text-align:left" title="AI note">AI: ${esc(a.issue||'check this photo')}</span>`}
+const aiIssues=doc=>Object.entries(doc?.ai||{}).filter(([sl,a])=>!a.ok&&doc.photos?.[sl]?.id===a.photo).length;
+// managers: check photos that never got an AI result (e.g. AI was busy when staff uploaded)
+function aiBackfill(date,type){if(!A.sample)return;const doc=photoDoc(date,type);if(!doc)return;
+  Object.entries(doc.photos||{}).forEach(([slot,p])=>{if(!AIC[p.id]&&doc.ai?.[slot]?.photo!==p.id)aiCheckPhoto({type,slot,date,loc:curLoc(),id:p.id})})}
 async function onTaskUpload(inp){const f=inp.files?.[0];if(!f)return;const{type,slot,date}=inp.dataset;const tile=inp.closest('.tile');tile&&tile.classList.add('busy');
   const id=await uploadImg(f);if(!id){tile&&tile.classList.remove('busy');return}
   const loc=curLoc();const ref=A.db.doc(`photoLogs/${loc}_${date}_${type}`);const me=actor()||'manager';const now=new Date().toISOString();const cur=photoDoc(date,type);
-  const p={id,by:me,at:now};const photos={...(cur?.photos||{}),[slot]:p};const slots=slotsOf(type,date);
+  const hash=await photoHash(f);const p={id,by:me,at:now,...(hash?{hash}:{})};const photos={...(cur?.photos||{}),[slot]:p};const slots=slotsOf(type,date);
   const body={loc,date,type,photos:{[slot]:p},flags:{[slot]:false},updatedAt:now};
   if(slots.every(s=>photos[s.id]||cur?.checks?.[s.id])&&!cur?.completedAt){body.completedAt=now;body.completedBy=me}
   const wr=cur?ref.update(body):ref.set({...body,photos});
-  if(await W(wr)){D.photos[`${loc}_${date}_${type}`]={...(cur||{}),...body,photos,flags:{...(cur?.flags||{}),[slot]:false}};if(!body.completedAt)toast(L('Photo saved','照片已保存'));drawSheet();render();afterTaskDone(type,date,!!body.completedAt)}}
+  if(await W(wr)){D.photos[`${loc}_${date}_${type}`]={...(cur||{}),...body,photos,flags:{...(cur?.flags||{}),[slot]:false}};if(!body.completedAt)toast(L('Photo saved','照片已保存'));drawSheet();render();afterTaskDone(type,date,!!body.completedAt);
+    compress(f).then(b=>aiCheckPhoto({type,slot,date,loc,id,blob:b,hash})).catch(()=>aiCheckPhoto({type,slot,date,loc,id,hash}))}}
 
 async function onTaskCheck(type,slot,date){const loc=curLoc();const ref=A.db.doc(`photoLogs/${loc}_${date}_${type}`);const me=actor()||'manager';const now=new Date().toISOString();const cur=photoDoc(date,type);
   const was=!!cur?.checks?.[slot];const checks={...(cur?.checks||{}),[slot]:was?null:{by:me,at:now}};const slots=slotsOf(type,date);
@@ -1162,9 +1209,10 @@ let RQ=null;
 function reviewNext(){if(!RQ)return;const x=RQ.list[RQ.i];if(!x){const n=RQ.done;RQ=null;closeSheet();render();if(!toReview().length&&n)celebrate('All reviews done!',`${n} task${n>1?'s':''} checked`,true);else toast(n?`Done. ${n} task${n>1?'s':''} reviewed.`:'Review finished');return}reviewSheet(x.d,x.type)}
 function reviewSheet(date,type){const doc=photoDoc(date,type);if(!doc)return;const slots=slotsOf(type,date);const T=TASKS().find(t=>t.type===type)||{name:()=>'Task'};const flags={...(doc.flags||{})};
   openSheet({title:()=>`${L('Review','检查')} · ${T.name()}`,body:()=>`${RQ?`<div class="row"><span class="eyebrow grow">Review ${RQ.i+1} of ${RQ.list.length}</span><button class="btn sm" data-act="reviewSkip">Skip</button></div>`:''}<div class="small muted">${fmtD(date)} · ${doc.completedBy?'By '+esc(empName(doc.completedBy))+' · ':''}${chip(stChip(taskState(date,type).st),taskState(date,type).label)} ${L('Tap a photo to view it full size. Flag photos that need to be redone.','点照片放大查看。需要重做的照片请标记。')}</div>
-   <div class="tiles">${slots.map(sl=>{const p=doc.photos?.[sl.id];return p?`<div class="tile has" style="cursor:default"><img src="${BLOB}${esc(p.id)}" alt="" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)}" style="cursor:zoom-in"><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}</span><span class="flag"><button class="chip ${flags[sl.id]?'bad':''}" style="border:0;cursor:pointer" data-act="flagPh" data-slot="${sl.id}">${flags[sl.id]?L('Flagged','已标记'):L('Flag','标记')}</button></span></div>`:doc.checks?.[sl.id]?`<div class="tile has" style="cursor:default;display:grid;place-items:center;text-align:center;padding:10px"><div><div style="font-size:28px;color:var(--ok)">✓</div><b>${esc(sl.name)}</b><div class="tiny muted">${esc(empName(doc.checks[sl.id].by))} · ${fmtT(hm(new Date(doc.checks[sl.id].at)))}</div></div></div>`:`<div class="tile">${esc(sl.name)}<br>${L('missing','缺')}</div>`}).join('')}</div>
+   ${(()=>{const d2=photoDoc(date,type)||doc;const n=aiIssues(d2);return n?`<div class="hint warn">AI noticed ${n} possible issue${n>1?'s':''} — look at the yellow notes. You decide.</div>`:''})()}
+   <div class="tiles">${slots.map(sl=>{const p=doc.photos?.[sl.id];return p?`<div class="tile has" style="cursor:default"><img src="${BLOB}${esc(p.id)}" alt="" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)}" style="cursor:zoom-in"><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}${aiChip(doc,sl.id)?'<br>'+aiChip(doc,sl.id):''}</span><span class="flag"><button class="chip ${flags[sl.id]?'bad':''}" style="border:0;cursor:pointer" data-act="flagPh" data-slot="${sl.id}">${flags[sl.id]?L('Flagged','已标记'):L('Flag','标记')}</button></span></div>`:doc.checks?.[sl.id]?`<div class="tile has" style="cursor:default;display:grid;place-items:center;text-align:center;padding:10px"><div><div style="font-size:28px;color:var(--ok)">✓</div><b>${esc(sl.name)}</b><div class="tiny muted">${esc(empName(doc.checks[sl.id].by))} · ${fmtT(hm(new Date(doc.checks[sl.id].at)))}</div></div></div>`:`<div class="tile">${esc(sl.name)}<br>${L('missing','缺')}</div>`}).join('')}</div>
    <label class="f">${L('Note to staff','给员工的备注')}<textarea class="in" id="rv_note" placeholder="${L('e.g. wipe under the blender, drains not cleaned','例如：搅拌机下面没擦，下水道没清理')}">${esc(doc.review?.note||'')}</textarea></label>`,
-   foot:()=>`<button class="btn bad" data-act="reviewSave" data-st="issue">${L('Has issues','有问题')}</button><button class="btn pri" data-act="reviewSave" data-st="ok">${ic('check')} ${L('Passed','合格')}${RQ&&RQ.i<RQ.list.length-1?' · next':''}</button>`,mount:()=>{SH.flags=flags;SH.date=date;SH.type=type}})}
+   foot:()=>`<button class="btn bad" data-act="reviewSave" data-st="issue">${L('Has issues','有问题')}</button><button class="btn pri" data-act="reviewSave" data-st="ok">${ic('check')} ${L('Passed','合格')}${RQ&&RQ.i<RQ.list.length-1?' · next':''}</button>`,mount:()=>{SH.flags=flags;SH.date=date;SH.type=type;aiBackfill(date,type)}})}
 
 function shiftSheet(id,date){const s=id?D.shifts[id]:{empId:'',date,start:'11:00',end:'17:00',note:''};const ems=emps();
   SH={editId:id||null};openSheet({editId:id||null,title:()=>id?L('Edit shift','编辑班次'):L('Add shift','添加班次'),body:()=>`
@@ -1586,7 +1634,9 @@ const wxLabel=w=>!w?'':`${Math.round(w.tmax)}°F${wxSnow(w)?' · snow':wxWet(w)?
 /* baseline: same weekday in earlier weeks (before today, store open that day) */
 const SETTLE=new WeakMap();
 /* a new store's first 6 weeks (opening buzz) are not used as normal sales */
-function settledFrom(H){if(SETTLE.has(H))return SETTLE.get(H);const f=Object.keys(H).sort().find(d=>dayTot(H[d])>=30);const v=f?addDays(f,42):'9999';SETTLE.set(H,v);return v}
+/* opening day = the store's setting, else the first day with a real day of sales ($300+; test orders before opening are smaller) */
+function openedOn(loc){const H=hourlyOf(loc);const set=fcCfg().opened?.[loc];if(set&&/^\d{4}-\d\d-\d\d$/.test(set))return set;if(SETTLE.has(H))return SETTLE.get(H);const f=Object.keys(H).sort().find(d=>dayTot(H[d])>=300)||null;SETTLE.set(H,f);return f}
+function settledFrom(H){const loc=Object.keys(D.hourly||{}).find(l=>D.hourly[l]===H);const o=loc?openedOn(loc):null;return o?addDays(o,42):'9999'}
 function fcSamples(H,date,h,weeks){const xs=[],td=today(),st=settledFrom(H);for(let k=1;k<=weeks+8&&xs.length<weeks;k++){const d=addDays(date,-7*k);if(d>=td||d<st)continue;const v=H[d];if(!v||dayTot(v)<30)continue;xs.push({w:Math.pow(.85,xs.length),v:h==null?dayTot(v):(+v[h]?.[0]||0),d})}return xs}
 function wstat(xs){let a=xs.slice();if(a.length>=5){a.sort((p,q)=>p.v-q.v);a=a.slice(1,-1)}const sw=a.reduce((s,x)=>s+x.w,0);if(!sw)return null;const m=a.reduce((s,x)=>s+x.w*x.v,0)/sw;return{m,sd:Math.sqrt(a.reduce((s,x)=>s+x.w*(x.v-m)**2,0)/sw),n:xs.length}}
 /* weather effect learned per store: log(actual/baseline) ≈ b0·(temp − baseline weeks' temp) + b1·rain + b2·snow, pulled toward sensible defaults when there is little data */
@@ -1761,7 +1811,7 @@ function asNeedsCard(ws,n){const loc=curLoc(),has=fcHas(loc),use=fcUse(loc),wxRe
     ${use?`<div class="tiny muted">People on shift at each time. Open and close times come from your usual shifts. ${wxReady?'':'Loading weather…'}</div>${hsyncLine()}${days}
       <div class="row wrapr" style="gap:6px"><button class="btn sm" data-act="fcDetail">Hourly detail</button><button class="btn sm" data-act="fcSettings">Forecast settings</button><button class="btn sm" data-act="needsEdit">Usual shifts</button></div>`
     :`${usual}<div class="row" style="gap:6px"><button class="btn sm" data-act="needsEdit">Edit</button><button class="btn sm" data-act="fcSettings">Forecast settings</button></div>`}</div>`}
-function fcDetailSheet(){const loc=curLoc(),ws=AS?.ws||nextWk(),n=AS?.n||7,c=fcCfg();
+function fcDetailSheet(ws0,n0){const loc=curLoc(),ws=ws0||AS?.ws||nextWk(),n=n0||AS?.n||7,c=fcCfg();
   openSheet({title:()=>`Sales forecast · ${esc(locName(loc))}`,body:()=>{const M=wxNow(loc)?fcModel():null;
     return `<div class="tiny muted">Based on the last ${c.weeks} same weekdays (newer weeks count more), adjusted for the weather forecast. People = 1 up to ${kmoney(c.max1)}/hour, then one more for every ${kmoney(c.cap)}. Staffing adds a ${FC_BUF.find(b=>b[0]===+c.buffer)?.[1]?.toLowerCase()||'custom'} cushion for hours that swing a lot.</div>
     ${M?`<div class="hint">${fcModelTxt(M)}</div>`:''}
@@ -1771,6 +1821,39 @@ function fcDetailSheet(){const loc=curLoc(),ws=AS?.ws||nextWk(),n=AS?.n||7,c=fcC
        <div class="tbl"><table><thead><tr><th>Hour</th><th>Forecast</th><th>Busy hour</th><th>People</th></tr></thead><tbody>${Object.entries(F.hours).map(([h,x])=>`<tr><td>${LANG_HOUR(+h)}</td><td>${kmoney(x.m)}</td><td class="muted">${kmoney(x.m+x.sd)}</td><td><b>${x.need}</b></td></tr>`).join('')}</tbody></table></div>`}</div>`}).join('')}`}});
   if(!wxNow(loc))wxAll().then(()=>{if(SH)drawSheet()})}
 function fcModelTxt(M){const p=x=>Math.round(Math.abs(Math.exp(x)-1)*100);return `From ${M.n} days of your stores' history: every 10°F colder ≈ <b>−${p(-M.b[0]*10)}%</b> sales · rainy day <b>${M.b[1]<=0?'−':'+'}${p(M.b[1])}%</b> · snowy day <b>−${p(M.b[2])}%</b>${M.snow<3?' (few snow days yet, mostly a default)':''}.`}
+/* ---------- today's sales forecast (home screen) ---------- */
+// average day over the last 4 weeks (store open), to say how this weekday compares
+function fcAvgDay(loc,date){const H=hourlyOf(loc),st=settledFrom(H);const xs=[];for(let i=1;i<=28;i++){const d=addDays(date,-i);if(d>=today()||d<st)continue;const t=dayTot(H[d]);if(t>=30)xs.push(t)}return xs.length>=7?xs.reduce((a,b)=>a+b,0)/xs.length:null}
+const pct=x=>`${x>=0?'+':'−'}${Math.round(Math.abs(x)*100)}%`;
+function fcTodayCard(){const loc=curLoc();if(!isMgr||!fcHas(loc))return '';
+  if(!wxNow(loc)&&!fcTodayCard.p)fcTodayCard.p=wxAll().then(()=>{fcTodayCard.p=null;rerender()});
+  const d=bizDate(),F=fcDay(loc,d);if(!F.ok)return `<div class="card small muted">${ic('spark')} Sales forecast: ${esc(F.why)}</div>`;
+  const base=F.tot/(F.f||1),avg=fcAvgDay(loc,d),wd=DOW[parseYmd(d).getDay()];
+  const hrs=Object.entries(F.hours).map(([h,x])=>[+h,x]).sort((a,b)=>a[0]-b[0]);const mx=Math.max(1,...hrs.map(([,x])=>x.m+x.sd));const nowH=new Date().getHours();
+  // yesterday: what we would have forecast vs what really happened
+  const y=addDays(d,-1),Hy=hourlyOf(loc)[y],Fy=Hy&&dayTot(Hy)>=30?fcDay(loc,y):null,ay=Hy?dayTot(Hy):0;
+  const week=[...Array(7)].map((_,i)=>addDays(d,i+1)).map(x=>({d:x,F:fcDay(loc,x),open:needsFor(loc,parseYmd(x).getDay()).length>0}));
+  return `<div class="card stack" style="gap:10px">
+   <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><div class="eyebrow">Sales forecast · today</div>
+     <div style="font-family:var(--display);font-weight:800;font-size:34px;line-height:1.1">${kmoney(F.tot)}</div>
+     <div class="small muted">${wd}${F.wx?` · ${esc(wxLabel(F.wx))}`:''}</div></div>
+    <button class="btn sm" data-act="fcWeek">Next 7 days</button></div>
+   <div class="small" style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px">
+    ${avg?`<span class="muted">${wd}s</span><span>usually ${kmoney(base)} — ${pct(base/avg-1)} vs an average day (${kmoney(avg)})</span>`:`<span class="muted">${wd}s</span><span>usually ${kmoney(base)}</span>`}
+    <span class="muted">Weather</span><span>${F.wx?(Math.abs(F.f-1)<0.02?'no real effect today':`${pct(F.f-1)}${F.tdiff!=null?` (${Math.abs(Math.round(F.tdiff))}°F ${F.tdiff<0?'colder':'warmer'} than recent ${wd}s${wxSnow(F.wx)?', snow':wxWet(F.wx)?', rain':''})`:''}`):'loading…'}</span>
+    ${Fy?.ok?`<span class="muted">Yesterday</span><span>forecast ${kmoney(Fy.tot)} · actual ${kmoney(ay)} (${pct(ay/Fy.tot-1)})</span>`:''}
+   </div>
+   <div style="display:flex;align-items:flex-end;gap:3px;height:92px;padding-top:14px" role="img" aria-label="Forecast sales by hour">
+    ${hrs.map(([h,x])=>`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;min-width:0" title="${LANG_HOUR(h)}: ${kmoney(x.m)} · ${x.need} ${x.need>1?'people':'person'}">
+      <span class="tiny" style="font-weight:700;color:${x.need>1?'var(--brand)':'var(--muted)'}">${x.need}</span>
+      <div style="width:100%;height:${Math.max(3,Math.round(x.m/mx*60))}px;border-radius:4px 4px 0 0;background:${h===nowH?'var(--brand)':'color-mix(in srgb,var(--brand) 45%,transparent)'}"></div>
+      <span class="tiny muted">${LANG_HOUR(h)}</span></div>`).join('')}
+   </div>
+   <div class="tiny muted">Bars = forecast sales per hour; number on top = people needed. Updated each morning from Menusifu.</div>
+   <div class="row" style="gap:4px;overflow-x:auto">${week.map(w=>`<div style="flex:1;min-width:46px;text-align:center;padding:6px 2px;border-radius:10px;background:var(--sunk)"><div class="tiny muted">${WD()[parseYmd(w.d).getDay()]}</div><div class="small" style="font-weight:700">${!w.open?'—':w.F.ok?kmoney(w.F.tot):'?'}</div><div class="tiny muted">${w.F.ok&&w.F.wx?Math.round(w.F.wx.tmax)+'°'+(wxSnow(w.F.wx)?'❄':wxWet(w.F.wx)?'☂':''):''}</div></div>`).join('')}</div>
+   ${hsyncLine()}
+  </div>`}
+ACT.fcWeek=()=>fcDetailSheet(addDays(bizDate(),0),8);
 let FCS=null;
 function fcSettingsSheet(){const c=fcCfg();FCS={geo:{...(c.geo||{})},msg:''};
   openSheet({title:()=>'Sales forecast settings',body:()=>{const c=fcCfg();const L2=LOCS();
@@ -1783,6 +1866,8 @@ function fcSettingsSheet(){const c=fcCfg();FCS={geo:{...(c.geo||{})},msg:''};
      <div class="card stack"><h3>Hourly sales history</h3>${hsyncLine()}
       ${L2.map(l=>{const H=hourlyOf(l.id);const ds=Object.keys(H).sort();const g=FCS.geo[l.id]||DEF_GEO[l.id];
         return `<div class="stack" style="gap:6px;padding-block:6px;border-top:1px solid var(--line)"><div class="row"><b class="grow">${esc(l.name)}</b><span class="small muted">${ds.length?`${ds.length} days · ${fmtD(ds[0],{month:'short',day:'numeric',year:'2-digit'})} – ${fmtD(ds[ds.length-1],{month:'short',day:'numeric'})}`:'No data yet'}</span></div>
+         <label class="f">Opened on<input class="in" type="date" id="fc_open_${esc(l.id)}" value="${esc(c.opened?.[l.id]||openedOn(l.id)||'')}"></label>
+         <span class="tiny muted">Sales before this day are ignored, and the first 6 weeks after it (opening buzz) are not used as normal weeks.</span>
          <label class="btn sm" style="width:max-content">${ic('plus')} Import CSV<input type="file" accept=".csv,text/csv" data-fcimp="${esc(l.id)}" hidden></label>
          <div class="row" style="gap:6px"><input class="in grow" id="fc_geo_${esc(l.id)}" placeholder="City for weather, e.g. West Hartford" value="${esc(g?.name||'')}"><button class="btn sm" data-act="fcGeo" data-l="${esc(l.id)}">Find</button></div>
          ${g?`<span class="tiny muted">Weather from ${esc(g.name||'')} (${(+g.lat).toFixed(2)}, ${(+g.lon).toFixed(2)})</span>`:'<span class="tiny" style="color:var(--bad)">Set a city to use the weather.</span>'}</div>`}).join('')}
@@ -1790,7 +1875,8 @@ function fcSettingsSheet(){const c=fcCfg();FCS={geo:{...(c.geo||{})},msg:''};
       ${FCS.msg?`<div class="hint">${esc(FCS.msg)}</div>`:''}</div>`},
    foot:()=>`<button class="btn pri big" data-act="fcSave">Save</button>`})}
 function fcGrab(){const c=fcCfg();const v=(id,d)=>{const x=num($(id)?.value);return x==null?d:x};
-  return{...c,cap:Math.max(20,v('#fc_cap',c.cap)),max1:Math.max(20,v('#fc_max1',c.max1)),minStaff:Math.max(0,Math.round(v('#fc_min',c.minStaff))),buffer:v('#fc_buf',c.buffer),weeks:Math.max(3,Math.min(16,Math.round(v('#fc_weeks',c.weeks)))),geo:{...(c.geo||{}),...FCS.geo}}}
+  return{...c,cap:Math.max(20,v('#fc_cap',c.cap)),max1:Math.max(20,v('#fc_max1',c.max1)),minStaff:Math.max(0,Math.round(v('#fc_min',c.minStaff))),buffer:v('#fc_buf',c.buffer),weeks:Math.max(3,Math.min(16,Math.round(v('#fc_weeks',c.weeks)))),geo:{...(c.geo||{}),...FCS.geo},
+  opened:Object.fromEntries(LOCS().map(l=>{const x=$('#fc_open_'+l.id)?.value;return[l.id,x&&/^\d{4}-\d\d-\d\d$/.test(x)?x:(c.opened?.[l.id]||'')]}).filter(([,x])=>x))}}
 async function fcSaveCfg(f){const cfg={...(D.schedCfg||{}),forecast:f};if(!await W(A.db.doc('mgr/sched').set(cfg)))return false;D.schedCfg=cfg;FCM={};return true}
 Object.assign(ACT,{
   fcSettings:()=>{if(AS)asGrab();fcSettingsSheet()},

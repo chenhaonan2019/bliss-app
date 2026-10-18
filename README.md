@@ -149,3 +149,13 @@ Notes:
 - If Menusifu adds a verification code or "I'm not a robot" check at sign-in, the run stops and the app shows why.
 - GitHub pauses scheduled Actions in a public repository after 60 days without commits. It emails you; click *Enable workflow*.
 - Store mapping is `MENUSIFU_STORES` in the workflow file (`Menusifu branch id=app store id`).
+
+## Today's sales forecast and AI photo check
+- **Today** (managers and owners) shows today's forecast sales, how this weekday and the weather move it, people needed per hour,
+  yesterday's forecast vs actual, and the next 7 days. It uses the same forecast as Auto-schedule.
+- Each store's **opening day** is found automatically (first day with $300+ in sales) and can be changed in Auto-schedule →
+  Forecast settings. Sales before it are ignored and the first 6 weeks after it (opening buzz) don't count as normal weeks.
+- **AI photo check**: after a task photo is saved, Claude (the `ai` function, quick model) checks it against the item name and the
+  item's example photo if it has one. Staff see "AI ✓" or a short note right away and can retake. A photo that matches one already
+  used for the same task on another day is flagged as reused. In Review, tasks with AI notes come first and the notes show on the
+  photos; the manager still decides Passed / Has issues. Results are saved on the photo log as `ai`.
