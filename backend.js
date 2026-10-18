@@ -169,6 +169,52 @@
       },
       renameOrg: async (name) => { await rpc("rename_org", { new_name: name }); window.blissAccount.org = name.trim(); },
     };
+    // Shift cover: database rules in schema.sql (cover_*), notifications in the "cover" Edge Function.
+    const coverFn = async (body) => {
+      const { data, error } = await SB.functions.invoke("cover", { body: { org_id: ORG, ...body } });
+      if (error) throw new Error("Couldn't reach the \"cover\" function. Is it deployed?");
+      return data;
+    };
+    const b64 = (s) => { const t = s.replace(/-/g, "+").replace(/_/g, "/"); return Uint8Array.from(atob(t + "===".slice((t.length + 3) % 4)), (c) => c.charCodeAt(0)); };
+    // after a change, re-read cover requests and shifts right away (don't wait for the live update)
+    const crpc = async (fn, args) => { const r = await rpc(fn, args); refresh("cover"); refresh("shifts"); return r; };
+    window.blissCover = {
+      request: (a) => crpc("cover_request", a),
+      respond: (cid, emp) => (emp ? crpc("cover_respond_for", { cid, emp }) : crpc("cover_respond", { cid })),
+      withdraw: (cid) => crpc("cover_withdraw", { cid }),
+      assign: (cid, emp, by_name) => crpc("cover_assign", { cid, emp, by_name }),
+      cancel: (cid, by_name) => crpc("cover_cancel", { cid, by_name }),
+      notify: (action, cid) => coverFn({ action, cid }),
+      test: (channel, to) => coverFn({ action: "test", channel, to }),
+      // Phone notifications ("web push"). On iPhone this needs the app added to the Home Screen first.
+      pushSupported: () => "serviceWorker" in navigator && "PushManager" in window && "Notification" in window,
+      pushState: async () => {
+        if (!window.blissCover.pushSupported()) return "unsupported";
+        if (Notification.permission === "denied") return "blocked";
+        const reg = await navigator.serviceWorker.getRegistration("/");
+        const sub = reg && (await reg.pushManager.getSubscription());
+        return sub ? "on" : "off";
+      },
+      pushOn: async () => {
+        if (!window.blissCover.pushSupported()) throw new Error("This browser can't show notifications. On iPhone, first tap Share → Add to Home Screen, then open BLISS from the Home Screen.");
+        const perm = await Notification.requestPermission();
+        if (perm !== "granted") throw new Error("Notifications are blocked. Allow them for this site in your phone's settings.");
+        const reg = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+        await navigator.serviceWorker.ready;
+        const { publicKey } = await coverFn({ action: "vapid" });
+        let sub = await reg.pushManager.getSubscription();
+        if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: b64(publicKey) });
+        const { error } = await SB.rpc("push_save", { sub: sub.toJSON() });
+        if (error) throw new Error(error.message);
+        return "on";
+      },
+      pushOff: async () => {
+        const reg = await navigator.serviceWorker.getRegistration("/");
+        const sub = reg && (await reg.pushManager.getSubscription());
+        if (sub) { await SB.rpc("push_remove", { ep: sub.endpoint }); await sub.unsubscribe(); }
+        return "off";
+      },
+    };
     hideAuth();
     // Who's who (owners and managers can read everyone; staff only themselves). Used to show reviewer names.
     SB.from("members").select("user_id,email,role").eq("org_id", ORG).then(({ data }) => { window.blissAccount.members = data || []; });

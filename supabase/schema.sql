@@ -64,7 +64,7 @@ create or replace function public.write_level(p text) returns int
 language sql stable as $$
   select case
     when split_part(p, '/', 1) = 'owner' or p = 'mgr/wages' then 4
-    when split_part(p, '/', 1) in ('mgr','config','employees','links','shifts','training') then 3
+    when split_part(p, '/', 1) in ('mgr','config','employees','links','shifts','training','cover') then 3
     when split_part(p, '/', 1) = 'trainreq'
       then case when split_part(p, '/', 2) = auth.uid()::text then 2 else 4 end
     else 2 end
@@ -389,6 +389,199 @@ create trigger docs_guard_manager before insert or update or delete on public.do
 
 -- (Removing access when a team member is deleted is handled by sync_member_roles.)
 drop trigger if exists docs_employee_removed on public.docs;
+
+-- ───────────────────────── shift cover ─────────────────────────
+-- cover/<id> documents: someone can't make a shift (or wants to swap). Staff create and answer them
+-- only through these functions, so they can't change the schedule directly.
+create or replace function public.my_emp(o uuid) returns text
+language sql stable security definer set search_path = public as $$
+  select data ->> 'empId' from public.docs where org_id = o and path = 'links/' || auth.uid()::text
+$$;
+grant execute on function public.my_emp(uuid) to authenticated;
+
+create or replace function public.emp_loc(o uuid, emp text) returns text
+language sql stable security definer set search_path = public as $$
+  select coalesce(
+    (select data ->> 'loc' from public.docs where org_id = o and path = 'employees/' || emp),
+    (select data -> 'locations' -> 0 ->> 'id' from public.docs where org_id = o and path = 'config/settings'))
+$$;
+revoke all on function public.emp_loc(uuid, text) from public, anon, authenticated;
+
+create or replace function public.cover_log(d jsonb, ev text) returns jsonb
+language sql immutable as $$
+  select jsonb_set(d, '{log}', coalesce(d -> 'log', '[]'::jsonb) || jsonb_build_array(jsonb_build_object('at', now(), 'ev', ev)))
+$$;
+
+-- Ask for cover on a shift (your own; managers can do it for anyone). Returns the cover id.
+create or replace function public.cover_request(o uuid, shift_id text, reason text default '', kind text default 'cover',
+  swap_to text default null, starts_at timestamptz default null, elig jsonb default '[]'::jsonb, by_name text default '',
+  backup text default null)
+returns text
+language plpgsql security definer set search_path = public as $$
+#variable_conflict use_column
+declare lvl int := public.my_level(o); sh jsonb; me text := public.my_emp(o); cid text; cfg jsonb; uh numeric; ex text;
+begin
+  if lvl < 2 then raise exception 'not allowed' using errcode = '42501'; end if;
+  select data into sh from public.docs where org_id = o and path = 'shifts/' || shift_id;
+  if sh is null then raise exception 'That shift no longer exists'; end if;
+  if lvl < 3 and (me is null or sh ->> 'empId' is distinct from me) then
+    raise exception 'You can only ask for cover on your own shift' using errcode = '42501'; end if;
+  if kind not in ('cover', 'swap') then kind := 'cover'; end if;
+  if kind = 'swap' and (swap_to is null or swap_to = sh ->> 'empId') then raise exception 'Choose who to swap with'; end if;
+  select doc_id into ex from public.docs where org_id = o and coll = 'cover' and data ->> 'shiftId' = shift_id and data ->> 'status' = 'open' limit 1;
+  if ex is not null then return ex; end if;
+  select data into cfg from public.docs where org_id = o and path = 'mgr/cover';
+  uh := coalesce((cfg ->> 'urgentHours')::numeric, 4);
+  cid := 'c' || to_char(now(), 'YYMMDD') || substr(md5(random()::text || clock_timestamp()::text), 1, 8);
+  if kind = 'swap' then elig := jsonb_build_array(swap_to); end if;
+  insert into public.docs(org_id, path, coll, doc_id, data) values (o, 'cover/' || cid, 'cover', cid,
+    public.cover_log(jsonb_build_object(
+      'shiftId', shift_id, 'empId', sh ->> 'empId', 'loc', coalesce(sh ->> 'loc', public.emp_loc(o, sh ->> 'empId')),
+      'date', sh ->> 'date', 'start', sh ->> 'start', 'end', sh ->> 'end',
+      'startsAt', coalesce(starts_at, ((sh ->> 'date') || ' ' || (sh ->> 'start'))::timestamp at time zone 'America/New_York'),
+      'reason', left(coalesce(reason, ''), 300), 'kind', kind, 'swapTo', swap_to, 'backup', case when kind = 'swap' then null else backup end,
+      'elig', coalesce(elig, '[]'::jsonb), 'volunteers', '{}'::jsonb, 'status', 'open', 'stage', 0, 'urgentHours', uh,
+      'createdAt', now(), 'createdBy', auth.uid(), 'createdByName', left(coalesce(by_name, ''), 80), 'byMgr', lvl >= 3 and (me is null or sh ->> 'empId' <> me)),
+    case when kind = 'swap' then 'Swap requested' when lvl >= 3 and (me is null or sh ->> 'empId' <> me) then 'Marked as can''t come by ' || coalesce(nullif(by_name, ''), 'a manager')
+         else 'Asked for cover' end));
+  return cid;
+end $$;
+grant execute on function public.cover_request(uuid, text, text, text, text, timestamptz, jsonb, text, text) to authenticated;
+
+-- Put someone on the shift and close the request.
+create or replace function public.cover_fill(o uuid, cid text, emp text, how text) returns void
+language plpgsql security definer set search_path = public as $$
+declare d jsonb; nm text;
+begin
+  select data into d from public.docs where org_id = o and path = 'cover/' || cid;
+  select data ->> 'name' into nm from public.docs where org_id = o and path = 'employees/' || emp;
+  update public.docs set data = data || jsonb_build_object('empId', emp, 'loc', coalesce(public.emp_loc(o, emp), data ->> 'loc'),
+      'coveredFrom', d ->> 'empId', 'coverId', cid)
+   where org_id = o and path = 'shifts/' || (d ->> 'shiftId');
+  update public.docs set data = public.cover_log(data || jsonb_build_object('status', 'filled', 'assigned', emp, 'filledAt', now(), 'filledHow', how),
+      coalesce(nm, 'Someone') || ' took the shift (' || how || ')')
+   where org_id = o and path = 'cover/' || cid;
+end $$;
+revoke all on function public.cover_fill(uuid, text, text, text) from public, anon, authenticated;
+
+-- "I can take it": urgent → first eligible person gets it; otherwise it's an offer the manager picks from.
+create or replace function public.cover_take(o uuid, cid text, emp text, via text) returns text
+language plpgsql security definer set search_path = public as $$
+declare d jsonb; e jsonb; urgent boolean;
+begin
+  select data into d from public.docs where org_id = o and path = 'cover/' || cid for update;
+  if d is null or d ->> 'status' <> 'open' then return 'closed'; end if;
+  if emp is null or emp = d ->> 'empId' then return 'not_allowed'; end if;
+  select data into e from public.docs where org_id = o and path = 'employees/' || emp;
+  if e is null or not coalesce((e ->> 'active')::boolean, true) then return 'not_allowed'; end if;
+  if d ->> 'kind' = 'swap' and emp is distinct from d ->> 'swapTo' then return 'not_allowed'; end if;
+  if coalesce(public.emp_loc(o, emp), '') <> coalesce(d ->> 'loc', '') then return 'not_allowed'; end if;
+  urgent := now() >= (d ->> 'startsAt')::timestamptz - make_interval(secs => coalesce((d ->> 'urgentHours')::numeric, 4) * 3600);
+  if d ->> 'kind' <> 'swap' and urgent and coalesce(d -> 'elig', '[]'::jsonb) ? emp then
+    update public.docs set data = jsonb_set(data, array['volunteers', emp], jsonb_build_object('at', now(), 'via', via))
+     where org_id = o and path = 'cover/' || cid;
+    perform public.cover_fill(o, cid, emp, 'first to accept, via ' || via);
+    return 'assigned';
+  end if;
+  update public.docs set data = public.cover_log(jsonb_set(data, array['volunteers', emp], jsonb_build_object('at', now(), 'via', via)),
+      coalesce(e ->> 'name', 'Someone') || case when d ->> 'kind' = 'swap' then ' agreed to swap' else ' offered to cover' end || ' (' || via || ')')
+   where org_id = o and path = 'cover/' || cid;
+  return 'volunteered';
+end $$;
+revoke all on function public.cover_take(uuid, text, text, text) from public, anon, authenticated;
+
+create or replace function public.cover_respond(o uuid, cid text) returns text
+language plpgsql security definer set search_path = public as $$
+begin
+  if public.my_level(o) < 2 then raise exception 'not allowed' using errcode = '42501'; end if;
+  return public.cover_take(o, cid, public.my_emp(o), 'app');
+end $$;
+grant execute on function public.cover_respond(uuid, text) to authenticated;
+
+-- Shared store phone (signed in as a manager): answer for the staff member who tapped their name.
+create or replace function public.cover_respond_for(o uuid, cid text, emp text) returns text
+language plpgsql security definer set search_path = public as $$
+begin
+  if public.my_level(o) < 3 then raise exception 'not allowed' using errcode = '42501'; end if;
+  return public.cover_take(o, cid, emp, 'store phone');
+end $$;
+grant execute on function public.cover_respond_for(uuid, text, text) to authenticated;
+
+-- Used by the "cover" Edge Function for text-message and phone-call answers.
+create or replace function public.cover_respond_as(o uuid, cid text, emp text, via text) returns text
+language sql security definer set search_path = public as $$ select public.cover_take(o, cid, emp, via) $$;
+revoke all on function public.cover_respond_as(uuid, text, text, text) from public, anon, authenticated;
+grant execute on function public.cover_respond_as(uuid, text, text, text) to service_role;
+
+create or replace function public.cover_withdraw(o uuid, cid text) returns void
+language plpgsql security definer set search_path = public as $$
+declare me text := public.my_emp(o);
+begin
+  update public.docs set data = public.cover_log(data #- array['volunteers', me], 'An offer was withdrawn')
+   where org_id = o and path = 'cover/' || cid and data ->> 'status' = 'open' and data -> 'volunteers' ? me;
+end $$;
+grant execute on function public.cover_withdraw(uuid, text) to authenticated;
+
+-- Managers: give the shift to someone (usually one of the people who offered).
+create or replace function public.cover_assign(o uuid, cid text, emp text, by_name text default '') returns text
+language plpgsql security definer set search_path = public as $$
+declare d jsonb;
+begin
+  if public.my_level(o) < 3 then raise exception 'Only a manager can assign the shift' using errcode = '42501'; end if;
+  select data into d from public.docs where org_id = o and path = 'cover/' || cid for update;
+  if d is null or d ->> 'status' <> 'open' then return 'closed'; end if;
+  if emp = d ->> 'empId' then raise exception 'That is the person who can''t come'; end if;
+  perform public.cover_fill(o, cid, emp, case when d ->> 'kind' = 'swap' then 'swap approved by ' else 'picked by ' end || coalesce(nullif(by_name, ''), 'a manager'));
+  return 'assigned';
+end $$;
+grant execute on function public.cover_assign(uuid, text, text, text) to authenticated;
+
+-- The person who asked, or a manager, can call it off (e.g. they can come after all).
+create or replace function public.cover_cancel(o uuid, cid text, by_name text default '') returns void
+language plpgsql security definer set search_path = public as $$
+declare d jsonb;
+begin
+  select data into d from public.docs where org_id = o and path = 'cover/' || cid;
+  if d is null then return; end if;
+  if public.my_level(o) < 3 and d ->> 'empId' is distinct from public.my_emp(o) then
+    raise exception 'not allowed' using errcode = '42501'; end if;
+  update public.docs set data = public.cover_log(data || jsonb_build_object('status', 'cancelled', 'cancelledAt', now()),
+      'Called off by ' || coalesce(nullif(by_name, ''), 'someone'))
+   where org_id = o and path = 'cover/' || cid and data ->> 'status' = 'open';
+end $$;
+grant execute on function public.cover_cancel(uuid, text, text) to authenticated;
+
+-- Phone push notifications: each phone/browser that turned them on.
+create table if not exists public.push_subs (
+  endpoint   text primary key,
+  user_id    uuid not null references auth.users(id) on delete cascade,
+  sub        jsonb not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists push_subs_user_idx on public.push_subs(user_id);
+alter table public.push_subs enable row level security;
+drop policy if exists push_own on public.push_subs;
+create policy push_own on public.push_subs for select to authenticated using (user_id = auth.uid());
+
+create or replace function public.push_save(sub jsonb) returns void
+language plpgsql security definer set search_path = public as $$
+begin
+  if auth.uid() is null or coalesce(sub ->> 'endpoint', '') !~ '^https://' then raise exception 'bad subscription'; end if;
+  insert into public.push_subs(endpoint, user_id, sub) values (sub ->> 'endpoint', auth.uid(), sub)
+    on conflict (endpoint) do update set user_id = excluded.user_id, sub = excluded.sub;
+end $$;
+grant execute on function public.push_save(jsonb) to authenticated;
+
+create or replace function public.push_remove(ep text) returns void
+language sql security definer set search_path = public as $$
+  delete from public.push_subs where endpoint = ep and user_id = auth.uid()
+$$;
+grant execute on function public.push_remove(text) to authenticated;
+
+-- Keys only the server can see (the phone-push signing key). No one signed in can read this table.
+create table if not exists public.app_secrets (k text primary key, v text not null);
+alter table public.app_secrets enable row level security;
+revoke all on public.app_secrets from anon, authenticated;
 
 -- ───────────────────────── realtime ─────────────────────────
 do $$ begin

@@ -89,6 +89,7 @@ main{padding-block:16px 110px}
 .chips button{flex:none;border:1px solid var(--line);background:var(--surface);border-radius:12px;padding:6px 10px;cursor:pointer;text-align:center;min-width:52px}
 .chips button.on{background:var(--brand);color:var(--brand-ink);border-color:var(--brand)}
 .chips button b{display:block;font-size:16px}
+.chips button{position:relative}.nobk{position:absolute;top:4px;right:4px;width:8px;height:8px;border-radius:50%;background:var(--bad)}
 .chips button span{font-size:11px;opacity:.8}
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 .stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:10px}
@@ -241,6 +242,7 @@ const ICON={
  spark:'<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8z"/>',
  link:'<path d="M10 14a4 4 0 005.7 0l3-3a4 4 0 00-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 00-5.7 0l-3 3a4 4 0 005.7 5.7l1-1"/>',
  list:'<path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01"/>',doc:'<path d="M6 2h9l5 5v15H6z"/><path d="M14 2v6h6"/>',
+ bell:'<path d="M6 16V11a6 6 0 0112 0v5l1.5 2h-15z"/><path d="M10 20a2 2 0 004 0"/>',
  star:'<path d="M12 3l2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9z"/>',
 };
 const ic=(n,c='i')=>`<svg class="${c}" viewBox="0 0 24 24" aria-hidden="true">${ICON[n]||''}</svg>`;
@@ -491,7 +493,7 @@ function countRows(d,mgr){return usedFreqs().filter(f=>mgr||!MGR_ONLY_FREQ.inclu
   const sub=g.st==='done'?`${esc(empName(g.by))} · ${fmtT(hm(new Date(g.at)))}`:`${n} items${g.last&&f!=='daily'?` · last ${fmtD(g.last.date,{month:'short',day:'numeric'})}`:''}`;
   const c=g.st==='done'?chip('ok','Done'):g.st==='overdue'?chip('bad','Overdue'):chip(f==='daily'?'':'warn',f==='daily'?'Tonight':'Due today');
   return `<div class="li tap" data-act="countSheet" data-f="${f}" tabindex="0">${ic('list')}<div class="grow"><div class="t">${t}${MGR_ONLY_FREQ.includes(f)?' <span class="chip" style="vertical-align:1px">Manager</span>':''}</div><div class="small muted">${sub}</div></div>${c}${ic('chev')}</div>`}).join('')}
-function badgeCount(){if(mode()!=='mgr')return 0;return attention().length}
+function badgeCount(){if(mode()!=='mgr')return 0;return attention().length+coverOpen().filter(c=>c.loc===curLoc()).length}
 // Tasks from the last 7 days that staff finished (or ran out of time on) and no manager has reviewed yet.
 function toReview(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.filled&&['ontime','late','missed'].includes(s.st)&&!s.doc?.review)r.push({d,type:T.type,st:s.st})})}return r.sort((a,b)=>a.d.localeCompare(b.d))}
 function missedTasks(){const t=bizDate();const r=[];for(let i=0;i<7;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.st==='missed'&&!s.filled)r.push({d,type:T.type})})}return r}
@@ -574,6 +576,7 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
     :`<button class="btn pri big block" data-act="clockIn">${ic('clock')} ${L('Clock in','上班打卡')}</button>`}
     ${todayP.filter(p=>p.out).map(p=>`<div class="small muted">${fmtT(hm(new Date(p.in)))} – ${fmtT(hm(new Date(p.out)))} · ${fmtH(punchHrs(p))} h</div>`).join('')}
   </div>
+  ${coverStaffCard(me)}${pushCard()}
   ${availCard(me)}
   <h3>${L('Today’s tasks','今日任务')}</h3>
   ${allTasksDone(d)?`<div class="card row" style="gap:12px;border-left:4px solid var(--ok);background:var(--ok-bg)"><span style="font-size:24px;color:var(--ok)">✓</span><div class="grow"><div class="t">All of today's tasks are done</div><div class="small muted">Thank you!</div></div></div>`:''}
@@ -589,9 +592,9 @@ function vEShift(){const me=actor(),d=today();const up=Object.values(D.shifts).f
   const ws=weekStart(d),we=addDays(ws,6);const wk=Object.values(D.punches).filter(p=>p.empId===me&&p.date>=ws&&p.date<=we);const hrs=wk.reduce((s,p)=>s+punchHrs(p),0);
   const a=D.avail[me];
   return `<div class="stack"><div class="row"><h2 class="grow">${L('My shifts','我的排班')}</h2>${A.downloads&&up.length?`<button class="btn sm" data-act="ics">${ic('dl')} ${L('Add to calendar','加入日历')}</button>`:''}</div>
-  ${availCard(me)}
+  ${coverStaffCard(me)}${availCard(me)}${backupDuty(me)}
   <div class="stats" style="grid-template-columns:1fr 1fr"><div class="stat"><b>${fmtH(hrs)}</b><span>${L('Hours this week','本周工时')}</span></div><div class="stat"><b>${up.length}</b><span>${L('Upcoming shifts','即将的班次')}</span></div></div>
-  ${up.length?`<div class="card flush list">${up.map(s=>`<div class="li"><div class="grow"><div class="t">${fmtD(s.date)}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)} · ${fmtH(shiftHrs(s))} h${s.note?' · '+esc(s.note):''}</div></div>${s.date===d?chip('brand',L('Today','今天')):''}</div>`).join('')}</div>`
+  ${up.length?`<div class="card flush list">${up.map(s=>`<div class="li"><div class="grow"><div class="t">${fmtD(s.date)}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)} · ${fmtH(shiftHrs(s))} h${s.note?' · '+esc(s.note):''}</div></div>${s.date===d?chip('brand',L('Today','今天')):''}${coverFor(s.id)?`<button class="btn sm" data-act="cvOpen" data-id="${esc(coverFor(s.id).id)}">Finding cover…</button>`:atTime(s.date,s.start).getTime()>Date.now()?`<button class="btn sm" data-act="cvCant" data-id="${s.id}">Can't make it</button>`:''}</div>`).join('')}</div>`
    :`<div class="empty card"><b>${L('No upcoming shifts','暂无排班')}</b>${L('Your manager will post the schedule here.','经理排班后会显示在这里。')}</div>`}
   ${(()=>{const ws=UI.ew||weekStart(today());const days=[...Array(7)].map((_,i)=>addDays(ws,i));
     const view=UI.ewView||'list';const wkSh=days.flatMap(x=>shiftsOn(x));
@@ -651,6 +654,7 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
   return `<div class="stack">${isMgr&&!isOwner&&!D.links[uid]?`<div class="hint warn">Your account isn't linked to a store yet. Ask the owner to link you in Team → People, then you'll only see your store.</div>`:''}<div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${esc(locName(curLoc()))}</div><h2>${L('Today at BLISS','BLISS 今日')}</h2></div>
   <div class="stats"><div class="stat"><b>${onNow}</b><span>${L('Clocked in now','正在上班')}</span></div><div class="stat"><b>${tdone}/${tasksOn(d).length+1}</b><span>${L('Tasks done','任务完成')}</span></div><div class="stat"><b style="color:${low?'var(--warn)':'inherit'}">${low}</b><span>${L('Low / out items','库存偏低')}</span></div><div class="stat"><b>${arriving}</b><span>${L('Deliveries due','待到货')}</span></div></div>
   ${actor()?(openPunch(actor())?`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock out (me)</button>`:`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock in (me)</button>`):''}
+  ${coverMgrCard()}
   ${attnList(att)}
   ${reviewCard()}
   <h3>${L('Shifts today','今日班次')}</h3>
@@ -729,9 +733,10 @@ function schedPlan(){const ws=UI.week||weekStart(today());const day=UI.day&&UI.d
   const days=[...Array(7)].map((_,i)=>addDays(ws,i));const list=shiftsOn(day);
   const ems=emps();const wkH={};Object.values(D.shifts).forEach(s=>{if(s.date>=ws&&s.date<=addDays(ws,6))wkH[s.empId]=(wkH[s.empId]||0)+shiftHrs(s)});
   return `<div class="row"><button class="btn sm" data-act="wk" data-n="-7" aria-label="${L('Previous week','上一周')}">${ic('left')}</button><div class="grow" style="text-align:center;font-weight:700">${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(addDays(ws,6),{month:'short',day:'numeric'})}</div><button class="btn sm" data-act="wk" data-n="7" aria-label="${L('Next week','下一周')}">${ic('chev')}</button></div>
-  <div class="chips">${days.map(x=>{const n=shiftsOn(x).length;return `<button class="${x===day?'on':''}" data-act="day" data-d="${x}"><span>${WD()[parseYmd(x).getDay()]} ${parseYmd(x).getDate()}</span><b>${n||'·'}</b></button>`}).join('')}</div>
+  <div class="chips">${days.map(x=>{const n=shiftsOn(x).length;return `<button class="${x===day?'on':''}" data-act="day" data-d="${x}"><span>${WD()[parseYmd(x).getDay()]} ${parseYmd(x).getDate()}</span><b>${n||'·'}</b>${noBackupCount([x])?'<i class="nobk" title="A shift has no backup"></i>':''}</button>`}).join('')}</div>
+  ${(()=>{const n=noBackupCount(days);return n?`<div class="hint warn">⚠ ${n} shift${n===1?' has':'s have'} no backup this week: no one else is free then. Ask someone to open up their availability, or move the shift.</div>`:days.some(x=>shiftsOn(x).length)?`<div class="small muted">✓ Every upcoming shift this week has a backup person.</div>`:''})()}
   <div class="card flush list"><div class="li" style="background:var(--sunk);min-height:0;padding-block:10px"><span class="eyebrow grow">${fmtD(day,{weekday:'long',month:'short',day:'numeric'})}</span><button class="btn sm pri" data-act="shiftEdit" data-d="${day}">${ic('plus')} ${L('Add shift','加班次')}</button></div>
-   ${list.length?list.map(s=>`<div class="li tap" data-act="shiftEdit" data-id="${s.id}" tabindex="0">${avatar(s.empId)}<div class="grow"><div class="t">${esc(empName(s.empId))}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)} · ${fmtH(shiftHrs(s))} h${s.note?' · '+esc(s.note):''}</div></div>${list.some(x=>x!==s&&x.empId===s.empId&&ovl(x,s))?chip('bad','Double-booked'):availChip(availFor(s.empId,s.date,s.start,s.end))}</div>`).join(''):`<div class="empty">${L('No shifts this day','这天没有班次')}</div>`}</div>
+   ${list.length?list.map(s=>`<div class="li tap" data-act="shiftEdit" data-id="${s.id}" tabindex="0">${avatar(s.empId)}<div class="grow"><div class="t">${esc(empName(s.empId))}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)} · ${fmtH(shiftHrs(s))} h${s.note?' · '+esc(s.note):''}</div>${backupLine(s)}</div>${coverFor(s.id)?chip('warn','Needs cover'):''}${list.some(x=>x!==s&&x.empId===s.empId&&ovl(x,s))?chip('bad','Double-booked'):availChip(availFor(s.empId,s.date,s.start,s.end))}</div>`).join(''):`<div class="empty">${L('No shifts this day','这天没有班次')}</div>`}</div>
   <div class="g2"><button class="btn pri" data-act="autoSched">${ic('spark')} Auto-schedule</button><button class="btn" data-act="chartView">${ic('cal')} Chart view</button></div>
   <div class="row"><button class="btn sm" data-act="copyWeek" data-ws="${ws}">${L('Copy last week’s shifts','复制上周排班')}</button></div>
   <div class="card stack"><h3>${L('Scheduled hours this week','本周排班工时')}</h3>${ems.length?ems.map(e=>`<div class="row">${avatar(e.id)}<span class="grow">${esc(e.name)}</span><b>${fmtH(wkH[e.id]||0)} h</b></div>`).join(''):`<div class="muted small">${L('Add team members in the Team tab.','请先在"团队"添加员工。')}</div>`}</div>`}
@@ -819,6 +824,7 @@ function teamSet(){const s=D.settings;
   return `${isOwner?`<div class="card stack"><h3>Preview other views</h3><p class="small muted">See the app the way a store manager or a staff member sees it. Nothing changes for anyone else. Tap "Exit preview" to come back.</p><div class="g2"><button class="btn" data-act="pvStart" data-k="mgr">${ic('users')} Preview as manager</button><button class="btn" data-act="pvStart" data-k="emp">${ic('clock')} Preview as staff</button></div></div>`:''}
   ${accountCard()}
   ${isOwner&&!UI.pv?businessCard():''}
+  ${coverSetCard()}
   <div class="card stack"><h3>Time rules</h3>
    <div class="row wrapr"><span class="small muted grow">Task names, items and due times (prep, closing, deep cleaning and your own tasks) are set in Tasks.</span><button class="btn sm" data-act="slotEdit">${ic('list')} Edit tasks & times</button></div>
    <div class="g3"><label class="f">${L('Photo grace (min)','照片宽限(分)')}<input class="in" type="number" id="st_pg" value="${s.photoGrace}"></label><label class="f">${L('Late after (min)','迟到宽限(分)')}<input class="in" type="number" id="st_lg" value="${s.lateGrace}"></label><label class="f">${L('OT after (h/wk)','加班线(时/周)')}<input class="in" type="number" id="st_ot" value="${s.otWeekly}"></label></div>
@@ -1143,7 +1149,9 @@ function shiftSheet(id,date){const s=id?D.shifts[id]:{empId:'',date,start:'11:00
    <div class="g2"><label class="f">${L('Start','开始')}<input class="in" type="time" id="sh_start" value="${esc(s.start)}"></label><label class="f">${L('End','结束')}<input class="in" type="time" id="sh_end" value="${esc(s.end)}"></label></div>
    <div class="row wrapr">${[['10:30','16:30'],['11:00','17:00'],['16:00','22:30'],['17:00','23:00']].map(([a,b])=>`<button class="btn sm" data-act="shPreset" data-a="${a}" data-b="${b}">${fmtT(a)}–${fmtT(b)}</button>`).join('')}</div>
    <div class="eyebrow">${L('Who','员工')}</div><div class="card flush list" id="sh_emps">${shEmpList(ems,s)}</div>
-   <label class="f">${L('Note','备注')}<input class="in" id="sh_note" value="${esc(s.note||'')}" placeholder="${L('e.g. opening, closing','例如：开店、打烊')}"></label>`,
+   <label class="f">${L('Note','备注')}<input class="in" id="sh_note" value="${esc(s.note||'')}" placeholder="${L('e.g. opening, closing','例如：开店、打烊')}"></label>
+   ${id?(()=>{const c=backupCands(s);return `<label class="f">Backup (asked first if they can't come)<select class="in" id="sh_backup"><option value="">${c.length?'Automatic: '+esc(empName(c[0])):'No one is free then'}</option>${c.map(e=>`<option value="${e}" ${s.backup===e?'selected':''}>${esc(empName(e))}</option>`).join('')}</select>${c.length?'':'<span class="tiny" style="color:var(--bad)">No one else has this time open in their availability.</span>'}</label>`})():''}
+   ${id&&atTime(s.date,s.start).getTime()>Date.now()?(coverFor(id)?`<button class="btn block" data-act="cvOpen" data-id="${esc(coverFor(id).id)}">Finding cover… see offers</button>`:`<button class="btn block" data-act="cvCant" data-id="${id}">${ic('users')} Mark can't come · find cover</button>`):''}`,
    foot:()=>`${id?`<button class="btn bad" data-act="shiftDel" data-id="${id}">${L('Delete','删除')}</button>`:''}<button class="btn pri" data-act="shiftSave" data-id="${id||''}">${L('Save','保存')}</button>`,
    mount:()=>{SH.emp=s.empId;['sh_date','sh_start','sh_end'].forEach(k=>{const el=$('#'+k);el&&el.addEventListener('change',()=>{$('#sh_emps').innerHTML=shEmpList(ems,{empId:SH.emp,date:$('#sh_date').value,start:$('#sh_start').value,end:$('#sh_end').value})})})}})}
 function shEmpList(emps,s){return emps.map(e=>{const av=availFor(e.id,s.date,s.start,s.end);const clash=Object.values(D.shifts).some(x=>x.empId===e.id&&x.date===s.date&&x!==D.shifts[SH?.editId]&&toMin(x.start)<toMin(s.end)&&toMin(s.start)<toMin(x.end));
@@ -1432,7 +1440,7 @@ const ACT={
  shPreset:d=>{$('#sh_start').value=d.a;$('#sh_end').value=d.b;$('#sh_start').dispatchEvent(new Event('change'))},
  shEmp:(d,el)=>{SH.emp=el.value},
  shiftSave:async d=>{const emp=document.querySelector('input[name=sh_emp]:checked')?.value;if(!emp){toast(L('Choose who works this shift','请选择员工'));return}
-   const body={empId:emp,loc:locOf(emp),date:$('#sh_date').value,start:$('#sh_start').value,end:$('#sh_end').value,note:$('#sh_note').value.trim()};if(!body.date||!body.start||!body.end)return;
+   const body={empId:emp,loc:locOf(emp),date:$('#sh_date').value,start:$('#sh_start').value,end:$('#sh_end').value,note:$('#sh_note').value.trim()};const bk=$('#sh_backup')?.value;if(bk)body.backup=bk;if(!body.date||!body.start||!body.end)return;
    if(await W(A.db.doc('shifts/'+(d.id||uidGen())).set(body))){UI.day=body.date;closeSheet()}},
  shiftDel:async d=>{if(await W(A.db.doc('shifts/'+d.id).delete()))closeSheet()},
  copyWeek:async d=>{const prev=addDays(d.ws,-7);const src=Object.values(D.shifts).filter(s=>s.date>=prev&&s.date<=addDays(prev,6)&&locOf(s.empId)===curLoc());if(!src.length){toast(L('Last week has no shifts','上周没有排班'));return}
@@ -1704,19 +1712,143 @@ async function boot(){
   subscribe(db.collection('shifts').where('date','>=',from),s=>{D.shifts=mapDocs(s)});
   subscribe(db.collection('punches').where('date','>=',from),s=>{D.punches=mapDocs(s)});
   subscribe(db.collection('availability'),s=>{D.avail=mapDocs(s)});
+  subscribe(db.collection('cover').where('date','>=',addDays(today(),-14)),s=>{D.cover=mapDocs(s)});
   subscribe(db.collection('training'),s=>{D.training=mapDocs(s)});
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
       window.blissAccount.ensureUsers(em).then(()=>{try{localStorage.setItem(k,t)}catch{}}).catch(e=>console.warn('acct sync',e))},3000)}
   if(uid&&!isOwner){const l=await db.doc('links/'+uid).get().catch(()=>null);if(!l?.exists){db.doc('pending/'+uid).set({at:new Date().toISOString()}).catch(()=>{})}}
-  render();
+  render();coverBoot();
   setInterval(()=>{if(!SH&&!typing($('#view')))render()},60000);
 }
+/* ---------- shift cover ---------- */
+const CV=()=>window.blissCover;
+const COVER_DEF={push:true,email:true,sms:false,call:false,smsAfter:15,callAfter:30,urgentHours:4,alertPhones:[]};
+const coverCfg=()=>({...COVER_DEF,...(D.coverCfg||{})});
+const covers=()=>Object.values(D.cover||{});
+const cvStart=c=>new Date(c.startsAt||atTime(c.date,c.start)).getTime();
+const coverOpen=()=>covers().filter(c=>c.status==='open'&&cvStart(c)>Date.now()).sort((a,b)=>cvStart(a)-cvStart(b));
+const coverFor=sid=>covers().find(c=>c.shiftId===sid&&c.status==='open'&&cvStart(c)>Date.now());
+const coverUrgent=c=>Date.now()>=cvStart(c)-(+c.urgentHours||4)*36e5;
+const cvWhen=c=>`${fmtD(c.date,{weekday:'short',month:'short',day:'numeric'})} · ${fmtT(c.start)}–${fmtT(c.end)}`;
+const first=id=>empName(id).split(' ')[0];
+const cvClash=(emp,c)=>Object.values(D.shifts).some(x=>x.empId===emp&&x.date===c.date&&x.id!==(c.shiftId||c.id)&&(()=>{const a=toMin(x.start);let b=toMin(x.end);if(b<=a)b+=1440;const s=toMin(c.start);let e=toMin(c.end);if(e<=s)e+=1440;return a<e&&s<b})());
+// First guess at who can cover (the server checks again, including max weekly hours).
+function coverEligLocal(s){const loc=s.loc||locOf(s.empId);
+  return Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&locOf(e.id)===loc&&!cvClash(e.id,s)&&!['no','off'].includes(availFor(e.id,s.date,s.start,s.end))).map(e=>e.id)}
+async function cvRun(p,okMsg){try{const r=await p;if(okMsg)toast(okMsg);return r??true}catch(e){console.warn(e);toast(e?.message||'Something went wrong');return null}}
+const cvNotify=(a,cid)=>CV()?.notify(a,cid).catch(e=>console.warn('cover notify',e));
+
+// Staff (or a manager for someone): "Can't make it"
+function cantSheet(sid){const s=D.shifts[sid];if(!s)return;const forOther=mode()==='mgr'&&s.empId!==actor();
+  const mates=Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&locOf(e.id)===(s.loc||locOf(s.empId))).sort((a,b)=>a.name.localeCompare(b.name));
+  const el=coverEligLocal(s);const uh=coverCfg().urgentHours;const urgent=Date.now()>=atTime(s.date,s.start).getTime()-uh*36e5;
+  openSheet({title:()=>forOther?`${esc(first(s.empId))} can't come`:"Can't make this shift",body:()=>`
+   <div class="card row">${ic('cal')}<div class="grow"><div class="t">${fmtD(s.date,{weekday:'long',month:'short',day:'numeric'})}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)}${forOther?' · '+esc(empName(s.empId)):''}</div></div></div>
+   <label class="f">What happened? <span class="muted">(optional)</span><input class="in" id="cv_reason" maxlength="200" placeholder="e.g. sick, family emergency, car trouble"></label>
+   <div class="eyebrow">How should we find cover?</div>
+   <div class="card flush list">
+    <label class="li tap"><input type="radio" name="cv_kind" value="cover" checked><div class="grow"><div class="t">Ask everyone who can cover</div><div class="small muted">${el.length} ${el.length===1?'person is':'people are'} free then. Everyone is notified, and so is the manager.</div></div></label>
+    <label class="li tap"><input type="radio" name="cv_kind" value="swap"><div class="grow"><div class="t">Swap with a coworker</div><div class="small muted">Pick who. They agree, then the manager approves.</div></div></label></div>
+   <label class="f" id="cv_swapf" hidden>Swap with<select class="in" id="cv_swap"><option value="">Choose…</option>${mates.map(e=>`<option value="${e.id}">${esc(e.name)}${el.includes(e.id)?'':cvClash(e.id,s)?' (already working then)':' (not on their availability)'}</option>`).join('')}</select></label>
+   <div class="hint">${urgent?`This shift starts within ${uh} hours, so the first person who can cover and accepts gets it right away. The manager is told.`:`The manager picks from the people who offer. Within ${uh} hours of the shift, the first person to accept gets it.`}</div>`,
+   foot:()=>`<button class="btn" data-act="closeSheet">Back</button><button class="btn pri" data-act="cvSend" data-id="${sid}">Send</button>`,
+   mount:()=>{document.querySelectorAll('input[name=cv_kind]').forEach(r=>r.addEventListener('change',()=>{$('#cv_swapf').hidden=r.value!=='swap'||!r.checked}))}})}
+
+function coverStaffCard(me){if(!me)return'';const loc=locOf(me);
+  const mine=covers().filter(c=>c.empId===me&&cvStart(c)>Date.now()-36e5&&['open','filled'].includes(c.status)&&c.date>=addDays(today(),-1));
+  const ask=coverOpen().filter(c=>c.empId!==me&&c.loc===loc&&(c.kind==='swap'?c.swapTo===me:((c.elig||[]).includes(me)||!cvClash(me,c))));
+  if(!ask.length&&!mine.length)return'';
+  return `${ask.length?`<div class="card stack" style="border-left:4px solid var(--warn)"><div class="row"><span style="font-size:20px">🙋</span><h3 class="grow">${ask.length===1?'A shift needs cover':ask.length+' shifts need cover'}</h3></div>
+   <div class="list">${ask.map(c=>{const vol=c.volunteers?.[me];const urg=coverUrgent(c)&&c.kind!=='swap';return `<div class="li" style="padding-inline:0;align-items:flex-start"><div class="grow tap" data-act="cvOpen" data-id="${esc(c.id)}"><div class="t">${cvWhen(c)}</div><div class="small muted">${c.kind==='swap'?`${esc(first(c.empId))} asked you to take this shift`:`${esc(first(c.empId))} can't make it`}${urg?' · first to accept gets it':''}</div></div>
+    ${vol?`<div class="stack" style="gap:4px;align-items:flex-end">${chip('ok','Offered ✓')}${isMgr?'':`<button class="btn sm" data-act="cvWithdraw" data-id="${esc(c.id)}">Withdraw</button>`}</div>`:`<button class="btn sm ${urg?'pri':''}" data-act="cvTake" data-id="${esc(c.id)}">${c.kind==='swap'?"Yes, I'll take it":'I can take it'}</button>`}</div>`}).join('')}</div>
+   <div class="tiny muted">${ask.some(c=>!coverUrgent(c)||c.kind==='swap')?'The manager confirms who gets it. You\'ll be told.':''}</div></div>`:''}
+  ${mine.map(c=>c.status==='filled'?`<div class="card row" style="border-left:4px solid var(--ok)">${ic('check')}<div class="grow"><div class="t">Your shift is covered</div><div class="small muted">${cvWhen(c)} · ${esc(empName(c.assigned))} is taking it</div></div></div>`
+   :`<div class="card row tap" data-act="cvOpen" data-id="${esc(c.id)}" style="border-left:4px solid var(--info)"><div class="grow"><div class="t">Finding cover for your shift</div><div class="small muted">${cvWhen(c)} · ${Object.keys(c.volunteers||{}).length?Object.keys(c.volunteers).length+' offered, waiting for the manager':'no one has offered yet'}</div></div>${ic('chev')}</div>`).join('')}`}
+
+function pushCard(){const s=UI.push;if(UI.kiosk||!CV()||s==='on'||!s||ls.get('pushNo')===today())return'';
+  if(s==='unsupported'){const ios=/iPhone|iPad/.test(navigator.userAgent);return ios?`<div class="card stack"><div class="t">Get alerts when a shift needs cover</div><div class="small muted">On iPhone: tap Share ⬆︎ → <b>Add to Home Screen</b>, then open BLISS from your Home Screen and turn notifications on.</div><button class="btn sm" data-act="pushLater">Not now</button></div>`:''}
+  if(s==='blocked')return'';
+  return `<div class="card row wrapr"><span style="font-size:20px">🔔</span><div class="grow"><div class="t">Turn on notifications</div><div class="small muted">Get an alert on this phone when a shift needs cover.</div></div><button class="btn sm" data-act="pushLater">Not now</button><button class="btn sm pri" data-act="pushOn">Turn on</button></div>`}
+
+// Manager: requests at this store
+function coverMgrCard(){const loc=curLoc();const open=coverOpen().filter(c=>c.loc===loc);
+  const done=covers().filter(c=>c.loc===loc&&c.status==='filled'&&c.filledAt&&Date.now()-new Date(c.filledAt).getTime()<864e5);
+  if(!open.length&&!done.length)return'';
+  return `<h3>${open.length?'Shifts need cover':'Covered today'}</h3>${open.map(c=>{const vols=Object.entries(c.volunteers||{}).sort((a,b)=>String(a[1].at).localeCompare(String(b[1].at)));const urg=coverUrgent(c);
+   return `<div class="card stack" style="border-left:4px solid ${urg?'var(--bad)':'var(--warn)'}">
+    <div class="row tap" data-act="cvOpen" data-id="${esc(c.id)}">${avatar(c.empId)}<div class="grow"><div class="t">${c.kind==='swap'?`${esc(first(c.empId))} → ${esc(first(c.swapTo))} swap`:`${esc(first(c.empId))} can't make it`}</div><div class="small muted">${cvWhen(c)}${c.reason?' · '+esc(c.reason):''}</div></div>${urg&&c.kind!=='swap'?chip('bad','Urgent'):''}${ic('chev')}</div>
+    ${vols.length?`<div class="list">${vols.map(([e,v])=>`<div class="li" style="padding-inline:0">${avatar(e)}<div class="grow"><div class="t">${esc(empName(e))}</div><div class="small muted">${c.kind==='swap'?'Agreed':'Offered'} ${v.at?fmtDT(v.at):''}${v.via&&v.via!=='app'?' · by '+esc(v.via):''}</div></div><button class="btn sm pri" data-act="cvAssign" data-id="${esc(c.id)}" data-e="${esc(e)}">${c.kind==='swap'?'Approve':'Give it to '+esc(first(e))}</button></div>`).join('')}</div>`
+     :`<div class="small muted">${c.kind==='swap'?`Waiting for ${esc(first(c.swapTo))} to agree.`:`No offers yet. ${(c.elig||[]).length} people notified${c.stage>=3?', texted and called':c.stage>=2?' and texted':''}.`}</div>${c.kind!=='swap'&&c.backup?(()=>{const ph=D.employees[c.backup]?.phone||'';const tel=ph.replace(/[^\d+]/g,'');return `<div class="row wrapr" style="gap:6px"><span class="small grow">Backup: <b>${esc(empName(c.backup))}</b> (free then, asked first)</span>${tel?`<a class="btn sm" href="tel:${esc(tel)}">Call</a><a class="btn sm" href="sms:${esc(tel)}">Text</a>`:'<span class="tiny muted">no phone saved</span>'}</div>`})():c.kind!=='swap'?'<div class="small" style="color:var(--bad)">⚠ No backup: no one else had this time open.</div>':''}`}
+    <div class="row wrapr"><button class="btn sm" data-act="cvOpen" data-id="${esc(c.id)}">Pick someone else</button><button class="btn sm" data-act="cvCancel" data-id="${esc(c.id)}">They can come after all</button></div></div>`}).join('')}
+  ${done.length?`<div class="card flush list">${done.map(c=>`<div class="li tap" data-act="cvOpen" data-id="${esc(c.id)}">${avatar(c.assigned)}<div class="grow"><div class="t">${esc(first(c.assigned))} covers for ${esc(first(c.empId))}</div><div class="small muted">${cvWhen(c)}</div></div>${chip('ok','Covered')}</div>`).join('')}</div>`:''}`}
+
+function coverSheet(cid){openSheet({live:true,title:()=>{const c=D.cover[cid];return c?(c.kind==='swap'?'Shift swap':'Shift cover'):'Shift cover'},body:()=>{const c=D.cover[cid];if(!c)return '<div class="empty">This request is gone.</div>';
+  const me=actor();const mgr=mode()==='mgr';const st=c.status==='open'&&cvStart(c)<=Date.now()?'expired':c.status;
+  const head=`<div class="card stack"><div class="row">${avatar(c.empId)}<div class="grow"><div class="t">${esc(empName(c.empId))}${c.kind==='swap'?` → ${esc(empName(c.swapTo))}`:''}</div><div class="small muted">${cvWhen(c)} · ${esc(locName(c.loc))}</div></div>${chip({open:coverUrgent(c)?'bad':'warn',filled:'ok',cancelled:'',expired:''}[st]||'',{open:coverUrgent(c)&&c.kind!=='swap'?'Urgent':'Open',filled:'Covered',cancelled:'Called off',expired:'Not covered'}[st]||st)}</div>${c.reason?`<div class="small">“${esc(c.reason)}”</div>`:''}${st==='filled'?`<div class="t" style="color:var(--ok)">${esc(empName(c.assigned))} is covering.</div>`:''}</div>`;
+  if(!mgr){const vol=c.volunteers?.[me];const can=st==='open'&&c.empId!==me&&(c.kind!=='swap'||c.swapTo===me);
+   return head+(can?(vol?`<div class="hint">You offered. The manager will confirm.</div>${isMgr?'':`<button class="btn block" data-act="cvWithdraw" data-id="${esc(cid)}">Withdraw my offer</button>`}`:`<button class="btn pri big block" data-act="cvTake" data-id="${esc(cid)}">${c.kind==='swap'?"Yes, I'll take it":'I can take it'}</button><div class="small muted">${coverUrgent(c)&&c.kind!=='swap'?'First to accept gets it.':'The manager picks from everyone who offers.'}</div>`):'')+(st==='open'&&c.empId===me?`<button class="btn block" data-act="cvCancel" data-id="${esc(cid)}">I can come after all</button>`:'')}
+  const vols=c.volunteers||{};const cand=Object.values(D.employees).filter(e=>e.active!==false&&e.id!==c.empId&&locOf(e.id)===c.loc).sort((a,b)=>(vols[b.id]?1:0)-(vols[a.id]?1:0)||((c.elig||[]).includes(b.id)?1:0)-((c.elig||[]).includes(a.id)?1:0)||a.name.localeCompare(b.name));
+  return head+(st==='open'?`<div class="eyebrow">Give the shift to</div><div class="card flush list">${cand.map(e=>{const clash=cvClash(e.id,c);return `<div class="li">${avatar(e.id)}<div class="grow"><div class="t">${esc(e.name)}</div><div class="small muted">${vols[e.id]?`<b style="color:var(--ok)">${c.kind==='swap'?'Agreed':'Offered'}</b>${vols[e.id].via&&vols[e.id].via!=='app'?' by '+esc(vols[e.id].via):''} · `:''}${esc(e.phone||'no phone')}</div></div>${clash?chip('bad','Already on'):availChip(availFor(e.id,c.date,c.start,c.end))}<button class="btn sm ${vols[e.id]?'pri':''}" data-act="cvAssign" data-id="${esc(cid)}" data-e="${esc(e.id)}">Assign</button></div>`}).join('')}</div>
+    <button class="btn block" data-act="cvCancel" data-id="${esc(cid)}">${esc(first(c.empId))} can come after all</button>`:'')+
+   `<div class="eyebrow">What happened</div><div class="card stack" style="gap:6px">${(c.log||[]).map(l=>`<div class="row small" style="gap:10px;align-items:flex-start"><span class="muted" style="width:92px;flex:none">${fmtDT(l.at)}</span><span class="grow">${esc(l.ev)}</span></div>`).join('')||'<div class="small muted">—</div>'}</div>`}})}
+
+function coverSetCard(){if(!isMgr)return'';const c=coverCfg();const tw=(k,t,d)=>`<label class="li tap"><input type="checkbox" id="cvs_${k}" ${c[k]?'checked':''}><div class="grow"><div class="t">${t}</div><div class="small muted">${d}</div></div></label>`;
+  return `<div class="card stack" id="coverset"><h3>Shift cover</h3><p class="small muted">When someone can't make a shift, everyone free at that time is told, and so are you. Choose how. Texts and calls need Twilio set up first (see the setup guide). They only go out if no one has offered yet.</p>
+   <div class="card flush list">${tw('push','In-app + phone notifications','Free. Each person taps "Turn on notifications" once on their phone.')}${tw('email','Email','Free. Uses your Gmail.')}${tw('sms','Text message','About 1¢ per text. Replying YES offers to cover.')}${tw('call','Automatic phone call','About 2¢ per minute. Pressing 1 offers to cover.')}</div>
+   <div class="g2"><label class="f">Text if no one offers after (min)<input class="in" type="number" min="0" id="cvs_smsAfter" value="${c.smsAfter}"></label><label class="f">Call if still no one after (min)<input class="in" type="number" min="0" id="cvs_callAfter" value="${c.callAfter}"></label></div>
+   <label class="f">Urgent window (hours before the shift)<input class="in" type="number" min="0" step="0.5" id="cvs_urgentHours" value="${c.urgentHours}"><span class="tiny muted">Inside this window, the first person who can cover and accepts gets the shift automatically. Before it, you pick. Swaps always need your OK.</span></label>
+   <label class="f">Manager phones to text about cover<input class="in" id="cvs_phones" value="${esc((c.alertPhones||[]).join(', '))}" placeholder="(860) 555-0123, (203) 555-0188"><span class="tiny muted">Used only when Text message is on. Separate numbers with commas.</span></label>
+   <button class="btn pri" data-act="cvSaveSet">Save</button>
+   <div class="eyebrow">Try it</div>
+   <div class="row wrapr">${UI.push==='on'?`<button class="btn sm" data-act="pushOff">Notifications on this phone: On</button>`:`<button class="btn sm" data-act="pushOn">Turn on notifications on this phone</button>`}<button class="btn sm" data-act="cvTest" data-k="push">Test notification</button><button class="btn sm" data-act="cvTest" data-k="email">Test email</button></div>
+   <div class="row"><input class="in grow" type="tel" id="cvs_testto" placeholder="Your phone for a test"><button class="btn sm" data-act="cvTest" data-k="sms">Test text</button><button class="btn sm" data-act="cvTest" data-k="call">Test call</button></div></div>`}
+
+Object.assign(ACT,{
+ cvCant:d=>cantSheet(d.id),
+ cvOpen:d=>coverSheet(d.id),
+ cvSend:async d=>{const s=D.shifts[d.id];if(!s||!CV())return;const kind=document.querySelector('input[name=cv_kind]:checked')?.value||'cover';const sw=$('#cv_swap')?.value||'';
+   if(kind==='swap'&&!sw){toast('Choose who to swap with');return}
+   const cid=await cvRun(CV().request({shift_id:d.id,reason:$('#cv_reason')?.value.trim()||'',kind,swap_to:kind==='swap'?sw:null,starts_at:atTime(s.date,s.start).toISOString(),elig:kind==='swap'?[sw]:(()=>{const b=backupOf(s),e=coverEligLocal(s);return b?[b,...e.filter(x=>x!==b)]:e})(),backup:kind==='swap'?null:backupOf(s),by_name:myName()}));
+   if(!cid)return;closeSheet();toast(kind==='swap'?`Sent to ${first(sw)}. The manager will approve.`:"Sent. We're finding someone to cover.");cvNotify('open',cid)},
+ cvTake:async d=>{const me=actor();if(!me||!CV())return;const r=await cvRun(CV().respond(d.id,isMgr?me:undefined));
+   if(r==='assigned'){celebrate('The shift is yours!','Thank you for covering. The manager has been told.',true);cvNotify('assigned',d.id);if(SH)closeSheet()}
+   else if(r==='volunteered'){toast("Thanks! The manager will confirm.");cvNotify('responded',d.id)}
+   else if(r==='closed')toast('Someone already took this shift. Thanks anyway!');else if(r)toast("You can't take this one.")},
+ cvWithdraw:async d=>{await cvRun(CV().withdraw(d.id),'Offer withdrawn')},
+ cvAssign:async d=>{const c=D.cover[d.id];if(!c)return;if(!confirm(`Give ${cvWhen(c)} to ${empName(d.e)}?`))return;
+   const r=await cvRun(CV().assign(d.id,d.e,myName()));if(r==='assigned'){toast(`${first(d.e)} has the shift. They'll be told.`);cvNotify('assigned',d.id);if(SH)closeSheet()}else if(r==='closed')toast('This one is already closed.')},
+ cvCancel:async d=>{if(!confirm('Call off this cover request? The shift stays with the original person.'))return;if(await cvRun(CV().cancel(d.id,myName()),'Called off')!==null&&SH)closeSheet()},
+ cvSaveSet:async()=>{const g=k=>$('#cvs_'+k);const n=(k,dv)=>{const v=parseFloat(g(k).value);return isFinite(v)&&v>=0?v:dv};
+   const cfg={push:g('push').checked,email:g('email').checked,sms:g('sms').checked,call:g('call').checked,smsAfter:n('smsAfter',15),callAfter:n('callAfter',30),urgentHours:n('urgentHours',4),alertPhones:g('phones').value.split(/[,;\n]/).map(x=>x.trim()).filter(Boolean)};
+   if(await W(A.db.doc('mgr/cover').set(cfg))){D.coverCfg=cfg;toast('Saved')}},
+ cvTest:async d=>{if(!CV())return;const to=$('#cvs_testto')?.value.trim()||'';if((d.k==='sms'||d.k==='call')&&!to){toast('Type your phone number first');return}
+   const r=await cvRun(CV().test(d.k,to));if(r)toast(r.ok?`Sent. Check your ${d.k==='push'?'phone':d.k==='email'?'email':'phone'}.`:`Didn't send: ${r.why||r.error||'not set up'}`)},
+ pushOn:async()=>{const r=await cvRun(CV().pushOn());if(r==='on'){UI.push='on';toast("Notifications are on for this phone");render()}},
+ pushOff:async()=>{const r=await cvRun(CV().pushOff());if(r){UI.push='off';toast('Notifications off for this phone');render()}},
+ pushLater:()=>{ls.set('pushNo',today());render()},
+});
+function coverBoot(){const c=CV();if(c?.pushState)c.pushState().then(s=>{UI.push=s;rerender()}).catch(()=>{UI.push='unsupported'});
+  navigator.serviceWorker?.addEventListener?.('message',e=>{try{const id=new URL(e.data?.open,location.href).searchParams.get('cover');if(id)coverSheet(id)}catch{}});
+  let id=null;try{id=new URLSearchParams(location.search).get('cover')}catch{}
+  if(id){try{history.replaceState(null,'',location.pathname)}catch{}let n=0;const t=setInterval(()=>{if(D.cover[id]){clearInterval(t);coverSheet(id)}else if(++n>40)clearInterval(t)},250)}}
+
+/* ---------- backups: every shift should have someone free to cover it ---------- */
+// Free for the whole shift per their availability, same store, not already working then.
+function backupCands(s){const loc=s.loc||locOf(s.empId);const ws=weekStart(s.date),we=addDays(ws,6);const wk=id=>Object.values(D.shifts).filter(x=>x.empId===id&&x.date>=ws&&x.date<=we).reduce((a,x)=>a+shiftHrs(x),0);
+  return Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&locOf(e.id)===loc&&!cvClash(e.id,s)&&availFor(e.id,s.date,s.start,s.end)==='yes').sort((a,b)=>wk(a.id)-wk(b.id)||a.name.localeCompare(b.name)).map(e=>e.id)}
+// The chosen backup (a manager can pick one; otherwise the free person with the fewest hours that week).
+function backupOf(s){const c=backupCands(s);if(s.backup&&c.includes(s.backup))return s.backup;return c[0]||null}
+const backupLine=s=>{const b=backupOf(s);return b?`<span class="tiny muted">Backup: ${esc(first(b))}${s.backup===b?'':' (auto)'}</span>`:`<span class="tiny" style="color:var(--bad);font-weight:600">⚠ No backup: no one else is free then</span>`};
+function noBackupCount(days){return days.reduce((n,d)=>n+shiftsOn(d).filter(s=>atTime(s.date,s.start).getTime()>Date.now()&&!backupOf(s)).length,0)}
+function backupDuty(me){const up=Object.values(D.shifts).filter(s=>s.empId!==me&&s.date>=today()&&s.date<=addDays(today(),13)&&atTime(s.date,s.start).getTime()>Date.now()&&backupOf(s)===me).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start));
+  return up.length?`<div class="card stack"><h3>You're the backup</h3><p class="small muted">You're free at these times, so if someone can't come you'll be asked first.</p><div class="list">${up.slice(0,6).map(s=>`<div class="li" style="padding-inline:0"><div class="grow"><div class="t">${fmtD(s.date)} · ${fmtT(s.start)}–${fmtT(s.end)}</div><div class="small muted">for ${esc(first(s.empId))}</div></div></div>`).join('')}</div></div>`:''}
+
 Object.assign(SORT,{
   fixed:ids=>ACT.fixedOrder(ids),
   types:ids=>{if(!SH?.T)return;typesGrab();const L0=SH.T.list;SH.T.list=ids.map(i=>L0[+i]);drawSheet()},
