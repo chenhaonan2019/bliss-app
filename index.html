@@ -246,7 +246,22 @@ const ownerView=()=>isOwner&&UI.pv!=='mgr';
 const withLoc=(l,f)=>{const o=LOC_OVR;LOC_OVR=l;try{return f()}finally{LOC_OVR=o}};
 const UI={loc:ls.get('loc')||'wh',tab:null,sub:{},kiosk:ls.get('kiosk')==='1',kActor:null,mgrUnlocked:false,
   day:null,week:null,pDate:null,ps:null,pl:7,openGrp:{}};
-const TASKS=[{type:'prep1',name:()=>L('Prep photos','备料照片'),time:()=>D.settings.prep1},{type:'prep2',name:()=>L('Prep photos','备料照片'),time:()=>D.settings.prep2},{type:'close',name:()=>L('Closing photos','打烊照片'),time:()=>D.settings.closeBy},{type:'deep',name:()=>'Deep cleaning',time:()=>D.settings.closeBy}];
+// Task checklists. Owners and managers set them up (name, due time, days, items); saved in config/tasks.
+// Each item needs a photo or just a check, and can have an example photo. Until the list is edited once,
+// the built-in Prep / Closing / Deep cleaning tasks are used (same ids, so past photos keep working).
+const ALLDAYS=[0,1,2,3,4,5,6];
+function defaultTasks(){const s=D.settings,sl=D.slots||{};const cp=l=>(l||[]).map(x=>({id:x.id,name:x.name,photo:true}));
+  const dd=sl.deepDays&&Object.keys(sl.deepDays).length?Object.fromEntries(ALLDAYS.map(i=>[i,cp(sl.deepDays[i])])):null;
+  return [{id:'prep1',name:'Prep photos',time:s.prep1||'11:30',days:ALLDAYS,items:cp(sl.prep)},
+    {id:'prep2',name:'Prep photos',time:s.prep2||'16:00',days:ALLDAYS,items:cp(sl.prep)},
+    {id:'close',name:'Closing photos',time:s.closeBy||'22:00',days:ALLDAYS,items:cp(sl.close)},
+    dd?{id:'deep',name:'Deep cleaning',time:s.closeBy||'22:00',days:ALLDAYS,byDay:true,dayItems:dd,items:[]}
+      :{id:'deep',name:'Deep cleaning',time:s.closeBy||'22:00',days:ALLDAYS,items:cp(sl.deep?.length?sl.deep:[{id:'deep-cleaning',name:'Deep cleaning for today'}])}]}
+const taskList=()=>D.taskCfg?.length?D.taskCfg:defaultTasks();
+const TASKS=()=>taskList().map(t=>({type:t.id,cfg:t,name:()=>t.name||'Task',time:()=>t.time||'22:00'}));
+const taskOnDay=(t,date)=>!t.days||!t.days.length||t.days.includes(parseYmd(date).getDay());
+const tasksOn=d=>TASKS().filter(T=>slotsOf(T.type,d).length);
+const taskName=type=>TASKS().find(t=>t.type===type)?.name()||'Task';
 const LOCS=()=>D.settings.locations?.length?D.settings.locations:DEF_SET.locations;
 const locOf=e=>D.employees[e]?.loc||LOCS()[0].id;
 const LOCKEY={wh:['west hartford','farmington ave','06107','06119','06117','06110'],nh:['new haven','olive st','06511','06510','06513']};
@@ -325,11 +340,12 @@ const curSub=(tab,def)=>UI.sub[tab]||def;
 const itemById=id=>D.items.find(i=>i.id===id);
 const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const deepFor=date=>{const dd=D.slots.deepDays;if(dd&&Object.keys(dd).length){return dd[parseYmd(date||bizDate()).getDay()]||[]}return D.slots.deep?.length?D.slots.deep:[{id:'deep-cleaning',name:'Deep cleaning for today'}]};
-const slotsOf=(type,date)=>type==='close'?D.slots.close:type==='deep'?deepFor(date):D.slots.prep;
+const slotsOf=(type,date)=>{date=date||bizDate();const t=taskList().find(x=>x.id===type);if(!t||!taskOnDay(t,date))return[];return (t.byDay?t.dayItems?.[parseYmd(date).getDay()]:t.items)||[]};
+const slotDone=(doc,id)=>!!(doc?.photos?.[id]||doc?.checks?.[id]);
 const photoDoc=(date,type,loc)=>D.photos[`${loc||curLoc()}_${date}_${type}`];
 function taskState(date,type,loc){
-  const slots=slotsOf(type,date),doc=photoDoc(date,type,loc);const filled=slots.filter(s=>doc?.photos?.[s.id]).length,total=slots.length;
-  const t=TASKS.find(x=>x.type===type).time();const dl=new Date(atTime(date,t).getTime()+(D.settings.photoGrace||0)*6e4);
+  const slots=slotsOf(type,date),doc=photoDoc(date,type,loc);const filled=slots.filter(s=>slotDone(doc,s.id)).length,total=slots.length;
+  const t=TASKS().find(x=>x.type===type)?.time()||'22:00';const dl=new Date(atTime(date,t).getTime()+(D.settings.photoGrace||0)*6e4);
   if(!total)return{st:'none',label:L('None today','今天无'),filled:0,total:0,doc,deadline:dl};
   const done=total>0&&filled>=total;let st,label;
   if(done){const at=doc.completedAt?new Date(doc.completedAt):null;st=at&&at>dl?'late':'ontime';label=st==='late'?L('Done late','逾时完成'):L('Done on time','按时完成')}
@@ -408,7 +424,7 @@ function countRows(d,mgr){return usedFreqs().filter(f=>mgr||!MGR_ONLY_FREQ.inclu
   return `<div class="li tap" data-act="countSheet" data-f="${f}" tabindex="0">${ic('list')}<div class="grow"><div class="t">${t}${MGR_ONLY_FREQ.includes(f)?' <span class="chip" style="vertical-align:1px">Manager</span>':''}</div><div class="small muted">${sub}</div></div>${c}${ic('chev')}</div>`}).join('')}
 function badgeCount(){if(mode()!=='mgr')return 0;return attention().length}
 function attention(){const a=[];const t=bizDate();
-  for(let i=0;i<3;i++){const d=addDays(t,-i);TASKS.forEach(T=>{const s=taskState(d,T.type);if(s.filled&&['ontime','late','missed'].includes(s.st)&&!s.doc?.review)a.push({k:'review',d,type:T.type})})}
+  for(let i=0;i<3;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const s=taskState(d,T.type);if(s.filled&&['ontime','late','missed'].includes(s.st)&&!s.doc?.review)a.push({k:'review',d,type:T.type})})}
   ORD().forEach(o=>{if(o.status==='issue'&&!o.issueSeen)a.push({k:'order',o});if(o.status==='ordered'&&o.expected&&o.expected<t)a.push({k:'late',o})});
   const seen=+(ls.get('availSeen')||0);Object.entries(D.avail).forEach(([e,v])=>{if(v.updatedAt&&new Date(v.updatedAt).getTime()>seen&&D.employees[e]&&locOf(e)===curLoc())a.push({k:'avail',e})});
   if(t>availDue(t)){const nw=nextWk(t);emps().forEach(e=>{if(!D.avail[e.id]?.weeks?.[nw])a.push({k:'availMiss',e:e.id})})}
@@ -450,7 +466,7 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
   </div>
   <h3>${L('Today’s tasks','今日任务')}</h3>
   <div class="card flush list">
-    ${TASKS.map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time())}</div><div class="small muted">${s.filled}/${s.total} ${L('photos','张照片')}</div></div>${chip(stChip(s.st),s.label)}${ic('chev')}</div>`}).join('')}
+    ${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time())}</div><div class="small muted">${s.filled}/${s.total} ${L('photos','张照片')}</div></div>${chip(stChip(s.st),s.label)}${ic('chev')}</div>`}).join('')}
     ${dueD.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · take photos when it arrives</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}
     ${countRows(d)}
     ${availRow(me)}
@@ -507,10 +523,10 @@ function trainBoard(emp,editable){const cfg=D.trainCfg,tp=D.training[emp]||{};co
 /* ---------- manager views ---------- */
 function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();const lc=latestCount();
   const low=D.items.filter(it=>{const s=stockStatus(it,stockQty(it.id)?.q)[0];return s==='bad'||s==='warn'}).length;
-  const onNow=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&locOf(p.empId)===curLoc()).length;const tdone=TASKS.filter(T=>['ontime','late'].includes(taskState(d,T.type).st)).length+(C()[d]?1:0);
+  const onNow=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&locOf(p.empId)===curLoc()).length;const tdone=tasksOn(d).filter(T=>['ontime','late'].includes(taskState(d,T.type).st)).length+(C()[d]?1:0);
   const arriving=ORD().filter(o=>o.status==='ordered'&&(!o.expected||o.expected<=d)).length;
   return `<div class="stack">${isMgr&&!isOwner&&!D.links[uid]?`<div class="hint warn">Your account isn't linked to a store yet. Ask the owner to link you in Team → People, then you'll only see your store.</div>`:''}<div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${esc(locName(curLoc()))}</div><h2>${L('Today at BLISS','BLISS 今日')}</h2></div>
-  <div class="stats"><div class="stat"><b>${onNow}</b><span>${L('Clocked in now','正在上班')}</span></div><div class="stat"><b>${tdone}/${TASKS.length+1}</b><span>${L('Tasks done','任务完成')}</span></div><div class="stat"><b style="color:${low?'var(--warn)':'inherit'}">${low}</b><span>${L('Low / out items','库存偏低')}</span></div><div class="stat"><b>${arriving}</b><span>${L('Deliveries due','待到货')}</span></div></div>
+  <div class="stats"><div class="stat"><b>${onNow}</b><span>${L('Clocked in now','正在上班')}</span></div><div class="stat"><b>${tdone}/${tasksOn(d).length+1}</b><span>${L('Tasks done','任务完成')}</span></div><div class="stat"><b style="color:${low?'var(--warn)':'inherit'}">${low}</b><span>${L('Low / out items','库存偏低')}</span></div><div class="stat"><b>${arriving}</b><span>${L('Deliveries due','待到货')}</span></div></div>
   ${actor()?(openPunch(actor())?`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock out (me)</button>`:`<button class="btn block" data-act="tab" data-k="emp-self">${ic('clock')} Clock in (me)</button>`):''}
   <h3>${L('Shifts today','今日班次')}</h3>
   ${sh.length?`<div class="card flush list">${sh.map(s=>{const ps=Object.values(D.punches).filter(p=>p.empId===s.empId&&p.date===d);const p=ps[0];let c;
@@ -521,10 +537,10 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
    :`<div class="card empty"><b>${L('No shifts scheduled today','今天没有排班')}</b><button class="btn sm" data-act="tab" data-k="sched">${L('Open schedule','去排班')}</button></div>`}
   ${(()=>{const dd=ORD().filter(o=>o.status==='ordered'&&(!o.expected||o.expected<=d));return dd.length?`<h3>Deliveries to receive today</h3><div class="card flush list">${dd.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · shows on staff Today tasks</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}</div>`:''})()}
   <h3>${L('Checklists','每日检查')}</h3>
-  <div class="card flush list">${TASKS.map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" data-d="${d}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time())}</div><div class="small muted">${s.doc?.completedBy?esc(empName(s.doc.completedBy)):''}${s.doc?.review?' · '+(s.doc.review.status==='ok'?L('Passed','已合格'):L('Issue flagged','有问题')):''}</div></div>${chip(stChip(s.st),s.label)}</div>`}).join('')}
+  <div class="card flush list">${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" data-d="${d}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time())}</div><div class="small muted">${s.doc?.completedBy?esc(empName(s.doc.completedBy)):''}${s.doc?.review?' · '+(s.doc.review.status==='ok'?L('Passed','已合格'):L('Issue flagged','有问题')):''}</div></div>${chip(stChip(s.st),s.label)}</div>`}).join('')}
   ${countRows(d,1)}</div>
   ${att.length?`<h3>${L('Needs your attention','需要处理')}</h3><div class="card flush list">${att.slice(0,12).map(x=>{
-    if(x.k==='review')return `<div class="li tap" data-act="goPhotos" data-d="${x.d}">${chip('info',L('Review','待检查'))}<div class="grow">${TASKS.find(t=>t.type===x.type).name()} · ${fmtD(x.d,{month:'short',day:'numeric'})}</div>${ic('chev')}</div>`;
+    if(x.k==='review')return `<div class="li tap" data-act="goPhotos" data-d="${x.d}">${chip('info',L('Review','待检查'))}<div class="grow">${esc(taskName(x.type))} · ${fmtD(x.d,{month:'short',day:'numeric'})}</div>${ic('chev')}</div>`;
     if(x.k==='late')return `<div class="li tap" data-act="orderView" data-id="${x.o.id}">${chip('warn','Delivery')}<div class="grow">${esc(x.o.store)} · due ${fmtD(x.o.expected,{month:'short',day:'numeric'})}, not received yet</div>${ic('chev')}</div>`;
     if(x.k==='order')return `<div class="li tap" data-act="orderView" data-id="${x.o.id}">${chip('bad',L('Delivery','收货'))}<div class="grow">${esc(x.o.store)} · ${x.o.diffs?`${x.o.diffs} item${x.o.diffs>1?'s':''} counted differently than ordered`:'problem reported'}</div>${ic('chev')}</div>`;
     if(x.k==='avail')return `<div class="li tap" data-act="goAvail">${chip('warn',L('Availability','可上班时间'))}<div class="grow">${esc(empName(x.e))} ${L('updated','已更新')}</div>${ic('chev')}</div>`;
@@ -575,11 +591,11 @@ function stockItems(){const row=it=>`<div class="li tap" data-act="itemEdit" dat
 function vPhotos(){const d=UI.pDate||bizDate();const days=[...Array(7)].map((_,i)=>addDays(bizDate(),-i));
   return `<div class="stack"><h2>${L('Prep & closing photos','备料与打烊照片')}</h2>
   <div class="chips">${days.map(x=>`<button class="${x===d?'on':''}" data-act="pDate" data-d="${x}"><span>${WD()[parseYmd(x).getDay()]}</span><b>${parseYmd(x).getDate()}</b></button>`).join('')}<input type="date" class="in" id="pdate_pick" value="${d}" style="width:auto;min-height:0;padding:6px"></div>
-  ${TASKS.map(T=>{const s=taskState(d,T.type);const slots=slotsOf(T.type,d);const doc=s.doc;const rv=doc?.review;
-    return `<div class="card stack"><div class="row wrapr"><div class="grow"><h3>${T.name()} · ${fmtT(T.time())} <button class="btn sm" style="min-height:26px;padding:2px 8px;font-size:12px;vertical-align:2px" data-act="slotEdit" data-k="${T.type.startsWith('prep')?'prep':T.type}">Edit list</button></h3><div class="small muted">${doc?.completedBy?L('By ','上传人：')+esc(empName(doc.completedBy))+' · '+fmtDT(doc.completedAt):s.filled?L('In progress','进行中'):''}</div></div>${chip(stChip(s.st),s.label)}</div>
-    ${s.filled?`<div class="thumbs">${slots.map(sl=>{const p=doc?.photos?.[sl.id];return p?`<img src="${BLOB}${esc(p.id)}" alt="${esc(sl.name)}" title="${esc(sl.name)}" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)} · ${esc(empName(p.by))} · ${esc(fmtDT(p.at))}" style="${doc?.flags?.[sl.id]?'outline:3px solid var(--bad);outline-offset:-3px':''}">`:`<div class="ph" title="${esc(sl.name)}"></div>`}).join('')}</div>
+  ${tasksOn(d).map(T=>{const s=taskState(d,T.type);const slots=slotsOf(T.type,d);const doc=s.doc;const rv=doc?.review;
+    return `<div class="card stack"><div class="row wrapr"><div class="grow"><h3>${T.name()} · ${fmtT(T.time())} <button class="btn sm" style="min-height:26px;padding:2px 8px;font-size:12px;vertical-align:2px" data-act="slotEdit" data-k="${T.type}">Edit</button></h3><div class="small muted">${doc?.completedBy?L('By ','上传人：')+esc(empName(doc.completedBy))+' · '+fmtDT(doc.completedAt):s.filled?L('In progress','进行中'):''}</div></div>${chip(stChip(s.st),s.label)}</div>
+    ${s.filled?`<div class="thumbs">${slots.map(sl=>{const p=doc?.photos?.[sl.id];return !p&&doc?.checks?.[sl.id]?`<div class="ph" title="${esc(sl.name)}" style="display:grid;place-items:center;color:var(--ok);font-weight:700">✓</div>`:p?`<img src="${BLOB}${esc(p.id)}" alt="${esc(sl.name)}" title="${esc(sl.name)}" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)} · ${esc(empName(p.by))} · ${esc(fmtDT(p.at))}" style="${doc?.flags?.[sl.id]?'outline:3px solid var(--bad);outline-offset:-3px':''}">`:`<div class="ph" title="${esc(sl.name)}"></div>`}).join('')}</div>
       <div class="row wrapr">${rv?`${chip(rv.status==='ok'?'ok':'bad',rv.status==='ok'?L('Passed','合格'):L('Issue','有问题'))}<span class="small muted grow">${esc(rv.note||'')}</span>`:'<span class="grow"></span>'}<button class="btn sm" data-act="photoTask" data-type="${T.type}" data-d="${d}">${ic('cam')} Upload</button><button class="btn sm pri" data-act="reviewSheet" data-d="${d}" data-type="${T.type}">${rv?L('Edit review','修改检查'):L('Review','检查')}</button></div>`:`<div class="row"><span class="muted small grow">${L('No photos uploaded.','还没有上传照片。')}</span><button class="btn sm pri" data-act="photoTask" data-type="${T.type}" data-d="${d}">${ic('cam')} Upload photos</button></div>`}</div>`}).join('')}
-  <button class="btn" data-act="slotEdit">${L('Edit photo checklist','修改拍照位置')}</button></div>`}
+  ${tasksOn(d).length?'':`<div class="empty card">No tasks on this day.</div>`}<button class="btn" data-act="slotEdit">${ic('list')} Edit tasks, items & times</button></div>`}
 
 function vSched(){const s=curSub('sched','plan');
   return `<div class="stack"><h2>${L('Schedule & hours','排班与工时')}</h2>${subTabs('sched',[['plan',L('Schedule','排班')],['avail',L('Availability','可上班')],['time',L('Hours & pay','工时工资')]])}
@@ -642,18 +658,18 @@ function teamSet(){const s=D.settings;
   return `${isOwner?`<div class="card stack"><h3>Preview other views</h3><p class="small muted">See the app the way a store manager or a staff member sees it. Nothing changes for anyone else. Tap "Exit preview" to come back.</p><div class="g2"><button class="btn" data-act="pvStart" data-k="mgr">${ic('users')} Preview as manager</button><button class="btn" data-act="pvStart" data-k="emp">${ic('clock')} Preview as staff</button></div></div>`:''}
   ${accountCard()}
   ${isOwner&&!UI.pv?businessCard():''}
-  <div class="card stack"><h3>${L('Daily times','每日时间')}</h3>
-   <div class="g3"><label class="f">${L('Prep 1','备料 1')}<input class="in" type="time" id="st_prep1" value="${esc(s.prep1)}"></label><label class="f">${L('Prep 2','备料 2')}<input class="in" type="time" id="st_prep2" value="${esc(s.prep2)}"></label><label class="f">${L('Closing by','打烊截止')}<input class="in" type="time" id="st_close" value="${esc(s.closeBy)}"></label></div>
+  <div class="card stack"><h3>Time rules</h3>
+   <div class="row wrapr"><span class="small muted grow">Task names, items and due times (prep, closing, deep cleaning and your own tasks) are set in Tasks.</span><button class="btn sm" data-act="slotEdit">${ic('list')} Edit tasks & times</button></div>
    <div class="g3"><label class="f">${L('Photo grace (min)','照片宽限(分)')}<input class="in" type="number" id="st_pg" value="${s.photoGrace}"></label><label class="f">${L('Late after (min)','迟到宽限(分)')}<input class="in" type="number" id="st_lg" value="${s.lateGrace}"></label><label class="f">${L('OT after (h/wk)','加班线(时/周)')}<input class="in" type="number" id="st_ot" value="${s.otWeekly}"></label></div>
    <button class="btn pri" data-act="saveSettings">${L('Save','保存')}</button></div>
   <div class="card stack"><h3>${L('Shared store phone','店内共用手机')}</h3><p class="small muted">${L('Turn this on for a phone or tablet that stays in the shop and is signed in to your account. Staff tap their name and enter their PIN; manager pages need your manager PIN.','适合放在店里、登录你账号的手机或平板。员工点自己的名字输入 PIN 码操作；经理页面需要经理 PIN。')}</p>
    <label class="f">${L('Manager PIN','经理 PIN')}<input class="in" inputmode="numeric" maxlength="6" id="st_mpin" value="${esc(D.mgrSet.mgrPin||'')}" placeholder="4-6 ${L('digits','位数字')}"></label>
    <div class="row"><button class="btn" data-act="saveMpin">${L('Save PIN','保存 PIN')}</button><button class="btn ${UI.kiosk?'':'pri'}" data-act="kioskToggle">${UI.kiosk?L('Turn off on this device','在此设备关闭'):L('Use this device as store phone','设为店内共用手机')}</button></div></div>
-  <div class="card stack"><h3>${L('Checklists','清单')}</h3><button class="btn" data-act="slotEdit">${L('Edit photo checklist','修改拍照位置')}</button></div>`}
+  <div class="card stack"><h3>Tasks & checklists</h3><button class="btn" data-act="slotEdit">${ic('list')} Edit tasks, items & times</button></div>`}
 
 function storeToday(l){return withLoc(l,()=>{const d=bizDate();const sh=shiftsOn(d);const on=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&locOf(p.empId)===l).length;
   const lc=latestCount();const low=lc?D.items.filter(it=>['bad','warn'].includes(stockStatus(it,stockQty(it.id)?.q)[0])).length:null;
-  const tasks=TASKS.map(T=>({T,s:taskState(d,T.type)}));const counted=groupState('daily',d)?.st==='done';const late=Object.values(D.punches).filter(p=>p.date===d&&p.late>0&&locOf(p.empId)===l).length;
+  const tasks=tasksOn(d).map(T=>({T,s:taskState(d,T.type)}));const counted=groupState('daily',d)?.st==='done';const late=Object.values(D.punches).filter(p=>p.date===d&&p.late>0&&locOf(p.empId)===l).length;
   return{d,sh,on,low,tasks,counted,late,att:attention().length,arriving:ORD().filter(o=>o.status==='ordered').length}})}
 function ownerPeriod(a){const m=UI.opm||'week';if(m==='month'){const d=parseYmd(a);const s=ymd(new Date(d.getFullYear(),d.getMonth(),1));const e=ymd(new Date(d.getFullYear(),d.getMonth()+1,0));return{s,e,n:diffDays(s,e)+1}}
   const e=addDays(weekStart(a),6);const n=m==='2w'?14:7;return{s:addDays(e,1-n),e,n}}
@@ -678,7 +694,7 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
   if(sub==='today'){
     body=`<div class="g2">${L2.map(l=>{const t=storeToday(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
       <div class="small"><b>${t.on}</b> clocked in · <b>${t.sh.length}</b> shifts${t.late?` · <span style="color:var(--warn)">${t.late} late</span>`:''}</div>
-      <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${T.type==='close'?'Close':T.type==='deep'?'Deep':fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
+      <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
       <div class="small muted">${t.low==null?'No count yet':`${t.low} low / out`} · ${t.arriving} deliveries due</div></div>`}).join('')}</div>
       <p class="tiny muted">Tap a store to open it.</p>`}
   else if(sub==='labor'){const lab=L2.map(l=>withLoc(l.id,()=>({l,...laborSum(payroll(ws,PN))})));const TT=laborSum(Object.assign({},...L2.map(l=>withLoc(l.id,()=>payroll(ws,PN)))));const tr=taxRates();
@@ -778,12 +794,14 @@ function mountView(){
 }
 
 /* ---------- sheets ---------- */
-function photoTaskSheet(type,date){date=date||bizDate();const T=TASKS.find(x=>x.type===type);
+function photoTaskSheet(type,date){date=date||bizDate();const T=TASKS().find(x=>x.type===type)||{name:()=>'Task',time:()=>'22:00'};
   openSheet({live:true,title:()=>`${T.name()} · ${fmtT(T.time())}`,body:()=>{const s=taskState(date,type);const slots=slotsOf(type,date);
-    return `<div class="row"><div class="grow small muted">${fmtD(date)} · ${L('Take one photo of each spot.','每个位置拍一张。')}</div>${chip(stChip(s.st),s.label)}</div>
+    return `<div class="row"><div class="grow small muted">${fmtD(date)} · Take a photo of each item, or tap the check items when done.</div>${chip(stChip(s.st),s.label)}</div>
     ${A.assets?'':`<div class="hint warn">${L('Photo upload is not turned on for this account. Ask the manager.','此账号没有开通照片上传，请联系经理。')}</div>`}
-    ${slots.length?`<div class="tiles">${slots.map(sl=>{const p=s.doc?.photos?.[sl.id];return p?`<label class="tile has"><img src="${BLOB}${esc(p.id)}" alt=""><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}</span>${s.doc?.flags?.[sl.id]?`<span class="flag">${chip('bad',L('Redo','需重拍'))}</span>`:''}<input type="file" accept="image/*" capture="environment" data-up="task" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-label="${L('Retake','重拍')} ${esc(sl.name)}"></label>`
-      :`<label class="tile">${ic('cam')}<span>${esc(sl.name)}</span><input type="file" accept="image/*" capture="environment" data-up="task" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-label="${esc(sl.name)}"></label>`}).join('')}</div>`:`<div class="empty">${L('No photo spots set up yet.','还没有设置拍照位置。')}</div>`}
+    ${slots.length?`<div class="tiles">${slots.map(sl=>{const p=s.doc?.photos?.[sl.id];const ex=sl.ref?`<button class="chip info" style="position:absolute;top:6px;left:6px;border:0;cursor:pointer;z-index:2" data-act="viewPh" data-pid="${esc(sl.ref)}" data-cap="Example: ${esc(sl.name)}">Example</button>`:'';
+      if(sl.photo===false){const c=s.doc?.checks?.[sl.id];return `<button class="tile ${c?'has':''}" style="position:relative;display:grid;place-items:center;text-align:center;padding:12px;cursor:pointer" data-act="taskCheck" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-pressed="${c?'true':'false'}">${ex}<div><div style="font-size:30px;line-height:1;color:${c?'var(--ok)':'var(--muted)'}">${c?'✓':'☐'}</div><b>${esc(sl.name)}</b><div class="tiny muted">${c?`${esc(empName(c.by))} · ${fmtT(hm(new Date(c.at)))}`:'Tap when done'}</div></div></button>`}
+      return (p?`<label class="tile has"><img src="${BLOB}${esc(p.id)}" alt=""><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}</span>${s.doc?.flags?.[sl.id]?`<span class="flag">${chip('bad',L('Redo','需重拍'))}</span>`:''}<input type="file" accept="image/*" capture="environment" data-up="task" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-label="${L('Retake','重拍')} ${esc(sl.name)}"></label>`
+      :`<label class="tile">${ic('cam')}<span>${esc(sl.name)}</span><input type="file" accept="image/*" capture="environment" data-up="task" data-type="${type}" data-slot="${sl.id}" data-date="${date}" aria-label="${esc(sl.name)}"></label>`).replace('<label class="tile','<label style="position:relative" class="tile').replace(/(<label[^>]*>)/,'$1'+ex)}).join('')}</div>`:`<div class="empty">Nothing to do for this task today.</div>`}
     ${s.doc?.review?`<div class="card">${chip(s.doc.review.status==='ok'?'ok':'bad',s.doc.review.status==='ok'?L('Manager: passed','经理：合格'):L('Manager: issue','经理：有问题'))} <span class="small">${esc(s.doc.review.note||'')}</span></div>`:''}`},
     foot:()=>`<button class="btn pri" data-act="closeSheet">${L('Done','完成')}</button>`})}
 async function onTaskUpload(inp){const f=inp.files?.[0];if(!f)return;const{type,slot,date}=inp.dataset;const tile=inp.closest('.tile');tile&&tile.classList.add('busy');
@@ -791,10 +809,16 @@ async function onTaskUpload(inp){const f=inp.files?.[0];if(!f)return;const{type,
   const loc=curLoc();const ref=A.db.doc(`photoLogs/${loc}_${date}_${type}`);const me=actor()||'manager';const now=new Date().toISOString();const cur=photoDoc(date,type);
   const p={id,by:me,at:now};const photos={...(cur?.photos||{}),[slot]:p};const slots=slotsOf(type,date);
   const body={loc,date,type,photos:{[slot]:p},flags:{[slot]:false},updatedAt:now};
-  if(slots.every(s=>photos[s.id])&&!cur?.completedAt){body.completedAt=now;body.completedBy=me}
+  if(slots.every(s=>photos[s.id]||cur?.checks?.[s.id])&&!cur?.completedAt){body.completedAt=now;body.completedBy=me}
   const wr=cur?ref.update(body):ref.set({...body,photos});
   if(await W(wr)){D.photos[`${loc}_${date}_${type}`]={...(cur||{}),...body,photos,flags:{...(cur?.flags||{}),[slot]:false}};toast(L('Photo saved','照片已保存'));drawSheet();render()}}
 
+async function onTaskCheck(type,slot,date){const loc=curLoc();const ref=A.db.doc(`photoLogs/${loc}_${date}_${type}`);const me=actor()||'manager';const now=new Date().toISOString();const cur=photoDoc(date,type);
+  const was=!!cur?.checks?.[slot];const checks={...(cur?.checks||{}),[slot]:was?null:{by:me,at:now}};const slots=slotsOf(type,date);
+  const all=slots.every(s=>cur?.photos?.[s.id]||checks[s.id]);const body={loc,date,type,checks:{[slot]:was?null:{by:me,at:now}},updatedAt:now};
+  if(all&&!cur?.completedAt){body.completedAt=now;body.completedBy=me}if(!all&&cur?.completedAt){body.completedAt=null;body.completedBy=null}
+  const wr=cur?ref.update(body):ref.set({...body,photos:{},checks});
+  if(await W(wr)){D.photos[`${loc}_${date}_${type}`]={...(cur||{}),...body,photos:cur?.photos||{},checks};drawSheet();render()}}
 function countSheet(f){f=f||'daily';const d=bizDate();const CC=C();const ex=CC[d];const its=itemsOf(f);const cats=[...new Set(its.map(i=>i.cat||'Other'))];
   const title=f==='daily'?'Night inventory count':`${freqName(f)} inventory count`;
   openSheet({title:()=>title,body:()=>`<div class="small muted">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${f==='daily'?'Count what is left after closing.':`These ${its.length} items are counted ${freqName(f).toLowerCase()}.`} Grey number = last count.</div>
@@ -909,9 +933,9 @@ async function receiveSave(){const st=SH_RECV,o=D.orders[st.id];if(!st.photos.le
   const body={...o,lines,diffs,status:diffs||note?'issue':'received',receivedAt:new Date().toISOString(),receivedDate:bizDate(),receivedBy:actor()||'manager',recvPhotos:st.photos,recvNote:note,issueSeen:false};delete body.id;
   if(await W(A.db.doc('orders/'+st.id).set(body))){toast(diffs?'Saved. Your count was sent to the manager to check.':'Delivery received');SH_RECV=null;closeSheet()}}
 
-function reviewSheet(date,type){const doc=photoDoc(date,type);if(!doc)return;const slots=slotsOf(type,date);const T=TASKS.find(t=>t.type===type);const flags={...(doc.flags||{})};
+function reviewSheet(date,type){const doc=photoDoc(date,type);if(!doc)return;const slots=slotsOf(type,date);const T=TASKS().find(t=>t.type===type)||{name:()=>'Task'};const flags={...(doc.flags||{})};
   openSheet({title:()=>`${L('Review','检查')} · ${T.name()}`,body:()=>`<div class="small muted">${fmtD(date)} · ${L('Tap a photo to view it full size. Flag photos that need to be redone.','点照片放大查看。需要重做的照片请标记。')}</div>
-   <div class="tiles">${slots.map(sl=>{const p=doc.photos?.[sl.id];return p?`<div class="tile has" style="cursor:default"><img src="${BLOB}${esc(p.id)}" alt="" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)}" style="cursor:zoom-in"><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}</span><span class="flag"><button class="chip ${flags[sl.id]?'bad':''}" style="border:0;cursor:pointer" data-act="flagPh" data-slot="${sl.id}">${flags[sl.id]?L('Flagged','已标记'):L('Flag','标记')}</button></span></div>`:`<div class="tile">${esc(sl.name)}<br>${L('missing','缺')}</div>`}).join('')}</div>
+   <div class="tiles">${slots.map(sl=>{const p=doc.photos?.[sl.id];return p?`<div class="tile has" style="cursor:default"><img src="${BLOB}${esc(p.id)}" alt="" data-act="viewPh" data-pid="${esc(p.id)}" data-cap="${esc(sl.name)}" style="cursor:zoom-in"><span class="cap"><b>${esc(sl.name)}</b><br>${esc(empName(p.by))} · ${fmtT(hm(new Date(p.at)))}</span><span class="flag"><button class="chip ${flags[sl.id]?'bad':''}" style="border:0;cursor:pointer" data-act="flagPh" data-slot="${sl.id}">${flags[sl.id]?L('Flagged','已标记'):L('Flag','标记')}</button></span></div>`:doc.checks?.[sl.id]?`<div class="tile has" style="cursor:default;display:grid;place-items:center;text-align:center;padding:10px"><div><div style="font-size:28px;color:var(--ok)">✓</div><b>${esc(sl.name)}</b><div class="tiny muted">${esc(empName(doc.checks[sl.id].by))} · ${fmtT(hm(new Date(doc.checks[sl.id].at)))}</div></div></div>`:`<div class="tile">${esc(sl.name)}<br>${L('missing','缺')}</div>`}).join('')}</div>
    <label class="f">${L('Note to staff','给员工的备注')}<textarea class="in" id="rv_note" placeholder="${L('e.g. wipe under the blender, drains not cleaned','例如：搅拌机下面没擦，下水道没清理')}">${esc(doc.review?.note||'')}</textarea></label>`,
    foot:()=>`<button class="btn bad" data-act="reviewSave" data-st="issue">${L('Has issues','有问题')}</button><button class="btn pri" data-act="reviewSave" data-st="ok">${ic('check')} ${L('Passed','合格')}</button>`,mount:()=>{SH.flags=flags;SH.date=date;SH.type=type}})}
 
@@ -1022,31 +1046,31 @@ function typesSheet(){SH=null;const T={list:typeList().map(t=>({...t}))};
    <div class="row"><input class="in grow" id="ty_new" maxlength="30" placeholder="New section, e.g. Bulk Order Food"><button class="btn" data-act="typeAdd">${ic('plus')} Add</button></div>`,
    foot:()=>`<button class="btn pri" data-act="typesSave">Save sections</button>`,mount:()=>{SH.T=T}})}
 function typesGrab(){document.querySelectorAll('[data-tn]').forEach(el=>{const t=SH.T.list[+el.dataset.tn];if(t)t.name=el.value})}
-function slotSheet(tab){const cp=l=>(l||[]).map(x=>({id:x.id,name:x.name}));
-  const ed={prep:cp(D.slots.prep),close:cp(D.slots.close),deep:Object.fromEntries([0,1,2,3,4,5,6].map(i=>[i,cp((D.slots.deepDays||{})[i])]))};
-  let cur=tab||'prep',day=parseYmd(bizDate()).getDay();
-  const list=()=>cur==='deep'?ed.deep[day]:ed[cur];
-  const grab=()=>{const l=list();l.forEach((x,i)=>{const el=$('#sl_i'+i);if(el)x.name=el.value})};
-  openSheet({title:()=>'Photo checklist',body:()=>{const l=list();
-   return `<div class="seg" role="tablist">${[['prep','Prep (11:30 & 4pm)'],['close','Closing'],['deep','Deep cleaning']].map(([k,n])=>`<button role="tab" class="${cur===k?'on':''}" data-act="slT" data-k="${k}">${n} <span class="muted" style="font-weight:400">${k==='deep'?Object.values(ed.deep).reduce((a,x)=>a+x.length,0):ed[k].length}</span></button>`).join('')}</div>
-   ${cur==='deep'?`<div class="chips">${[1,2,3,4,5,6,0].map(i=>`<button class="${day===i?'on':''}" data-act="slD" data-k="${i}"><span>${WD()[i]}</span><b>${ed.deep[i].length}</b></button>`).join('')}</div>`:''}
-   <p class="small muted">${cur==='deep'?`Photos staff take for deep cleaning every ${DOW[day]}.`:cur==='close'?'Photos staff take at closing every night.':'Photos staff take at both prep times every day.'} Staff must upload one photo for each item. Tap a name to edit it.</p>
-   <div class="card flush list">${l.length?l.map((x,i)=>`<div class="li" style="gap:6px;padding-block:8px"><span class="small muted" style="width:20px;text-align:right">${i+1}</span><input class="in grow" id="sl_i${i}" value="${esc(x.name)}" aria-label="Photo item ${i+1}" style="min-width:0">
-     <button class="x" data-act="slMv" data-i="${i}" data-n="-1" aria-label="Move up" ${i?'':'disabled'} style="width:32px;height:32px">${ic('left').replace('<svg','<svg style="transform:rotate(90deg)"')}</button><button class="x" data-act="slMv" data-i="${i}" data-n="1" aria-label="Move down" ${i<l.length-1?'':'disabled'} style="width:32px;height:32px">${ic('chev').replace('<svg','<svg style="transform:rotate(90deg)"')}</button><button class="x" data-act="slDel" data-i="${i}" aria-label="Delete ${esc(x.name)}" style="width:32px;height:32px;color:var(--bad)">${ic('x')}</button></div>`).join(''):`<div class="empty">No photo items here yet.</div>`}</div>
-   <div class="row"><input class="in grow" id="sl_new" placeholder="New photo item, e.g. Ice machine clean" aria-label="New photo item"><button class="btn" data-act="slAdd">${ic('plus')} Add</button></div>
-   ${cur==='deep'?`<button class="btn sm" data-act="slCopy" style="align-self:flex-start">Copy ${DOW[day]}'s list to another day…</button><div class="row wrapr" id="sl_copyto" hidden>${[1,2,3,4,5,6,0].filter(i=>i!==day).map(i=>`<button class="btn sm" data-act="slCopyTo" data-k="${i}">${WD()[i]}</button>`).join('')}</div>`:''}`},
-   foot:()=>`<button class="btn pri big" data-act="slotSave">Save all changes</button>`});
-  Object.assign(ACT,{
-   slT:d=>{grab();cur=d.k;drawSheet()},slD:d=>{grab();day=+d.k;drawSheet()},
-   slAdd:()=>{grab();const v=$('#sl_new').value.trim();if(!v){$('#sl_new').focus();return}list().push({id:slug(v)+'-'+uidGen().slice(-3),name:v});drawSheet();setTimeout(()=>$('#sl_new')?.focus(),0)},
-   slDel:d=>{grab();list().splice(+d.i,1);drawSheet()},
-   slMv:d=>{grab();const l=list(),i=+d.i,j=i+(+d.n);if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];drawSheet()},
-   slCopy:()=>{const r=$('#sl_copyto');if(r)r.hidden=!r.hidden},
-   slCopyTo:d=>{grab();ed.deep[+d.k]=cp(ed.deep[day]);toast(`Copied to ${DOW[+d.k]}`);drawSheet()},
-   slotSave:async()=>{grab();const clean=l=>l.map(x=>({id:x.id,name:x.name.trim()})).filter(x=>x.name);
-     const body={...D.slots,prep:clean(ed.prep),close:clean(ed.close),deepDays:Object.fromEntries(Object.entries(ed.deep).map(([k,v])=>[k,clean(v)]))};delete body.deep;body.deep=D.slots.deep||[];
-     if(await W(A.db.doc('config/photoSlots').set(body))){D.slots={...D.slots,...body};toast('Photo checklist saved');closeSheet()}}
-  })}
+function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEach(t=>{t.days=t.days?.length?t.days:[...ALLDAYS];t.items=t.items||[];if(t.byDay)t.dayItems=Object.fromEntries(ALLDAYS.map(i=>[i,t.dayItems?.[i]||[]]))});
+  TK={E,cur:Math.max(0,E.findIndex(t=>t.id===type)),day:parseYmd(bizDate()).getDay(),del:null};
+  openSheet({title:()=>'Tasks & checklists',body:()=>{const t=TK.E[TK.cur];if(!t)return `<button class="btn pri" data-act="tkNew">${ic('plus')} New task</button>`;const l=tkList();
+   return `<div class="chips">${TK.E.map((x,i)=>`<button class="${i===TK.cur?'on':''}" data-act="tkPick" data-i="${i}"><span>${esc(fmtT(x.time||'22:00'))}</span><b style="font-size:13px">${esc(x.name||'Task')}</b></button>`).join('')}<button data-act="tkNew"><span>New</span><b>${ic('plus')}</b></button></div>
+   <div class="card stack">
+    <div class="g2"><label class="f">Task name<input class="in" id="tk_name" maxlength="40" value="${esc(t.name||'')}" placeholder="e.g. Morning opening"></label><label class="f">Due by<input class="in" type="time" id="tk_time" value="${esc(t.time||'22:00')}"></label></div>
+    <div class="f" style="gap:6px;display:flex;flex-direction:column;font-size:13px;font-weight:600;color:var(--muted)">Days<div class="row wrapr" style="gap:6px">${[1,2,3,4,5,6,0].map(i=>`<button class="btn sm ${t.days.includes(i)?'pri':''}" data-act="tkDay" data-k="${i}" aria-pressed="${t.days.includes(i)}">${WD()[i]}</button>`).join('')}</div></div>
+    <label class="row" style="gap:8px"><input type="checkbox" id="tk_byday" ${t.byDay?'checked':''} data-act="tkByDay"> <span class="small">Different items on each day (like deep cleaning)</span></label>
+   </div>
+   ${t.byDay?`<div class="chips">${[1,2,3,4,5,6,0].filter(i=>t.days.includes(i)).map(i=>`<button class="${TK.day===i?'on':''}" data-act="tkDayPick" data-k="${i}"><span>${WD()[i]}</span><b>${(t.dayItems[i]||[]).length}</b></button>`).join('')}</div>`:''}
+   <p class="small muted">${t.byDay?`Items for ${DOW[TK.day]}.`:'Items staff do every time.'} 📷 = staff must take a photo. ☑ = staff just tap to check it off. Add an example photo to show what "done right" looks like.</p>
+   <div class="card flush list">${l.length?l.map((x,i)=>`<div class="li" style="gap:6px;padding-block:8px;flex-wrap:wrap">
+     <input class="in" id="ti_${i}" value="${esc(x.name)}" aria-label="Item ${i+1}" style="flex:1 1 100%;min-width:0">
+     <button class="btn sm" data-act="tiPhoto" data-i="${i}" title="Photo or check">${x.photo===false?'☑ Check':'📷 Photo'}</button>
+     ${x.ref?`<img src="${BLOB}${esc(x.ref)}" alt="Example" data-act="viewPh" data-pid="${esc(x.ref)}" data-cap="Example: ${esc(x.name)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;cursor:zoom-in"><button class="btn sm" data-act="tiRefDel" data-i="${i}" aria-label="Remove example photo">✕</button>`
+       :`<label class="btn sm" style="cursor:pointer">+ Example<input type="file" accept="image/*" data-up="tref" data-i="${i}" hidden></label>`}
+     <button class="btn sm" data-act="tiMv" data-i="${i}" data-n="-1" ${i?'':'disabled'} aria-label="Move up">↑</button>
+     <button class="btn sm bad" data-act="tiDel" data-i="${i}" aria-label="Delete item">✕</button></div>`).join(''):`<div class="empty">No items yet.</div>`}</div>
+   <div class="row"><input class="in grow" id="ti_new" placeholder="New item, e.g. Wipe the counters" aria-label="New item"><button class="btn" data-act="tiAdd">${ic('plus')} Add</button></div>
+   ${t.byDay?`<div class="row wrapr" style="gap:6px"><span class="small muted">Copy ${DOW[TK.day]}'s items to:</span>${[1,2,3,4,5,6,0].filter(i=>i!==TK.day&&t.days.includes(i)).map(i=>`<button class="btn sm" data-act="tkCopy" data-k="${i}">${WD()[i]}</button>`).join('')}</div>`:''}
+   <button class="btn bad" data-act="tkDel">${TK.del===t.id?'Tap again to delete this task':'Delete this task'}</button>`},
+   foot:()=>`<button class="btn pri big" data-act="tkSave">Save all tasks</button>`})}
+let TK=null;
+const tkList=()=>{const t=TK.E[TK.cur];if(!t)return[];if(t.byDay){t.dayItems=t.dayItems||{};return t.dayItems[TK.day]=t.dayItems[TK.day]||[]}return t.items};
+function tkGrab(){const t=TK?.E[TK.cur];if(!t||!$('#tk_name'))return;t.name=$('#tk_name').value;t.time=$('#tk_time').value||t.time;tkList().forEach((x,i)=>{const el=$('#ti_'+i);if(el)x.name=el.value})}
 function pinSheet(title,pin,onOk){let v='';const draw=()=>{const d=$('#pindots');if(d)d.innerHTML=[...Array(pin.length)].map((_,i)=>`<i class="${i<v.length?'f':''}"></i>`).join('')};
   openSheet({title:()=>title,body:()=>`<div class="pindots" id="pindots"></div><div class="pin">${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>k===''?'<span></span>':`<button data-pin="${k}" aria-label="${k}">${k}</button>`).join('')}</div><div id="pinerr" class="small" style="text-align:center;color:var(--bad);min-height:20px"></div>`,
    mount:()=>{draw();$('#sheet .pin').onclick=e=>{const b=e.target.closest('[data-pin]');if(!b)return;const k=b.dataset.pin;if(k==='⌫')v=v.slice(0,-1);else if(v.length<pin.length)v+=k;$('#pinerr').textContent='';draw();
@@ -1144,7 +1168,24 @@ const ACT={
  flagPh:d=>{SH.flags[d.slot]=!SH.flags[d.slot];const b=document.querySelector(`[data-act=flagPh][data-slot="${d.slot}"]`);b.className='chip '+(SH.flags[d.slot]?'bad':'');b.textContent=SH.flags[d.slot]?L('Flagged','已标记'):L('Flag','标记')},
  reviewSave:async d=>{const flags=SH.flags,date=SH.date,type=SH.type;const status=d.st==='ok'&&Object.values(flags).some(Boolean)?'issue':d.st;
    const cur={...photoDoc(date,type)};delete cur.id;const ok=await W(A.db.doc(`photoLogs/${curLoc()}_${date}_${type}`).set({...cur,loc:curLoc(),flags,review:{status,note:$('#rv_note').value.trim(),at:new Date().toISOString()}}));if(ok)closeSheet()},
- slotEdit:d=>slotSheet(d.k),
+ slotEdit:d=>tasksSheet(d.k),
+ taskCheck:d=>onTaskCheck(d.type,d.slot,d.date),
+ tkPick:d=>{tkGrab();TK.cur=+d.i;TK.del=null;const t=TK.E[TK.cur];if(t?.byDay&&!t.days.includes(TK.day))TK.day=t.days[0];drawSheet()},
+ tkNew:()=>{tkGrab();const id='task-'+uidGen().slice(-6);TK.E.push({id,name:'New task',time:'12:00',days:[...ALLDAYS],items:[]});TK.cur=TK.E.length-1;drawSheet();setTimeout(()=>{const el=$('#tk_name');el&&(el.focus(),el.select())},0)},
+ tkDay:d=>{tkGrab();const t=TK.E[TK.cur],k=+d.k;t.days=t.days.includes(k)?t.days.filter(x=>x!==k):[...t.days,k];if(t.byDay&&!t.days.includes(TK.day)&&t.days.length)TK.day=t.days[0];drawSheet()},
+ tkByDay:(d,el)=>{tkGrab();const t=TK.E[TK.cur];if(el.checked){t.byDay=true;t.dayItems=Object.fromEntries(ALLDAYS.map(i=>[i,(t.dayItems?.[i]?.length?t.dayItems[i]:t.items).map(x=>({...x}))]))}else{t.byDay=false;t.items=t.items?.length?t.items:(t.dayItems?.[TK.day]||[]).map(x=>({...x}))}drawSheet()},
+ tkDayPick:d=>{tkGrab();TK.day=+d.k;drawSheet()},
+ tkCopy:d=>{tkGrab();const t=TK.E[TK.cur];t.dayItems[+d.k]=tkList().map(x=>({...x,id:x.id}));toast(`Copied to ${DOW[+d.k]}`);drawSheet()},
+ tiAdd:()=>{tkGrab();const v=$('#ti_new').value.trim();if(!v){$('#ti_new').focus();return}tkList().push({id:slug(v)+'-'+uidGen().slice(-3),name:v,photo:true});drawSheet();setTimeout(()=>$('#ti_new')?.focus(),0)},
+ tiPhoto:d=>{tkGrab();const x=tkList()[+d.i];if(x){x.photo=x.photo===false?true:false;drawSheet()}},
+ tiRefDel:d=>{tkGrab();const x=tkList()[+d.i];if(x){delete x.ref;drawSheet()}},
+ tiMv:d=>{tkGrab();const l=tkList(),i=+d.i,j=i+(+d.n);if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];drawSheet()},
+ tiDel:d=>{tkGrab();tkList().splice(+d.i,1);drawSheet()},
+ tkDel:()=>{tkGrab();const t=TK.E[TK.cur];if(!t)return;if(TK.del!==t.id){TK.del=t.id;drawSheet();return}TK.E.splice(TK.cur,1);TK.cur=Math.max(0,TK.cur-1);TK.del=null;drawSheet()},
+ tkSave:async()=>{tkGrab();const clean=l=>(l||[]).map(x=>({id:x.id,name:String(x.name||'').trim(),photo:x.photo!==false,...(x.ref?{ref:x.ref}:{})})).filter(x=>x.name);
+   const bad=TK.E.find(t=>!String(t.name||'').trim()||!t.days.length);if(bad){toast(!String(bad.name||'').trim()?'Every task needs a name':`Pick at least one day for ${bad.name}`);return}
+   const list=TK.E.map(t=>({id:t.id,name:t.name.trim(),time:t.time||'22:00',days:[...t.days].sort(),...(t.byDay?{byDay:true,dayItems:Object.fromEntries(ALLDAYS.map(i=>[i,clean(t.dayItems?.[i])])),items:[]}:{items:clean(t.items)})}));
+   if(await W(A.db.doc('config/tasks').set({list}))){D.taskCfg=list;toast('Tasks saved');closeSheet();render()}},
  wk:d=>{UI.week=addDays(UI.week||weekStart(today()),+d.n);UI.day=null;render()},day:d=>{UI.day=d.d;render()},
  shiftEdit:d=>shiftSheet(d.id,d.d),
  shPreset:d=>{$('#sh_start').value=d.a;$('#sh_end').value=d.b;$('#sh_start').dispatchEvent(new Event('change'))},
@@ -1192,7 +1233,7 @@ const ACT={
  evalNew:()=>evalSheet(),evalSave:()=>evalSave(),evalView:d=>evalViewSheet(d.id),
  evalDel:async d=>{if(SH.confirmDel!==d.id){SH.confirmDel=d.id;toast(L('Tap Delete again to confirm','再点一次"删除"确认'));return}if(await W(A.db.doc('mgr/evals/items/'+d.id).delete()))closeSheet()},
  sigClear:d=>{const c=$('#'+d.c);c.getContext('2d').clearRect(0,0,c.width,c.height);c.dataset.drawn=''},
- saveSettings:async()=>{const s={...D.settings,prep1:$('#st_prep1').value||'11:30',prep2:$('#st_prep2').value||'16:00',closeBy:$('#st_close').value||'23:00',photoGrace:num($('#st_pg').value)??30,lateGrace:num($('#st_lg').value)??5,otWeekly:num($('#st_ot').value)??40};
+ saveSettings:async()=>{const s={...D.settings,prep1:$('#st_prep1')?.value||D.settings.prep1||'11:30',prep2:$('#st_prep2')?.value||D.settings.prep2||'16:00',closeBy:$('#st_close')?.value||D.settings.closeBy||'23:00',photoGrace:num($('#st_pg').value)??30,lateGrace:num($('#st_lg').value)??5,otWeekly:num($('#st_ot').value)??40};
    if(await W(A.db.doc('config/settings').set(s))){D.settings=s;toast(L('Saved','已保存'))}},
  saveMpin:async()=>{const p=$('#st_mpin').value.trim();if(p&&!/^\d{4,6}$/.test(p)){toast(L('PIN must be 4–6 digits','PIN 必须是 4–6 位数字'));return}if(await W(A.db.doc('mgr/settings').set({...D.mgrSet,mgrPin:p})))toast(L('Saved','已保存'))},
  kioskToggle:()=>{if(!UI.kiosk&&!D.mgrSet.mgrPin){toast(L('Set a manager PIN first','请先设置经理 PIN'));return}UI.kiosk=!UI.kiosk;ls.set('kiosk',UI.kiosk?'1':'0');UI.mgrUnlocked=false;UI.kActor=null;render()},
@@ -1213,6 +1254,7 @@ document.addEventListener('change',async e=>{const t=e.target;
   if(t.matches('select[data-act=avMode]')){const r=$('#av_t'+t.dataset.i);if(r)r.hidden=t.value!=='custom';return}
   if(t.type!=='file'||!t.dataset.up)return;const kind=t.dataset.up;
   if(kind==='task'){await onTaskUpload(t)}
+  else if(kind==='tref'){const f=t.files?.[0];if(!f||!TK)return;tkGrab();toast('Uploading example…');const id=await uploadImg(f);if(!id)return;const x=tkList()[+t.dataset.i];if(x){x.ref=id;drawSheet()}}
   else if(kind==='selfie'){const f=t.files?.[0];if(!f)return;const t0=new Date();const lab=t.closest('label');if(lab){lab.style.opacity=.6;lab.firstChild&&0}toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(lab)lab.style.opacity='';if(!id)return;await doClockIn(id,t0)}
   else if(kind==='shot'){const fs=[...(t.files||[])];if(!fs.length)return;grabOrderLines();for(const f of fs){const blob=await compress(f);SH_ORDER.shots.push({blob,url:URL.createObjectURL(blob)})}SH_ORDER.msg='';drawSheet()}
   else if(kind==='recv'){const fs=[...(t.files||[])];if(!fs.length)return;const note=$('#r_note')?.value;const q=(D.orders[SH_RECV.id].lines||[]).map((_,i)=>$('#rq'+i)?.value);SH_RECV.busy=true;drawSheet();
@@ -1399,7 +1441,7 @@ async function boot(){
   if(!db){render();return}
   uid=user?await user.id():null;isMgr=user?await user.canEdit():false;isOwner=user?await user.isOwner():false;
   c.use('assets').then(x=>{A.assets=x;rerender()});c.use('sample').then(x=>{A.sample=x;rerender()});c.use('downloads').then(x=>{A.downloads=x;rerender()});
-  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
+  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
   subscribe(db.collection('employees'),s=>{D.employees=mapDocs(s)});
   subscribe(db.collection('links'),s=>{D.links=mapDocs(s)});
   subscribe(db.collection('counts').orderBy('date','desc').limit(120),s=>{D.counts=mapDocs(s)});
