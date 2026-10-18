@@ -2025,7 +2025,7 @@ function itemGuideEdit(i){trGrab();const back=SH;const sec=TR.S[TR.cur];const it
    <div class="tiny muted">Start a line with <b>- </b> for a bullet, <b>1. </b> for a step, <b>## </b> for a heading, <b>! </b> for an important note. Tables: <b>| Shots | Matcha |</b> one row per line, first row is the header.</div>
    <div class="eyebrow">Photos</div><div class="row wrapr">${it.photos.map((pid,j)=>`<div style="position:relative"><img src="${BLOB}${esc(pid)}" alt="" style="width:84px;height:84px;object-fit:cover;border-radius:10px"><button class="btn sm" style="position:absolute;top:2px;right:2px;padding:2px 6px" data-act="tgPhDel" data-j="${j}" aria-label="Remove photo">${ic('x')}</button></div>`).join('')}<label class="btn" style="cursor:pointer">${ic('cam')} Add photo<input type="file" accept="image/*" multiple data-up="tguide" hidden></label></div>
    <div class="card guide"><div class="eyebrow">Preview</div><div id="tg_prev">${guideHtml(it.body)}</div></div>`,
-   foot:()=>TR.direct?`<button class="btn" data-act="tgCancel">Cancel</button><button class="btn pri" data-act="tgDone">Save</button>`:`<button class="btn pri block" data-act="tgDone">Done</button>`,mount:()=>{const ta=$('#tg_body');ta&&ta.addEventListener('input',()=>{$('#tg_prev').innerHTML=guideHtml(ta.value)})}});SH.back=back}
+   foot:()=>`<button class="btn bad" data-act="tgDelete">Delete item</button>`+(TR.direct?`<button class="btn" data-act="tgCancel">Cancel</button><button class="btn pri" data-act="tgDone">Save</button>`:`<button class="btn pri" data-act="tgDone">Done</button>`),mount:()=>{const ta=$('#tg_body');ta&&ta.addEventListener('input',()=>{$('#tg_prev').innerHTML=guideHtml(ta.value)})}});SH.back=back}
 function tgGrab(){if(!TR||TR.gi==null)return;const it=TR.S[TR.cur].items[TR.gi];if(!it)return;const b=$('#tg_body');if(b)it.body=b.value;const c=$('#tg_check');if(c)it.check=c.value.trim();const nm=$('#tg_name');if(nm&&nm.value.trim())it.name=nm.value.trim()}
 Object.assign(ACT,{
  guideGo:d=>guideSheet(d.s,d.i,d.emp||(mode()==='emp'?actor():null)),
@@ -2034,6 +2034,9 @@ Object.assign(ACT,{
  trGuide:d=>itemGuideEdit(+d.i),
  tgDone:async()=>{tgGrab();if(TR.direct){const dr=TR.direct;const cfg={...D.trainCfg,sections:TR.S};delete cfg.id;if(!await W(A.db.doc('config/training').set(cfg)))return;D.trainCfg=cfg;TR=null;toast('Saved');guideSheet(dr.s,dr.i,dr.emp||null);return}
    const b=SH?.back;TR.gi=null;if(b){SH=b;drawSheet()}},
+ tgDelete:async()=>{tgGrab();const sec=TR.S[TR.cur];const it=sec.items[TR.gi];if(!it||!confirm(`Delete "${it.name}" from ${sec.title}? Trainees' progress on it is kept and comes back if you add it again with the same name.`))return;sec.items.splice(TR.gi,1);TR.gi=null;
+   if(TR.direct){const cfg={...D.trainCfg,sections:TR.S};delete cfg.id;if(!await W(A.db.doc('config/training').set(cfg)))return;D.trainCfg=cfg;TR=null;toast('Item deleted');closeSheet();return}
+   const b=SH?.back;if(b){SH=b;drawSheet()}},
  tgCancel:()=>{const dr=TR?.direct;TR=null;if(dr)guideSheet(dr.s,dr.i,dr.emp||null);else closeSheet()},
  guideEdit:d=>{const si=D.trainCfg.sections.findIndex(x=>x.id===d.s);if(si<0)return;TR={S:JSON.parse(JSON.stringify(D.trainCfg.sections)),cur:si,del:null,direct:{s:d.s,i:d.i,emp:d.emp}};const ii=TR.S[si].items.findIndex(x=>x.id===d.i);if(ii<0)return;itemGuideEdit(ii)},
  tgPhDel:d=>{tgGrab();TR.S[TR.cur].items[TR.gi].photos.splice(+d.j,1);drawSheet()},
