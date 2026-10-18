@@ -822,22 +822,23 @@ function teamEval(){const ev=Object.values(D.evals).filter(x=>locOf(x.empId)===c
    :`<div class="empty card"><b>${L('No evaluations yet','还没有评估')}</b>${L('Uses the BLISS 100-point performance evaluation.','使用 BLISS 100 分绩效评估表。')}</div>`}`}
 function spark(v){if(v.length<2)return'';const w=90,h=28,mn=Math.min(...v,60),mx=100;const pts=v.map((x,i)=>`${(i/(v.length-1)*(w-6)+3).toFixed(1)},${(h-3-(x-mn)/(mx-mn||1)*(h-6)).toFixed(1)}`);
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="trend"><polyline points="${pts.join(' ')}" fill="none" stroke="var(--brand)" stroke-width="2"/><circle cx="${pts.at(-1).split(',')[0]}" cy="${pts.at(-1).split(',')[1]}" r="3" fill="var(--brand)"/></svg>`}
-function teamSet(){const s=D.settings;
-  return `${isOwner?`<div class="card stack"><h3>Preview other views</h3><p class="small muted">See the app the way a store manager or a staff member sees it. Nothing changes for anyone else. Tap "Exit preview" to come back.</p><div class="g2"><button class="btn" data-act="pvStart" data-k="mgr">${ic('users')} Preview as manager</button><button class="btn" data-act="pvStart" data-k="emp">${ic('clock')} Preview as staff</button></div></div>`:''}
-  ${accountCard()}
-  ${isOwner&&!UI.pv?businessCard():''}
-  ${backupSetCard()}
-  ${pubSetCard()}
-  ${coverSetCard()}
-  <div class="card stack"><h3>Time rules</h3>
-   <div class="row wrapr"><span class="small muted grow">Task names, items and due times (prep, closing, deep cleaning and your own tasks) are set in Tasks.</span><button class="btn sm" data-act="slotEdit">${ic('list')} Edit tasks & times</button></div>
-   <div class="g3"><label class="f">${L('Photo grace (min)','照片宽限(分)')}<input class="in" type="number" id="st_pg" value="${s.photoGrace}"></label><label class="f">${L('Late after (min)','迟到宽限(分)')}<input class="in" type="number" id="st_lg" value="${s.lateGrace}"></label><label class="f">${L('OT after (h/wk)','加班线(时/周)')}<input class="in" type="number" id="st_ot" value="${s.otWeekly}"></label></div>
-   <button class="btn pri" data-act="saveSettings">${L('Save','保存')}</button></div>
-  <div class="card stack"><h3>${L('Shared store phone','店内共用手机')}</h3><p class="small muted">${L('Turn this on for a phone or tablet that stays in the shop and is signed in to your account. Staff tap their name and enter their PIN; manager pages need your manager PIN.','适合放在店里、登录你账号的手机或平板。员工点自己的名字输入 PIN 码操作；经理页面需要经理 PIN。')}</p>
+function teamSet(){const s=D.settings;const cfg=coverCfg();
+  const G=[
+   ['account','users','Account & business',[esc(window.blissAccount?.email||''),isOwner?'stores, owners, preview':''].filter(Boolean).join(' · '),()=>`${isOwner?`<div class="card stack"><h3>Preview other views</h3><p class="small muted">See the app the way a store manager or a staff member sees it. Nothing changes for anyone else. Tap "Exit preview" to come back.</p><div class="g2"><button class="btn" data-act="pvStart" data-k="mgr">${ic('users')} Preview as manager</button><button class="btn" data-act="pvStart" data-k="emp">${ic('clock')} Preview as staff</button></div></div>`:''}
+  ${accountCard()}${isOwner&&!UI.pv?businessCard():''}`],
+   ['sched','cal','Schedule',[pubOn()?'Owner review on':'Owner review off',backupOn()?'backups on':'backups off',`late after ${s.lateGrace} min`].join(' · '),()=>`${pubSetCard()}${backupSetCard()}
+  <div class="card stack"><h3>Late & overtime</h3><div class="g2"><label class="f">${L('Late after (min)','迟到宽限(分)')}<input class="in" type="number" id="st_lg" value="${s.lateGrace}"></label><label class="f">${L('Overtime after (h/week)','加班线(时/周)')}<input class="in" type="number" id="st_ot" value="${s.otWeekly}"></label></div>
+   <button class="btn pri" data-act="saveSettings">${L('Save','保存')}</button></div>`],
+   ['cover','bell','Shift cover & notifications',['push','email','sms','call'].filter(k=>cfg[k]).map(k=>({push:'phone alerts',email:'email',sms:'texts',call:'calls'}[k])).join(', ')||'all off',()=>coverSetCard()],
+   ['tasks','list','Tasks & photos',`${TASKS().length} tasks · photo grace ${s.photoGrace} min`,()=>`<div class="card stack"><h3>Tasks & checklists</h3><p class="small muted">Task names, items, photos and due times (prep, closing, deep cleaning and your own tasks).</p><button class="btn" data-act="slotEdit">${ic('list')} Edit tasks, items & times</button></div>
+  <div class="card stack"><h3>Photo grace</h3><label class="f">${L('Photos still count as on time for (min)','照片宽限(分)')}<input class="in" type="number" id="st_pg" value="${s.photoGrace}"></label><button class="btn pri" data-act="saveSettings">${L('Save','保存')}</button></div>`],
+   ['phone','clock','Store phone',UI.kiosk?'This device is the store phone':'Shared phone or tablet in the shop',()=>`<div class="card stack"><h3>${L('Shared store phone','店内共用手机')}</h3><p class="small muted">${L('Turn this on for a phone or tablet that stays in the shop and is signed in to your account. Staff tap their name and enter their PIN; manager pages need your manager PIN.','适合放在店里、登录你账号的手机或平板。员工点自己的名字输入 PIN 码操作；经理页面需要经理 PIN。')}</p>
    <label class="f">${L('Manager PIN','经理 PIN')}<input class="in" inputmode="numeric" maxlength="6" id="st_mpin" value="${esc(D.mgrSet.mgrPin||'')}" placeholder="4-6 ${L('digits','位数字')}"></label>
-   <div class="row"><button class="btn" data-act="saveMpin">${L('Save PIN','保存 PIN')}</button><button class="btn ${UI.kiosk?'':'pri'}" data-act="kioskToggle">${UI.kiosk?L('Turn off on this device','在此设备关闭'):L('Use this device as store phone','设为店内共用手机')}</button></div></div>
-  <div class="card stack"><h3>Tasks & checklists</h3><button class="btn" data-act="slotEdit">${ic('list')} Edit tasks, items & times</button></div>`}
-
+   <div class="row"><button class="btn" data-act="saveMpin">${L('Save PIN','保存 PIN')}</button><button class="btn ${UI.kiosk?'':'pri'}" data-act="kioskToggle">${UI.kiosk?L('Turn off on this device','在此设备关闭'):L('Use this device as store phone','设为店内共用手机')}</button></div></div>`],
+  ].filter(g=>g[0]!=='cover'||isMgr);
+  const cur=G.find(g=>g[0]===UI.setCat);
+  if(cur)return `<button class="btn sm" data-act="setCat" data-k="">${ic('left')} Settings</button><h3>${cur[2]}</h3>${cur[4]()}`;
+  return `<div class="card flush list">${G.map(([k,i,t,sub])=>`<div class="li tap" data-act="setCat" data-k="${k}" tabindex="0">${ic(i)}<div class="grow"><div class="t">${t}</div><div class="small muted">${sub}</div></div>${ic('chev')}</div>`).join('')}</div>`}
 function storeToday(l){return withLoc(l,()=>{const d=bizDate();const sh=shiftsOn(d);const on=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&locOf(p.empId)===l).length;
   const lc=latestCount();const low=lc?D.items.filter(it=>['bad','warn'].includes(stockStatus(it,stockQty(it.id)?.q)[0])).length:null;
   const tasks=tasksOn(d).map(T=>({T,s:taskState(d,T.type)}));const counted=groupState('daily',d)?.st==='done';const late=Object.values(D.punches).filter(p=>p.date===d&&p.late>0&&locOf(p.empId)===l).length;
@@ -1487,7 +1488,7 @@ const ACT={
  evalNew:()=>evalSheet(),evalSave:()=>evalSave(),evalView:d=>evalViewSheet(d.id),
  evalDel:async d=>{if(SH.confirmDel!==d.id){SH.confirmDel=d.id;toast(L('Tap Delete again to confirm','再点一次"删除"确认'));return}if(await W(A.db.doc('mgr/evals/items/'+d.id).delete()))closeSheet()},
  sigClear:d=>{const c=$('#'+d.c);c.getContext('2d').clearRect(0,0,c.width,c.height);c.dataset.drawn=''},
- saveSettings:async()=>{const s={...D.settings,prep1:$('#st_prep1')?.value||D.settings.prep1||'11:30',prep2:$('#st_prep2')?.value||D.settings.prep2||'16:00',closeBy:$('#st_close')?.value||D.settings.closeBy||'23:00',photoGrace:num($('#st_pg').value)??30,lateGrace:num($('#st_lg').value)??5,otWeekly:num($('#st_ot').value)??40};
+ saveSettings:async()=>{const s={...D.settings,prep1:$('#st_prep1')?.value||D.settings.prep1||'11:30',prep2:$('#st_prep2')?.value||D.settings.prep2||'16:00',closeBy:$('#st_close')?.value||D.settings.closeBy||'23:00',photoGrace:num($('#st_pg')?.value)??D.settings.photoGrace??30,lateGrace:num($('#st_lg')?.value)??D.settings.lateGrace??5,otWeekly:num($('#st_ot')?.value)??D.settings.otWeekly??40};
    if(await W(A.db.doc('config/settings').set(s))){D.settings=s;toast(L('Saved','已保存'))}},
  saveMpin:async()=>{const p=$('#st_mpin').value.trim();if(p&&!/^\d{4,6}$/.test(p)){toast(L('PIN must be 4–6 digits','PIN 必须是 4–6 位数字'));return}if(await W(A.db.doc('mgr/settings').set({...D.mgrSet,mgrPin:p})))toast(L('Saved','已保存'))},
  kioskToggle:()=>{if(!UI.kiosk&&!D.mgrSet.mgrPin){toast(L('Set a manager PIN first','请先设置经理 PIN'));return}UI.kiosk=!UI.kiosk;ls.set('kiosk',UI.kiosk?'1':'0');UI.mgrUnlocked=false;UI.kActor=null;render()},
@@ -1937,6 +1938,7 @@ function swapSheet(sid){const back=SH;openSheet({live:true,title:()=>{const s=D.
    ${grp.map(([g,t])=>{const r=rows.filter(x=>x.g===g);return r.length?`<div class="eyebrow">${t}</div><div class="card flush list">${r.map(x=>`<div class="li tap" data-act="swapDo" data-id="${esc(sid)}" data-e="${esc(x.e.id)}" tabindex="0" style="${g>=2?'opacity:.6':''}">${avatar(x.e.id)}<div class="grow"><div class="t">${esc(x.e.name)}${x.e.role==='Manager'?' · Manager':''}</div><div class="small muted">${fmtH(x.h)} h this week${num(max[x.e.id])?` (max ${fmtH(num(max[x.e.id]))})`:''}${x.e.id===bk?' · <b style="color:var(--ok)">backup</b>':''}</div></div>${x.over?chip('warn','Over max'):''}${x.clash?chip('bad','Already on'):availChip(x.av)}</div>`).join('')}</div>`:''}).join('')||'<div class="empty card">No one else at this store.</div>'}`},
   foot:()=>back?`<button class="btn block" data-act="swapBack">Back</button>`:`<button class="btn block" data-act="closeSheet">Close</button>`});SH.back=back}
 Object.assign(ACT,{
+ setCat:d=>{UI.setCat=d.k||null;window.scrollTo(0,0);render()},
  backupToggle:async()=>{const v=!backupOn();if(await W(A.db.doc('config/settings').update({backupOn:v}))){D.settings.backupOn=v;toast(v?'Backups are on':'Backups are off');render()}},
  swapPick:d=>swapSheet(d.id),
  swapBack:()=>{const b=SH?.back;if(b){SH=b;drawSheet()}else closeSheet()},
