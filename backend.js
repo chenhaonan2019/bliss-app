@@ -23,13 +23,13 @@
   const css = document.createElement("style");
   css.textContent = `#auth{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:24px max(16px,env(safe-area-inset-left,0px));overflow:auto}
   #auth .box{width:100%;max-width:380px;display:flex;flex-direction:column;gap:14px}
-  #auth .brand{text-align:center;margin-bottom:8px}#auth .brand b{font-family:var(--display);font-weight:800;font-size:40px;letter-spacing:.16em;color:var(--brand)}
+  #auth .brand{text-align:center;margin-bottom:8px}#auth .brand .mk{width:84px;height:84px;margin:0 auto 14px;background:var(--brand);-webkit-mask:url(logo-mark.png) center/contain no-repeat;mask:url(logo-mark.png) center/contain no-repeat}#auth .brand b{font-family:var(--display);font-weight:800;font-size:40px;letter-spacing:.16em;color:var(--brand)}
   #auth .brand small{display:block;font-size:11px;letter-spacing:.2em;text-transform:uppercase;color:var(--muted);margin-top:4px}
   #auth .code{font-size:28px;letter-spacing:.5em;text-align:center;font-weight:700}
   #auth .err{color:var(--bad);font-size:14px;min-height:20px}#auth .link{background:none;border:0;color:var(--info);font-weight:600;cursor:pointer;padding:6px}`;
   document.head.appendChild(css);
 
-  function screen(html) { host.hidden = false; host.innerHTML = `<div class="box"><div class="brand"><b>BLISS</b><small>Matcha &amp; Beyond</small></div>${html}</div>`; }
+  function screen(html) { host.hidden = false; host.innerHTML = `<div class="box"><div class="brand"><div class="mk" role="img" aria-label="BLISS logo"></div><b>BLISS</b><small>Matcha &amp; Beyond</small></div>${html}</div>`; }
   function hideAuth() { host.hidden = true; host.innerHTML = ""; }
   const errOf = (e) => e?.message || String(e || "Something went wrong");
 
