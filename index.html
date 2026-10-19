@@ -46,7 +46,9 @@ h3{font-size:16px;font-weight:600}
 .wrap{max-width:720px;margin:0 auto;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
 header.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:20;background:var(--brand);color:var(--brand-ink)}
 header.top .wrap{display:flex;align-items:center;gap:10px;padding-block:10px}
-.logo{display:flex;flex-direction:column;line-height:1;margin-right:auto}
+.logo{display:flex;align-items:center;gap:10px;line-height:1;margin-right:auto}
+.logo .mk{width:38px;height:38px;flex:none;display:block}
+.logo .tx{display:flex;flex-direction:column}
 .logo b{font-family:var(--display);font-weight:800;font-size:22px;letter-spacing:.14em}
 .logo small{font-size:10px;letter-spacing:.18em;text-transform:uppercase;opacity:.8;margin-top:3px}
 .hbtn{background:color-mix(in srgb,var(--brand-ink) 16%,transparent);border:0;color:var(--brand-ink);border-radius:999px;padding:6px 12px;font-weight:600;font-size:13px;cursor:pointer}
@@ -191,7 +193,7 @@ details.std ul{margin:6px 0 0;padding-left:18px;font-size:13px;color:var(--muted
 <body>
 
 
-<header class="top"><div class="wrap" id="hdr"><div class="logo"><b>BLISS</b><small>Matcha &amp; Beyond</small></div></div></header>
+<header class="top"><div class="wrap" id="hdr"><div class="logo"><img class="mk" src="logo-mark.png" alt=""><span class="tx"><b>BLISS</b><small>Matcha &amp; Beyond</small></span></div></div></header>
 <main><div class="wrap" id="view"><div class="empty"><b>Loading…</b>Connecting to the shop data</div></div></main>
 <nav class="tabs" id="nav" hidden><div class="in" id="navin"></div></nav>
 <div id="sheet"></div>
@@ -374,7 +376,7 @@ function drawHeader(m){
   else if(m==='pick')r=tag(loc)+(UI.pv?`<button class="hbtn" data-act="pvExit">Exit preview</button>`:`<button class="hbtn" data-act="mgrUnlock">Manager</button>`);
   else if(m==='emp'&&isMgr)r=tag(esc(empName(UI.kActor)))+`<button class="hbtn" data-act="kioskOut">${UI.pv?'Switch':'Done'}</button>`;
   else if(m==='emp')r=tag(`${esc(empName(actor()))} · ${loc}`);
-  $('#hdr').innerHTML=`<div class="logo"><b>BLISS</b><small>${m==='mgr'?'Matcha &amp; Beyond':loc}</small></div>${r}`;const os=$('#ownsel');if(os)os.onchange=()=>{UI.pscope=os.value;render(true)};const ls2=$('#locsel');if(ls2)ls2.onchange=()=>{UI.loc=ls2.value;ls.set('loc',UI.loc);UI.pDate=null;render(true)};
+  $('#hdr').innerHTML=`<div class="logo"><img class="mk" src="logo-mark.png" alt=""><span class="tx"><b>BLISS</b><small>${m==='mgr'?'Matcha &amp; Beyond':loc}</small></span></div>${r}`;const os=$('#ownsel');if(os)os.onchange=()=>{UI.pscope=os.value;render(true)};const ls2=$('#locsel');if(ls2)ls2.onchange=()=>{UI.loc=ls2.value;ls.set('loc',UI.loc);UI.pDate=null;render(true)};
   }
 function subTabs(tab,opts){const cur=UI.sub[tab]||opts[0][0];return `<div class="seg" role="tablist">${opts.map(([k,n])=>`<button role="tab" class="${cur===k?'on':''}" data-act="sub" data-tab="${tab}" data-k="${k}">${n}</button>`).join('')}</div>`}
 const curSub=(tab,def)=>UI.sub[tab]||def;
