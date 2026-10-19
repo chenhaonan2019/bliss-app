@@ -2156,6 +2156,9 @@ async function boot(){
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
       window.blissAccount.ensureUsers(em).then(()=>{try{localStorage.setItem(k,t)}catch{}}).catch(e=>console.warn('acct sync',e))},3000)}
+  // owner invites whose sign-in account was never created (e.g. the "team" function wasn't deployed yet): create them now
+  if(isOwner&&window.blissAccount?.listOwners)setTimeout(()=>{window.blissAccount.listOwners().then(rows=>{const pend=(rows||[]).filter(r=>r.pending).map(r=>r.email);
+    if(pend.length)return window.blissAccount.ensureUsers(pend).then(r=>{if(r?.created?.length)toast(`Sign-in ready for ${r.created.join(', ')}`)})}).catch(e=>console.warn('owner invites',e))},3500);
   if(uid&&!isOwner){const l=await db.doc('links/'+uid).get().catch(()=>null);if(!l?.exists){db.doc('pending/'+uid).set({at:new Date().toISOString()}).catch(()=>{})}}
   render();coverBoot();hsReady();
   setInterval(()=>{if(!SH&&!typing($('#view')))render()},60000);
