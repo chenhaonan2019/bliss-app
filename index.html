@@ -1856,14 +1856,16 @@ function fcTodayCardMgr(){const loc=curLoc(),d=bizDate(),x=fcNeedsOf(loc,d);if(!
    <div class="tiny muted">People needed each hour, from the sales forecast and the weather.</div></div>`}
 function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())return fcTodayCardMgr();if(!fcHas(loc))return '';
   if(!wxNow(loc)&&!fcTodayCard.p)fcTodayCard.p=wxAll().then(()=>{fcTodayCard.p=null;rerender()});
-  const d=bizDate(),F=fcDay(loc,d);if(!F.ok)return `<div class="card small muted">${ic('spark')} Sales forecast: ${esc(F.why)}</div>`;
+  // the day shown: today, or a day picked in the strip below
+  const d0=bizDate();if(UI.fcSel&&(UI.fcSel<=d0||UI.fcSel>addDays(d0,7)))UI.fcSel=null;const d=UI.fcSel||d0,isT=d===d0;
+  const F=fcDay(loc,d);if(!F.ok)return `<div class="card small muted">${ic('spark')} Sales forecast: ${esc(F.why)}${isT?'':` <button class="btn sm" data-act="fcPick" data-d="${d0}">Back to today</button>`}</div>`;
   const base=F.tot/(F.f||1),avg=fcAvgDay(loc,d),wd=DOW[parseYmd(d).getDay()];
-  const hrs=Object.entries(F.hours).map(([h,x])=>[+h,x]).sort((a,b)=>a[0]-b[0]);const mx=Math.max(1,...hrs.map(([,x])=>x.m+x.sd));const nowH=new Date().getHours();
+  const hrs=Object.entries(F.hours).map(([h,x])=>[+h,x]).sort((a,b)=>a[0]-b[0]);const mx=Math.max(1,...hrs.map(([,x])=>x.m+x.sd));const nowH=isT?new Date().getHours():-1;
   // yesterday: what we would have forecast vs what really happened
-  const y=addDays(d,-1),Hy=hourlyOf(loc)[y],Fy=Hy&&dayTot(Hy)>=30?fcDay(loc,y):null,ay=Hy?dayTot(Hy):0;
-  const week=[...Array(7)].map((_,i)=>addDays(d,i+1)).map(x=>({d:x,F:fcDay(loc,x),open:needsFor(loc,parseYmd(x).getDay()).length>0}));
+  const y=addDays(d,-1),Hy=isT?hourlyOf(loc)[y]:null,Fy=Hy&&dayTot(Hy)>=30?fcDay(loc,y):null,ay=Hy?dayTot(Hy):0;
+  const week=[...Array(8)].map((_,i)=>addDays(d0,i)).map(x=>({d:x,F:fcDay(loc,x),open:needsFor(loc,parseYmd(x).getDay()).length>0}));
   return `<div class="card stack" style="gap:10px">
-   <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><div class="eyebrow">Sales forecast today · ${esc(locName(loc))}</div>
+   <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><div class="eyebrow">${isT?'Sales forecast today':`Sales forecast · ${fmtD(d,{weekday:'short',month:'short',day:'numeric'})}`} · ${esc(locName(loc))}</div>
      <div style="font-family:var(--display);font-weight:800;font-size:34px;line-height:1.1">${kmoney(F.tot)}</div>
      <div class="small muted">Net sales · ${wd}${F.wx?` · ${esc(wxLabel(F.wx))}`:''}</div></div>
     <button class="btn sm" data-act="fcWeek">Next 7 days</button></div>
@@ -1881,10 +1883,11 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())re
    </div>
    <div class="tiny muted">Bars = forecast sales per hour; number on top = people needed. Updated each morning from Menusifu.</div>
    ${fcStaffRow()}
-   <div class="row" style="gap:4px;overflow-x:auto">${week.map(w=>`<div style="flex:1;min-width:46px;text-align:center;padding:6px 2px;border-radius:10px;background:var(--sunk)"><div class="tiny muted">${WD()[parseYmd(w.d).getDay()]}</div><div class="small" style="font-weight:700">${!w.open?'—':w.F.ok?kmoney(w.F.tot):'?'}</div>${w.open&&w.F.ok&&w.F.tips!=null?`<div class="tiny muted">+${kmoney(w.F.tips)} tips</div>`:''}<div class="tiny muted">${w.F.ok&&w.F.wx?Math.round(w.F.wx.tmax)+'°'+(wxSnow(w.F.wx)?'❄':wxWet(w.F.wx)?'☂':''):''}</div></div>`).join('')}</div>
+   <div class="row" style="gap:4px;overflow-x:auto">${week.map(w=>`<div role="button" tabindex="0" data-act="fcPick" data-d="${w.d}" aria-pressed="${w.d===d}" style="flex:1;min-width:46px;text-align:center;padding:6px 2px;border-radius:10px;cursor:pointer;background:${w.d===d?'color-mix(in srgb,var(--brand) 16%,transparent)':'var(--sunk)'};${w.d===d?'outline:2px solid var(--brand);outline-offset:-2px;':''}"><div class="tiny ${w.d===d?'':'muted'}" style="${w.d===d?'font-weight:700':''}">${w.d===d0?'Today':WD()[parseYmd(w.d).getDay()]}</div><div class="small" style="font-weight:700">${!w.open?'—':w.F.ok?kmoney(w.F.tot):'?'}</div>${w.open&&w.F.ok&&w.F.tips!=null?`<div class="tiny muted">+${kmoney(w.F.tips)} tips</div>`:''}<div class="tiny muted">${w.F.ok&&w.F.wx?Math.round(w.F.wx.tmax)+'°'+(wxSnow(w.F.wx)?'❄':wxWet(w.F.wx)?'☂':''):''}</div></div>`).join('')}</div>
    ${hsyncLine()}
   </div>`}
 ACT.fcWeek=()=>fcDetailSheet(addDays(bizDate(),0),8);
+ACT.fcPick=d=>{UI.fcSel=d.d===bizDate()?null:d.d;render()};
 // owner: staffing rule + cushion right on the card
 function fcStaffRow(){const c=fcCfg();
   return `<div class="row wrapr" style="gap:8px;padding:8px 10px;border-radius:10px;background:var(--sunk)">
