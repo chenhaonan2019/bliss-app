@@ -1825,14 +1825,34 @@ function needsSheet(){const loc=curLoc();const ed=Object.fromEntries([0,1,2,3,4,
 function ndDaySheet(date){const loc=curLoc();const hm2=m=>`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;
   let segs=needsCurve(needsAt(loc,date)).map(x=>({start:hm2(x.s),end:hm2(x.e),n:x.c}));const had=!!needsOverOf(loc,date);
   const grab=()=>{segs=segs.map((x,j)=>({start:$('#dd_s_'+j)?.value||x.start,end:$('#dd_e_'+j)?.value||x.end,n:Math.max(1,parseInt($('#dd_n_'+j)?.value)||1)}))};
+  // forecast for this day: sales per hour (owner only) and people the forecast suggests
+  const fc=(()=>{const o={};let tot=null,wx='';if(isOwner&&fcHas(loc)){const F=fcDay(loc,date);if(F.ok){tot=F.tot;wx=wxLabel(F.wx);Object.entries(F.hours).forEach(([h,x])=>o[+h]={m:x.m,need:x.need})}}
+    else{const x=fcNeedsOf(loc,date);if(x){wx=x.wx||'';Object.entries(x.hours||{}).forEach(([h,n])=>o[+h]={need:n})}}return{o,tot,wx}})();
+  const countAt=t=>segs.filter(x=>toMin(x.start)<=t&&t<toMin(x.end)).reduce((a,x)=>a+(+x.n||0),0);
+  const win=()=>segs.length?[Math.min(...segs.map(x=>toMin(x.start))),Math.max(...segs.map(x=>toMin(x.end)))]:null;
+  const hourCount=h=>{const w=win();if(!w)return 0;let c=0;for(let t=Math.max(w[0],h*60);t<Math.min(w[1],h*60+60);t+=30)c=Math.max(c,countAt(t));return c};
+  const setHour=(h,delta)=>{grab();const w=win();if(!w)return;const cnt=[];for(let t=w[0];t<w[1];t+=30)cnt.push(countAt(t));
+    for(let t=Math.max(w[0],h*60);t<Math.min(w[1],h*60+60);t+=30){const i=Math.round((t-w[0])/30);cnt[i]=Math.max(1,Math.min(9,(cnt[i]||0)+delta))}
+    const out=[];cnt.forEach((c,i)=>{const t=w[0]+i*30;const l=out[out.length-1];if(l&&l.n===c&&toMin(l.end)===t)l.end=hm2(t+30);else out.push({start:hm2(t),end:hm2(t+30),n:c})});segs=out;drawSheet()};
+  const chart=()=>{const w=win();const hs=new Set(Object.keys(fc.o).map(Number));if(w)for(let h=Math.floor(w[0]/60);h<Math.ceil(w[1]/60);h++)hs.add(h);const H=[...hs].sort((a,b)=>a-b);if(!H.length)return '';
+    const own=isOwner&&Object.values(fc.o).some(x=>x.m!=null);const mx=Math.max(1,...H.map(h=>own?(fc.o[h]?.m||0):(fc.o[h]?.need||0)));
+    return `<div class="card stack" style="gap:6px"><div class="row"><b class="grow">Forecast</b><span class="small muted">${fc.tot!=null?kmoney(fc.tot)+' net · ':''}${esc(fc.wx||'')}</span></div>
+     <div style="display:flex;align-items:flex-end;gap:3px;height:74px">${H.map(h=>{const f=fc.o[h];const v=own?(f?.m||0):(f?.need||0);return `<div style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px" title="${LANG_HOUR(h)}${f?.m!=null?': '+kmoney(f.m):''}"><span class="tiny muted">${f?f.need:''}</span><div style="width:100%;height:${f?Math.max(3,Math.round(v/mx*52)):0}px;border-radius:4px 4px 0 0;background:color-mix(in srgb,var(--brand) 40%,transparent)"></div></div>`}).join('')}</div>
+     <div style="display:flex;gap:3px">${H.map(h=>{const c=hourCount(h),f=fc.o[h],open=w&&h*60+60>w[0]&&h*60<w[1],diff=f&&open&&c!==f.need;
+       return `<div style="flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;gap:2px">${open?`<button class="x" style="width:26px;height:22px;font-size:14px" data-act="ddH" data-h="${h}" data-v="1" aria-label="One more person at ${LANG_HOUR(h)}">＋</button>
+        <b style="font-size:16px;${diff?'color:var(--brand);background:color-mix(in srgb,var(--brand) 16%,transparent);border-radius:6px;padding:0 6px':''}">${c}</b>
+        <button class="x" style="width:26px;height:22px;font-size:14px" data-act="ddH" data-h="${h}" data-v="-1" aria-label="One less person at ${LANG_HOUR(h)}">−</button>`:'<span class="tiny muted" style="height:66px;display:grid;place-items:center">—</span>'}<span class="tiny muted">${LANG_HOUR(h)}</span></div>`}).join('')}</div>
+     <div class="tiny muted">Small number above each bar = people the forecast suggests. Bold number = what you plan; tap ＋ / − to change it. Highlighted hours differ from the forecast.</div></div>`};
   openSheet({title:()=>`Shifts needed · ${fmtD(date,{weekday:'short',month:'short',day:'numeric'})}`,body:()=>`<p class="small muted">How many people should be working at each time on this day. This only changes ${fmtD(date,{weekday:'long',month:'short',day:'numeric'})}${had?'':' — the forecast and usual shifts stay as they are for other days'}.</p>
+    ${chart()}<div class="eyebrow">Time blocks</div>
     ${segs.length?segs.map((x,j)=>`<div class="row" style="gap:6px"><input class="in" type="time" step="1800" id="dd_s_${j}" value="${esc(x.start)}" style="min-width:0" aria-label="From"><span>–</span><input class="in" type="time" step="1800" id="dd_e_${j}" value="${esc(x.end)}" style="min-width:0" aria-label="To"><span>×</span><input class="in" type="number" min="1" max="9" id="dd_n_${j}" value="${x.n}" style="width:64px" aria-label="People"><button class="x" data-act="ddDel" data-j="${j}" aria-label="Remove" style="color:var(--bad);flex:none">${ic('x')}</button></div>`).join(''):'<div class="empty"><b>Closed</b>No one needed this day.</div>'}
     <div class="row wrapr" style="gap:6px"><button class="btn sm" data-act="ddAdd">${ic('plus')} Time block</button>${segs.length?`<button class="btn sm" data-act="ddClosed">Closed this day</button>`:''}</div>
     <div class="tiny muted">Example: 10:00a–12:00p × 1, 12:00p–3:00p × 2, 3:00p–9:30p × 1. Times on the hour or half hour.</div>`,
-   foot:()=>`${had?`<button class="btn" data-act="ddReset">Reset to forecast</button>`:''}<button class="btn pri big" data-act="ddSave">Save</button>`});
+   foot:()=>`${had?`<button class="btn" data-act="ddReset">Reset to forecast</button>`:''}<button class="btn pri big" data-act="ddSave">Save</button>`,
+   mount:()=>{document.querySelectorAll('#sheet input[id^="dd_"]').forEach(el=>el.addEventListener('change',()=>{grab();drawSheet()}))}});
   const save=async v=>{const cfg={...(D.schedCfg||{})};const o={...(cfg.needsOver||{})};Object.keys(o).forEach(k=>{if(k.slice(-10)<addDays(today(),-60))delete o[k]});
     const k=loc+'_'+date;if(v)o[k]=v;else delete o[k];cfg.needsOver=o;if(await W(A.db.doc('mgr/sched').set(cfg))){D.schedCfg=cfg;toast(v?'Day updated':'Back to the forecast');if(AS){SH=null;autoSheetReopen()}else{closeSheet();render()}}};
-  Object.assign(ACT,{ddAdd:()=>{grab();const last=segs[segs.length-1];segs.push(last?{start:last.end,end:last.end>'21:00'?last.end:'21:30',n:1}:{start:'11:00',end:'21:30',n:1});drawSheet()},
+  Object.assign(ACT,{ddH:d=>setHour(+d.h,+d.v),ddAdd:()=>{grab();const last=segs[segs.length-1];segs.push(last?{start:last.end,end:last.end>'21:00'?last.end:'21:30',n:1}:{start:'11:00',end:'21:30',n:1});drawSheet()},
    ddDel:d=>{grab();segs.splice(+d.j,1);drawSheet()},ddClosed:()=>{segs=[];drawSheet()},
    ddReset:()=>save(null),
    ddSave:()=>{grab();const v=segs.filter(x=>x.start&&x.end).map(x=>({start:x.start.slice(0,5),end:x.end.slice(0,5),n:x.n}));
