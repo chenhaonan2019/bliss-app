@@ -880,12 +880,13 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
   const legend=`<div class="legend">${L2.map((l,j)=>`<span><i style="background:${SC[j%3]}"></i>${esc(l.name)}</span>`).join('')}</div>`;
   const dot=j=>`<span class="dot" style="display:inline-block;background:${SC[j%3]};margin-right:6px"></span>`;
   const head=`<div><div class="eyebrow">${fmtD(today(),{weekday:'long',month:'long',day:'numeric'})}</div><h2>Owner</h2></div>
-  <div class="chips" role="tablist">${[['today','Today'],['overall','Profit & cost'],['labor','Labor cost'],['inv','Inventory cost'],['staff','Staff'],['order','Ordering & usage']].map(([k,n])=>`<button role="tab" class="${sub===k?'on':''}" data-act="ownerSub" data-k="${k}" style="padding:8px 12px"><b style="font-size:14px">${n}</b></button>`).join('')}</div>`;
+  <div class="chips" role="tablist">${[['today','Today'],['fc','Forecast'],['overall','Profit & cost'],['labor','Labor cost'],['inv','Inventory cost'],['staff','Staff'],['order','Ordering & usage']].map(([k,n])=>`<button role="tab" class="${sub===k?'on':''}" data-act="ownerSub" data-k="${k}" style="padding:8px 12px"><b style="font-size:14px">${n}</b></button>`).join('')}</div>`;
   const perBar=`<div class="seg" role="tablist">${[['week','Week'],['2w','2 Weeks'],['month','Month']].map(([k,n])=>`<button role="tab" class="${(UI.opm||'week')===k?'on':''}" data-act="ownerPer" data-k="${k}">${n}</button>`).join('')}</div>
   <div class="row"><button class="btn sm" data-act="ownerWk" data-n="-1" aria-label="Previous period">${ic('left')}</button><span class="grow small" style="font-weight:700;text-align:center">${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(PE,{month:'short',day:'numeric',year:'numeric'})}</span><button class="btn sm" data-act="ownerWk" data-n="1" aria-label="Next period">${ic('chev')}</button></div>`;
   let body='';
-  if(sub==='today'){const iss=L2.flatMap(l=>withLoc(l.id,()=>reviewIssues()));
-    body=`${iss.length?attnList(iss):''}<div class="g2">${L2.map(l=>{const t=storeToday(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
+  if(sub==='fc'){if(L2.some(l=>fcHas(l.id)&&!wxNow(l.id))&&!ofcBody.p)ofcBody.p=wxAll().then(()=>{ofcBody.p=null;rerender()});body=L2.some(l=>fcHas(l.id))?ofcBody(L2):`<div class="empty"><b>No sales history yet</b>The forecast starts once hourly sales are synced from Menusifu.</div>`}
+  else if(sub==='today'){const iss=L2.flatMap(l=>withLoc(l.id,()=>reviewIssues()));
+    body=`${ofcTodayCard(L2)}${iss.length?attnList(iss):''}<div class="g2">${L2.map(l=>{const t=storeToday(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
       <div class="small"><b>${t.on}</b> clocked in · <b>${t.sh.length}</b> shifts${t.late?` · <span style="color:var(--warn)">${t.late} late</span>`:''}</div>
       <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
       <div class="small muted">${t.low==null?'No count yet':`${t.low} low / out`} · ${t.arriving} deliveries due</div></div>`}).join('')}</div>
@@ -1902,6 +1903,50 @@ async function fcPublishNeeds(){if(!isOwner)return;await Promise.race([wxAll(),n
     for(let i=0;i<21;i++){const d=addDays(bizDate(),i),r=fcNeeds(loc,d);if(!r.fc?.ok)continue;dates[d]={needs:r.needs,hours:Object.fromEntries(Object.entries(r.fc.hours).map(([h,x])=>[h,x.need])),wx:wxLabel(r.fc.wx)}}
     try{await A.db.doc('mgr/fcneeds_'+loc).set({dates,at:new Date().toISOString()});D.fcneeds={...(D.fcneeds||{}),[loc]:dates}}catch(e){console.warn('publish needs',e)}}}
 ACT.fcCushion=async d=>{if(!isOwner)return;const v=+d.v;if(+fcCfg().buffer===v)return;if(await fcSaveCfg({...fcCfg(),buffer:v})){render();toast(`Cushion: ${FC_BUF.find(b=>b[0]===v)?.[1]} — managers' staffing updated`);fcPublishNeeds().then(()=>render())}};
+/* ---------- Owner → Forecast: sales and labor cost ahead ----------
+   Sales: actual for days already past (Menusifu sync), forecast for today and later.
+   Labor: past days use actual clock-in hours; otherwise scheduled shifts × each person's cost (payroll rate + employer payroll tax, cash rate, 1.5× over the weekly
+   overtime limit); days with no shifts yet use the forecast's people-per-hour × the store's average hourly cost. */
+const fcTaxPct=()=>{const t=taxRates();return ((+t.fica||0)+(+t.futa||0)+(+t.suta||0))/100};
+function fcAvgRate(loc){const tx=fcTaxPct();const r=Object.values(D.employees).filter(e=>e.active!==false&&locOf(e.id)===loc).map(e=>{const w=wageOf(e.id);return w.pay?w.pay*(1+tx):w.cash||0}).filter(x=>x>0);return r.length?r.reduce((a,b)=>a+b,0)/r.length:null}
+// cost per scheduled hour for one person in one Monday–Sunday week
+function fcWeekRate(empId,ws,cache){const k=empId+'|'+ws;if(cache[k]!=null)return cache[k];const W_=wageOf(empId),tx=fcTaxPct();
+  const h=Object.values(D.shifts).filter(s=>s.empId===empId&&s.date>=ws&&s.date<=addDays(ws,6)).reduce((a,s)=>a+shiftHrs(s),0);
+  if(!h||(!W_.pay&&!W_.cash))return cache[k]=0;const[ph,ch]=splitHrs(h,W_);const ot=Math.max(0,h-(D.settings.otWeekly||40));
+  const base=ph*W_.pay*(1+tx)+ch*W_.cash;const otExtra=ot*.5*(W_.pay?W_.pay*(1+tx):W_.cash);return cache[k]=(base+otExtra)/h}
+function fcRows(loc,from,n){const d0=bizDate(),H=hourlyOf(loc),avg=fcAvgRate(loc),cache={};
+  return [...Array(n)].map((_,i)=>{const d=addDays(from,i),past=d<d0;let net=null,tax=null,tips=null,recv=null,wx=null,ok=true;
+    if(past){const v=H[d];if(v&&dayTot(v)>0){const m=dayMoney(v);net=m.net;if(m.full){tax=m.tax;tips=m.tips;recv=m.recv}}else ok=false}
+    else{const F=fcDay(loc,d);if(F.ok){net=F.tot;tax=F.tax??null;tips=F.tips??null;recv=F.recv??null;wx=F.wx}else ok=false}
+    const sh=Object.values(D.shifts).filter(s=>s.date===d&&locOf(s.empId)===loc);let lh=0,lc=null,src='none';
+    const pu=past?Object.values(D.punches).filter(x=>x.date===d&&locOf(x.empId)===loc):[];
+    if(pu.length){const tx=fcTaxPct();lh=pu.reduce((a,x)=>a+punchHrs(x),0);lc=pu.reduce((a,x)=>{const W_=wageOf(x.empId);return a+punchHrs(x)*(W_.pay?W_.pay*(1+tx):W_.cash||0)},0);src='actual'}
+    else if(sh.length){lh=sh.reduce((a,s)=>a+shiftHrs(s),0);lc=sh.reduce((a,s)=>a+shiftHrs(s)*fcWeekRate(s.empId,weekStart(d),cache),0);src='sched'}
+    else if(!past&&needsFor(loc,parseYmd(d).getDay()).length){lh=needsAt(loc,d).reduce((a,x)=>a+((toMin(x.end)-toMin(x.start))/60)*(x.n||1),0);lc=avg!=null?lh*avg:null;src='est'}
+    return{d,past,ok,net,tax,tips,recv,wx,lh,lc,src}})}
+const fcSum=rows=>rows.reduce((a,r)=>{a.net+=r.net||0;a.tax+=r.tax||0;a.tips+=r.tips||0;a.recv+=r.recv||0;a.lh+=r.lh||0;a.lc+=r.lc||0;if(r.lc==null&&r.lh)a.noRate=true;if(r.net!=null&&r.recv==null)a.noRecv=true;if(r.src==='est')a.est++;return a},{net:0,tax:0,tips:0,recv:0,lh:0,lc:0,est:0});
+const laborPct=(lc,net)=>net>0?lc/net:null;
+const pctChip=p=>p==null?'<span class="muted">—</span>':`<b style="color:${p<=.25?'var(--ok)':p<=.32?'var(--warn)':'var(--bad)'}">${Math.round(p*100)}%</b>`;
+function ofcRange(){const k=UI.ofc||'this';const t=weekStart(bizDate());return k==='next'?{from:addDays(t,7),n:7,label:'Next week'}:k==='2w'?{from:addDays(t,7),n:14,label:'Next 2 weeks'}:{from:t,n:7,label:'This week'}}
+function ofcBody(L2){const R=ofcRange();const per=L2.map(l=>({l,rows:fcRows(l.id,R.from,R.n)}));per.forEach(p=>p.S=fcSum(p.rows));
+  const T=fcSum(per.flatMap(p=>p.rows));const lp=laborPct(T.lc,T.net);
+  const tile=(n,v,big)=>`<div style="flex:1;min-width:120px;padding:10px 12px;border-radius:12px;background:${big?'color-mix(in srgb,var(--brand) 14%,transparent)':'var(--sunk)'}"><div class="tiny muted">${n}</div><div style="font-weight:800;font-size:${big?22:18}px">${v}</div></div>`;
+  const days=[...Array(R.n)].map((_,i)=>addDays(R.from,i));
+  return `<div class="seg" role="tablist">${[['this','This week'],['next','Next week'],['2w','Next 2 weeks']].map(([k,n])=>`<button role="tab" class="${(UI.ofc||'this')===k?'on':''}" data-act="ofcPer" data-k="${k}">${n}</button>`).join('')}</div>
+   <div class="small muted" style="text-align:center">${fmtD(R.from,{month:'short',day:'numeric'})} – ${fmtD(addDays(R.from,R.n-1),{month:'short',day:'numeric'})}${days.some(d=>d<bizDate())?' · past days use actual sales':''}</div>
+   <div class="card stack"><div class="row wrapr" style="gap:8px">${tile('Net sales',kmoney(T.net),true)}${tile('Labor cost',T.noRate&&!T.lc?'—':kmoney(T.lc),true)}${tile('Labor % of sales',lp==null?'—':`<span style="color:${lp<=.25?'var(--ok)':lp<=.32?'var(--warn)':'var(--bad)'}">${Math.round(lp*100)}%</span>`,true)}</div>
+    <div class="row wrapr" style="gap:8px">${tile('Tax',kmoney(T.tax))}${tile('Tips',kmoney(T.tips))}${tile('Total receivable',kmoney(T.recv))}${tile('Labor hours',fmtH(T.lh).replace(/\.00$/,'')+' h')}</div>
+    <div class="tiny muted">Labor = clock-in hours for past days, scheduled shifts for the rest, × each person's pay (payroll + employer payroll tax, cash, overtime)${T.est?`; ${T.est} day${T.est>1?'s':''} not scheduled yet use the forecast's staffing × the store's average hourly cost`:''}.${T.noRate?' Some staff have no pay rate set (Team → wages), so labor is understated.':''}${T.noRecv?' Tax/tips missing for some days.':''}</div></div>
+   ${per.length>1?`<div class="tbl"><table><thead><tr><th>Store</th><th>Net sales</th><th>Labor</th><th>Labor %</th><th>Receivable</th></tr></thead><tbody>${per.map(p=>`<tr><td>${esc(p.l.name)}</td><td>${kmoney(p.S.net)}</td><td>${kmoney(p.S.lc)}</td><td>${pctChip(laborPct(p.S.lc,p.S.net))}</td><td>${kmoney(p.S.recv)}</td></tr>`).join('')}</tbody></table></div>`:''}
+   <div class="tbl"><table><thead><tr><th>Day</th><th>Net sales</th><th>Labor h</th><th>Labor</th><th>Labor %</th><th>Receivable</th></tr></thead><tbody>
+    ${days.map(d=>{const rs=per.map(p=>p.rows.find(r=>r.d===d));const S=fcSum(rs);const past=d<bizDate();const any=rs.some(r=>r.ok);const src=rs.some(r=>r.src==='est')?'est':rs.some(r=>r.src==='sched')?'sched':'';
+      return `<tr><td>${fmtD(d,{weekday:'short',month:'numeric',day:'numeric'})}${past?' <span class="tiny muted">actual</span>':''}${!past&&per.length===1&&rs[0].wx?`<div class="tiny muted">${esc(wxLabel(rs[0].wx))}</div>`:''}</td><td>${any?kmoney(S.net):'—'}</td><td>${S.lh?fmtH(S.lh).replace(/\.00$/,''):'—'}</td><td>${S.lh?kmoney(S.lc):'—'}${src==='est'?' <span class="tiny muted" title="Not scheduled yet: estimated from the forecast staffing">est.</span>':''}</td><td>${any&&S.lh?pctChip(laborPct(S.lc,S.net)):'—'}</td><td>${S.recv?kmoney(S.recv):'—'}</td></tr>`}).join('')}
+   </tbody></table></div>`}
+// compact card for Owner → Today
+function ofcTodayCard(L2){if(!L2.some(l=>fcHas(l.id)))return '';const t=weekStart(bizDate());const S=fcSum(L2.flatMap(l=>fcRows(l.id,t,7)));const lp=laborPct(S.lc,S.net);
+  return `<div class="card row tap" data-act="ownerSub" data-k="fc" tabindex="0" style="gap:12px;cursor:pointer">${ic('spark')}<div class="grow"><div class="t">This week · sales forecast</div>
+   <div class="small muted">${kmoney(S.net)} net · ${kmoney(S.recv)} receivable · labor ${kmoney(S.lc)} (${lp==null?'—':Math.round(lp*100)+'%'})</div></div>${ic('chev')}</div>`}
+ACT.ofcPer=d=>{UI.ofc=d.k;render()};
 let FCS=null;
 function fcSettingsSheet(){const c=fcCfg();FCS={geo:{...(c.geo||{})},msg:''};
   openSheet({title:()=>'Sales forecast settings',body:()=>{const c=fcCfg();const L2=LOCS();

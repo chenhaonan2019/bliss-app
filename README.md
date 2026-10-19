@@ -162,3 +162,9 @@ Notes:
   item's example photo if it has one. Staff see "AI ✓" or a short note right away and can retake. A photo that matches one already
   used for the same task on another day is flagged as reused. In Review, tasks with AI notes come first and the notes show on the
   photos; the manager still decides Passed / Has issues. Results are saved on the photo log as `ai`.
+
+## Owner → Forecast
+This week / next week / next 2 weeks, per store and in total: net sales, tax, tips, total receivable (actual for days already
+past, forecast for the rest), labor hours and labor cost, and labor as a % of net sales. Labor uses clock-in hours for past days,
+scheduled shifts otherwise (each person's payroll rate + employer payroll tax, cash rate, 1.5× past the weekly overtime limit),
+and for days not scheduled yet the forecast's staffing × the store's average hourly cost ("est."). Owner → Today shows this week's summary.
