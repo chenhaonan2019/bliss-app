@@ -1688,7 +1688,9 @@ function fcNeeds(loc,date){const man=needsFor(loc,parseYmd(date).getDay());if(!m
 /* Sales are owner-only (owner/hourly_*). Managers get people-per-hour computed by the daily sync (mgr/fcneeds_*), never amounts. */
 const fcNeedsOf=(loc,date)=>(D.fcneeds||{})[loc]?.[date]||null;
 const fcUse=loc=>fcCfg().on!==false&&(isOwner?fcHas(loc):!!Object.keys((D.fcneeds||{})[loc]||{}).length);
-function needsAt(loc,date){if(!fcUse(loc))return needsFor(loc,parseYmd(date).getDay());if(isOwner)return fcNeeds(loc,date).needs;
+// a manager/owner can change one day by hand; that day then ignores the forecast and usual shifts
+const needsOverOf=(loc,date)=>{const v=D.schedCfg?.needsOver?.[loc+'_'+date];return Array.isArray(v)?v:null};
+function needsAt(loc,date){const ov=needsOverOf(loc,date);if(ov)return ov;if(!fcUse(loc))return needsFor(loc,parseYmd(date).getDay());if(isOwner)return fcNeeds(loc,date).needs;
   const x=fcNeedsOf(loc,date);return x&&!needsFor(loc,parseYmd(date).getDay()).length?[]:x?.needs||needsFor(loc,parseYmd(date).getDay())}
 /* people needed at each hour, for the summary line */
 function needsCurve(nds){const ts=[...new Set(nds.flatMap(n=>[toMin(n.start),toMin(n.end)]))].sort((a,b)=>a-b);const seg=[];for(let i=0;i<ts.length-1;i++){const t=ts[i];const c=nds.filter(n=>toMin(n.start)<=t&&t<toMin(n.end)).reduce((a,n)=>a+(n.n||1),0);const l=seg[seg.length-1];if(l&&l.c===c&&l.e===t)l.e=ts[i+1];else seg.push({s:t,e:ts[i+1],c})}return seg.filter(x=>x.c>0)}
@@ -1808,6 +1810,25 @@ function needsSheet(){const loc=curLoc();const ed=Object.fromEntries([0,1,2,3,4,
    ndDel:d=>{grab();ed[+d.i].splice(+d.j,1);drawSheet()},ndCopy:d=>{grab();ed[+d.i]=ed[1].map(x=>({...x}));drawSheet()},
    ndSave:async()=>{grab();const staffing={...(D.settings.staffing||{}),[loc]:Object.fromEntries(Object.entries(ed).map(([k,v])=>[k,v.filter(x=>x.start&&x.end)]))};const s2={...D.settings,staffing};
      if(await W(A.db.doc('config/settings').set(s2))){D.settings=s2;toast('Saved');SH=null;autoSheetReopen()}}})}
+/* change one day's people by hand: time blocks with how many people, prefilled from what the day uses now */
+function ndDaySheet(date){const loc=curLoc();const hm2=m=>`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;
+  let segs=needsCurve(needsAt(loc,date)).map(x=>({start:hm2(x.s),end:hm2(x.e),n:x.c}));const had=!!needsOverOf(loc,date);
+  const grab=()=>{segs=segs.map((x,j)=>({start:$('#dd_s_'+j)?.value||x.start,end:$('#dd_e_'+j)?.value||x.end,n:Math.max(1,parseInt($('#dd_n_'+j)?.value)||1)}))};
+  openSheet({title:()=>`Shifts needed · ${fmtD(date,{weekday:'short',month:'short',day:'numeric'})}`,body:()=>`<p class="small muted">How many people should be working at each time on this day. This only changes ${fmtD(date,{weekday:'long',month:'short',day:'numeric'})}${had?'':' — the forecast and usual shifts stay as they are for other days'}.</p>
+    ${segs.length?segs.map((x,j)=>`<div class="row" style="gap:6px"><input class="in" type="time" step="1800" id="dd_s_${j}" value="${esc(x.start)}" style="min-width:0" aria-label="From"><span>–</span><input class="in" type="time" step="1800" id="dd_e_${j}" value="${esc(x.end)}" style="min-width:0" aria-label="To"><span>×</span><input class="in" type="number" min="1" max="9" id="dd_n_${j}" value="${x.n}" style="width:64px" aria-label="People"><button class="x" data-act="ddDel" data-j="${j}" aria-label="Remove" style="color:var(--bad);flex:none">${ic('x')}</button></div>`).join(''):'<div class="empty"><b>Closed</b>No one needed this day.</div>'}
+    <div class="row wrapr" style="gap:6px"><button class="btn sm" data-act="ddAdd">${ic('plus')} Time block</button>${segs.length?`<button class="btn sm" data-act="ddClosed">Closed this day</button>`:''}</div>
+    <div class="tiny muted">Example: 10:00a–12:00p × 1, 12:00p–3:00p × 2, 3:00p–9:30p × 1. Times on the hour or half hour.</div>`,
+   foot:()=>`${had?`<button class="btn" data-act="ddReset">Reset to forecast</button>`:''}<button class="btn pri big" data-act="ddSave">Save</button>`});
+  const save=async v=>{const cfg={...(D.schedCfg||{})};const o={...(cfg.needsOver||{})};Object.keys(o).forEach(k=>{if(k.slice(-10)<addDays(today(),-60))delete o[k]});
+    const k=loc+'_'+date;if(v)o[k]=v;else delete o[k];cfg.needsOver=o;if(await W(A.db.doc('mgr/sched').set(cfg))){D.schedCfg=cfg;toast(v?'Day updated':'Back to the forecast');if(AS){SH=null;autoSheetReopen()}else{closeSheet();render()}}};
+  Object.assign(ACT,{ddAdd:()=>{grab();const last=segs[segs.length-1];segs.push(last?{start:last.end,end:last.end>'21:00'?last.end:'21:30',n:1}:{start:'11:00',end:'21:30',n:1});drawSheet()},
+   ddDel:d=>{grab();segs.splice(+d.j,1);drawSheet()},ddClosed:()=>{segs=[];drawSheet()},
+   ddReset:()=>save(null),
+   ddSave:()=>{grab();const v=segs.filter(x=>x.start&&x.end).map(x=>({start:x.start.slice(0,5),end:x.end.slice(0,5),n:x.n}));
+     if(v.some(x=>toMin(x.end)<=toMin(x.start))){toast('Each block must end after it starts');return}
+     v.sort((a,b)=>toMin(a.start)-toMin(b.start));for(let i=1;i<v.length;i++)if(toMin(v[i].start)<toMin(v[i-1].end)){toast('Time blocks overlap — fix the times');return}
+     save(v)}})}
+ACT.ndDay=d=>{if(AS)asGrab();ndDaySheet(d.d)};
 function autoSheetReopen(){const keep=AS;autoSheet();if(keep){AS={...AS,...keep,plan:keep.plan}};drawSheet()}
 /* ---------- forecast UI ---------- */
 const kmoney=n=>'$'+Math.round(n).toLocaleString('en-US');
@@ -1820,23 +1841,23 @@ function asNeedsCard(ws,n){if(!isOwner)return asNeedsCardMgr(ws,n);const loc=cur
   const usual=[1,2,3,4,5,6,0].map(i=>{const l=needsFor(loc,i);return `<div class="row small"><b style="width:44px">${WD()[i]}</b><span class="grow">${l.length?l.map(x=>`${fmtT(x.start)}–${fmtT(x.end)} × ${x.n}`).join(' · '):'<span class="muted">Closed</span>'}</span></div>`}).join('');
   if(!has)return `<div class="card stack"><div class="row"><h3 class="grow">Shifts needed</h3><button class="btn sm" data-act="needsEdit">Edit</button></div>${usual}
     <div class="hint">Add hourly sales and the app will decide how many people each hour needs from your sales forecast and the weather. <button class="btn sm" data-act="fcSettings" style="margin-top:6px">${ic('spark')} Set up sales forecast</button></div></div>`;
-  const days=[...Array(n)].map((_,i)=>{const d=addDays(ws,i);const r=use?fcNeeds(loc,d):{needs:needsFor(loc,parseYmd(d).getDay()),fc:null};const F=r.fc;
-    return `<div class="row" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line);gap:8px"><div style="width:58px;flex:none"><b>${WD()[parseYmd(d).getDay()]}</b><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>
-      <div class="grow stack" style="gap:2px">${!r.needs.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(r.needs)}</span>`}
-      ${F?.ok?`<span class="tiny muted">Forecast ${kmoney(F.tot)}${F.wx?` · ${esc(wxLabel(F.wx))}${Math.abs(F.f-1)>=0.02?` (${F.f>1?'+':'−'}${Math.round(Math.abs(F.f-1)*100)}% weather)`:''}`:''}</span>`:F&&!F.ok?`<span class="tiny muted">Using usual shifts: ${esc(F.why)}</span>`:''}</div></div>`}).join('');
+  const days=[...Array(n)].map((_,i)=>{const d=addDays(ws,i);const r=use?fcNeeds(loc,d):{needs:needsFor(loc,parseYmd(d).getDay()),fc:null};const F=r.fc;const ov=needsOverOf(loc,d);if(ov)r.needs=ov;
+    return `<div class="row tap" data-act="ndDay" data-d="${d}" role="button" tabindex="0" title="Change this day" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line);gap:8px;cursor:pointer"><div style="width:58px;flex:none"><b>${WD()[parseYmd(d).getDay()]}</b><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>
+      <div class="grow stack" style="gap:2px">${!r.needs.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(r.needs)}</span>`}${ov?` ${chip('info','Edited')}`:''}
+      ${F?.ok?`<span class="tiny muted">Forecast ${kmoney(F.tot)}${F.wx?` · ${esc(wxLabel(F.wx))}${Math.abs(F.f-1)>=0.02?` (${F.f>1?'+':'−'}${Math.round(Math.abs(F.f-1)*100)}% weather)`:''}`:''}</span>`:F&&!F.ok?`<span class="tiny muted">Using usual shifts: ${esc(F.why)}</span>`:''}</div><span class="muted" style="flex:none;align-self:center">${ic('chev')}</span></div>`}).join('');
   return `<div class="card stack"><div class="row wrapr"><h3 class="grow">Shifts needed</h3><label class="row small" style="gap:6px"><input type="checkbox" data-act="fcToggle" ${use?'checked':''}> From sales forecast</label></div>
-    ${use?`<div class="tiny muted">People on shift at each time. Open and close times come from your usual shifts. ${wxReady?'':'Loading weather…'}</div>${hsyncLine()}${days}
+    ${use?`<div class="tiny muted">People on shift at each time. Open and close times come from your usual shifts. Tap a day to change it. ${wxReady?'':'Loading weather…'}</div>${hsyncLine()}${days}
       <div class="row wrapr" style="gap:6px"><button class="btn sm" data-act="fcDetail">Hourly detail</button><button class="btn sm" data-act="fcSettings">Forecast settings</button><button class="btn sm" data-act="needsEdit">Usual shifts</button></div>`
     :`${usual}<div class="row" style="gap:6px"><button class="btn sm" data-act="needsEdit">Edit</button><button class="btn sm" data-act="fcSettings">Forecast settings</button></div>`}</div>`}
 // managers: people per hour and weather only
 function asNeedsCardMgr(ws,n){const loc=curLoc(),use=fcUse(loc);
   const usual=[1,2,3,4,5,6,0].map(i=>{const l=needsFor(loc,i);return `<div class="row small"><b style="width:44px">${WD()[i]}</b><span class="grow">${l.length?l.map(x=>`${fmtT(x.start)}–${fmtT(x.end)} × ${x.n}`).join(' · '):'<span class="muted">Closed</span>'}</span></div>`}).join('');
   if(!use)return `<div class="card stack"><div class="row"><h3 class="grow">Shifts needed</h3><button class="btn sm" data-act="needsEdit">Edit</button></div>${usual}</div>`;
-  const days=[...Array(n)].map((_,i)=>{const d=addDays(ws,i);const x=fcNeedsOf(loc,d);const nds=needsAt(loc,d);
-    return `<div class="row" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line);gap:8px"><div style="width:58px;flex:none"><b>${WD()[parseYmd(d).getDay()]}</b><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>
-      <div class="grow stack" style="gap:2px">${!nds.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(nds)}</span>`}<span class="tiny muted">${x?`From the sales forecast${x.wx?' · '+esc(x.wx):''}`:'Usual shifts (no forecast for this day yet)'}</span></div></div>`}).join('');
+  const days=[...Array(n)].map((_,i)=>{const d=addDays(ws,i);const x=fcNeedsOf(loc,d);const nds=needsAt(loc,d);const ov=needsOverOf(loc,d);
+    return `<div class="row tap" data-act="ndDay" data-d="${d}" role="button" tabindex="0" title="Change this day" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line);gap:8px;cursor:pointer"><div style="width:58px;flex:none"><b>${WD()[parseYmd(d).getDay()]}</b><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>
+      <div class="grow stack" style="gap:2px">${!nds.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(nds)}</span>`}<span class="tiny muted">${ov?'Changed by hand':x?`From the sales forecast${x.wx?' · '+esc(x.wx):''}`:'Usual shifts (no forecast for this day yet)'}</span></div>${ov?chip('info','Edited'):''}<span class="muted" style="flex:none;align-self:center">${ic('chev')}</span></div>`}).join('');
   return `<div class="card stack"><div class="row"><h3 class="grow">Shifts needed</h3><button class="btn sm" data-act="needsEdit">Usual shifts</button></div>
-    <div class="tiny muted">People on shift at each time, set from the owner's sales forecast and the weather. Open and close times come from your usual shifts.</div>${hsyncLine()}${days}</div>`}
+    <div class="tiny muted">People on shift at each time, set from the owner's sales forecast and the weather. Open and close times come from your usual shifts. Tap a day to change it.</div>${hsyncLine()}${days}</div>`}
 function fcDetailSheet(ws0,n0){const loc=curLoc(),ws=ws0||AS?.ws||nextWk(),n=n0||AS?.n||7,c=fcCfg();
   openSheet({title:()=>`Sales forecast · ${esc(locName(loc))}`,body:()=>{const M=wxNow(loc)?fcModel():null;
     return `<div class="tiny muted">Based on the last ${c.weeks} same weekdays (newer weeks count more), adjusted for the weather forecast. People = 1 up to ${kmoney(c.max1)}/hour, then one more for every ${kmoney(c.cap)}. Staffing adds a ${FC_BUF.find(b=>b[0]===+c.buffer)?.[1]?.toLowerCase()||'custom'} cushion for hours that swing a lot.</div>
