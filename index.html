@@ -1880,10 +1880,23 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())re
       <span class="tiny muted">${LANG_HOUR(h)}</span></div>`).join('')}
    </div>
    <div class="tiny muted">Bars = forecast sales per hour; number on top = people needed. Updated each morning from Menusifu.</div>
+   ${fcStaffRow()}
    <div class="row" style="gap:4px;overflow-x:auto">${week.map(w=>`<div style="flex:1;min-width:46px;text-align:center;padding:6px 2px;border-radius:10px;background:var(--sunk)"><div class="tiny muted">${WD()[parseYmd(w.d).getDay()]}</div><div class="small" style="font-weight:700">${!w.open?'—':w.F.ok?kmoney(w.F.tot):'?'}</div>${w.open&&w.F.ok&&w.F.tips!=null?`<div class="tiny muted">+${kmoney(w.F.tips)} tips</div>`:''}<div class="tiny muted">${w.F.ok&&w.F.wx?Math.round(w.F.wx.tmax)+'°'+(wxSnow(w.F.wx)?'❄':wxWet(w.F.wx)?'☂':''):''}</div></div>`).join('')}</div>
    ${hsyncLine()}
   </div>`}
 ACT.fcWeek=()=>fcDetailSheet(addDays(bizDate(),0),8);
+// owner: staffing rule + cushion right on the card
+function fcStaffRow(){const c=fcCfg();
+  return `<div class="row wrapr" style="gap:8px;padding:8px 10px;border-radius:10px;background:var(--sunk)">
+    <div class="grow small" style="min-width:180px"><b>People:</b> 1 up to ${kmoney(c.max1)}/h, +1 per ${kmoney(c.cap)}${+c.minStaff>1?` · at least ${c.minStaff}`:''}</div>
+    <div class="seg" style="padding:3px;flex:none" role="group" aria-label="Cushion for busy swings">${FC_BUF.map(([v,n,d])=>`<button class="${+c.buffer===v?'on':''}" style="padding:5px 10px" data-act="fcCushion" data-v="${v}" title="${esc(d)}">${n}</button>`).join('')}</div>
+    <button class="btn sm" data-act="fcSettings">Settings</button></div>`}
+// recompute managers' staffing (people per hour, no money) right away instead of waiting for the morning sync
+async function fcPublishNeeds(){if(!isOwner)return;await Promise.race([wxAll(),new Promise(r=>setTimeout(r,6000))]);
+  for(const loc of Object.keys(D.hourly||{})){if(!fcHas(loc))continue;const dates={};
+    for(let i=0;i<21;i++){const d=addDays(bizDate(),i),r=fcNeeds(loc,d);if(!r.fc?.ok)continue;dates[d]={needs:r.needs,hours:Object.fromEntries(Object.entries(r.fc.hours).map(([h,x])=>[h,x.need])),wx:wxLabel(r.fc.wx)}}
+    try{await A.db.doc('mgr/fcneeds_'+loc).set({dates,at:new Date().toISOString()});D.fcneeds={...(D.fcneeds||{}),[loc]:dates}}catch(e){console.warn('publish needs',e)}}}
+ACT.fcCushion=async d=>{if(!isOwner)return;const v=+d.v;if(+fcCfg().buffer===v)return;if(await fcSaveCfg({...fcCfg(),buffer:v})){render();toast(`Cushion: ${FC_BUF.find(b=>b[0]===v)?.[1]} — managers' staffing updated`);fcPublishNeeds().then(()=>render())}};
 let FCS=null;
 function fcSettingsSheet(){const c=fcCfg();FCS={geo:{...(c.geo||{})},msg:''};
   openSheet({title:()=>'Sales forecast settings',body:()=>{const c=fcCfg();const L2=LOCS();
@@ -1914,7 +1927,7 @@ Object.assign(ACT,{
   fcToggle:async(d,el)=>{if(!isOwner){el.checked=!el.checked;return}asGrab();if(await fcSaveCfg({...fcCfg(),on:el.checked})){if(el.checked)wxAll().then(()=>{if(AS)drawSheet()});drawSheet()}},
   fcGeo:async d=>{const q=($('#fc_geo_'+d.l)?.value||'').split(',')[0].trim();if(!q)return;try{const r=await fetch(`https://geocoding-api.open-meteo.com/v1/search?name=${encodeURIComponent(q)}&count=5&language=en&format=json&countryCode=US`).then(r=>r.json());const x=(r.results||[])[0];
     if(!x){toast('City not found');return}FCS.geo[d.l]={lat:+x.latitude.toFixed(4),lon:+x.longitude.toFixed(4),name:`${x.name}, ${x.admin1_code||x.admin1||''}`.replace(/, $/,'')};const keep=fcGrab();D.schedCfg={...(D.schedCfg||{}),forecast:keep};drawSheet()}catch(e){toast('Could not look up the city')}},
-  fcSave:async()=>{if(await fcSaveCfg(fcGrab())){toast('Forecast settings saved');if(AS){SH=null;autoSheetReopen()}else closeSheet()}}});
+  fcSave:async()=>{if(await fcSaveCfg(fcGrab())){toast('Forecast settings saved');if(AS){SH=null;autoSheetReopen()}else{closeSheet();render()}fcPublishNeeds().then(()=>render())}}});
 /* receive hourly sales from a Menusifu reports tab: that tab opens this app with #import-hourly and posts the data;
    nothing is saved until a manager reviews it and taps Import */
 const MS_ORIGIN='https://cloud.menusifucloud.com';let HS_IN=null,HS_T=null;
