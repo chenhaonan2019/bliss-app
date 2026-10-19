@@ -1850,7 +1850,7 @@ function fcModelTxt(M){const p=x=>Math.round(Math.abs(Math.exp(x)-1)*100);return
 function fcAvgDay(loc,date){const H=hourlyOf(loc),st=settledFrom(H);const xs=[];for(let i=1;i<=28;i++){const d=addDays(date,-i);if(d>=today()||d<st)continue;const t=dayTot(H[d]);if(t>=30)xs.push(t)}return xs.length>=7?xs.reduce((a,b)=>a+b,0)/xs.length:null}
 const pct=x=>`${x>=0?'+':'−'}${Math.round(Math.abs(x)*100)}%`;
 function fcTodayCardMgr(){const loc=curLoc(),d=bizDate(),x=fcNeedsOf(loc,d);if(!x)return '';const hrs=Object.entries(x.hours||{}).map(([h,n])=>[+h,n]).sort((a,b)=>a[0]-b[0]);const nowH=new Date().getHours();
-  return `<div class="card stack" style="gap:8px"><div class="row"><div class="grow"><div class="eyebrow">Staffing today</div><div class="small muted">${DOW[parseYmd(d).getDay()]}${x.wx?' · '+esc(x.wx):''}</div></div></div>
+  return `<div class="card stack" style="gap:8px"><div class="row"><div class="grow"><div class="eyebrow">Staffing today · ${esc(locName(loc))}</div><div class="small muted">${DOW[parseYmd(d).getDay()]}${x.wx?' · '+esc(x.wx):''}</div></div></div>
    <div class="row" style="gap:3px">${hrs.map(([h,n])=>`<div style="flex:1;min-width:0;text-align:center;padding:6px 0;border-radius:8px;background:${n>1?'color-mix(in srgb,var(--brand) 22%,transparent)':'var(--sunk)'};${h===nowH?'outline:2px solid var(--brand);':''}"><div style="font-weight:700">${n}</div><div class="tiny muted">${LANG_HOUR(h)}</div></div>`).join('')}</div>
    <div class="tiny muted">People needed each hour, from the sales forecast and the weather.</div></div>`}
 function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())return fcTodayCardMgr();if(!fcHas(loc))return '';
@@ -1862,7 +1862,7 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())re
   const y=addDays(d,-1),Hy=hourlyOf(loc)[y],Fy=Hy&&dayTot(Hy)>=30?fcDay(loc,y):null,ay=Hy?dayTot(Hy):0;
   const week=[...Array(7)].map((_,i)=>addDays(d,i+1)).map(x=>({d:x,F:fcDay(loc,x),open:needsFor(loc,parseYmd(x).getDay()).length>0}));
   return `<div class="card stack" style="gap:10px">
-   <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><div class="eyebrow">Sales forecast · today</div>
+   <div class="row" style="align-items:flex-start;gap:10px"><div class="grow"><div class="eyebrow">Sales forecast today · ${esc(locName(loc))}</div>
      <div style="font-family:var(--display);font-weight:800;font-size:34px;line-height:1.1">${kmoney(F.tot)}</div>
      <div class="small muted">Net sales · ${wd}${F.wx?` · ${esc(wxLabel(F.wx))}`:''}</div></div>
     <button class="btn sm" data-act="fcWeek">Next 7 days</button></div>
