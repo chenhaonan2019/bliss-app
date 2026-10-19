@@ -386,13 +386,15 @@ const itemById=id=>D.items.find(i=>i.id===id);
 const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
 const deepFor=date=>{const dd=D.slots.deepDays;if(dd&&Object.keys(dd).length){return dd[parseYmd(date||bizDate()).getDay()]||[]}return D.slots.deep?.length?D.slots.deep:[{id:'deep-cleaning',name:'Deep cleaning for today'}]};
 // Each item repeats like an alarm: every day (default), chosen weekdays, monthly on a date, or one date only.
+// an item with locs:[...] only shows at those stores; no locs = every store
+const itemAtLoc=(x,loc)=>!Array.isArray(x.locs)||!x.locs.length||x.locs.includes(loc);
 function itemOn(x,date){const r=x.rep||'daily';if(r==='daily')return true;const dt=parseYmd(date);
   if(r==='weekly')return (x.days||[]).includes(dt.getDay());
   if(r==='monthly'){const last=new Date(dt.getFullYear(),dt.getMonth()+1,0).getDate();const want=x.dom==='last'?last:Math.min(+x.dom||1,last);return dt.getDate()===want}
   if(r==='once')return x.date===date;return true}
 const repText=x=>{const r=x.rep||'daily';if(r==='weekly'){const d=x.days||[];return d.length?[1,2,3,4,5,6,0].filter(i=>d.includes(i)).map(i=>WD()[i]).join(', '):'No days picked'}
   if(r==='monthly')return x.dom==='last'?'Monthly, last day':`Monthly, day ${x.dom||1}`;if(r==='once')return x.date?fmtD(x.date):'Pick a date';return 'Every day'};
-const slotsOf=(type,date)=>{date=date||bizDate();const t=taskList().find(x=>x.id===type);if(!t||!taskOnDay(t,date))return[];return ((t.byDay?t.dayItems?.[parseYmd(date).getDay()]:t.items)||[]).filter(x=>itemOn(x,date))};
+const slotsOf=(type,date)=>{date=date||bizDate();const t=taskList().find(x=>x.id===type);if(!t||!taskOnDay(t,date))return[];return ((t.byDay?t.dayItems?.[parseYmd(date).getDay()]:t.items)||[]).filter(x=>itemOn(x,date)&&itemAtLoc(x,curLoc()))};
 const slotDone=(doc,id)=>!!(doc?.photos?.[id]||doc?.checks?.[id]);
 const photoDoc=(date,type,loc)=>D.photos[`${loc||curLoc()}_${date}_${type}`];
 function taskState(date,type,loc){
@@ -578,8 +580,10 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
     <div class="row"><div class="grow"><div class="eyebrow">${L('Today’s shift','今天的班')}</div>
       <div class="t" style="font-weight:700;font-size:17px">${sh.length?sh.map(s=>`${fmtT(s.start)} – ${fmtT(s.end)}`).join(', '):L('No shift scheduled','今天没有排班')}</div></div>
       ${op?chip(op.late?'warn':'ok',op.late?L(`Late ${op.late} min`,`迟到 ${op.late} 分钟`):L('On time','准时')):''}</div>
-    ${op?`<div class="row"><div class="grow"><div class="muted small">${L('Clocked in at','上班打卡')}</div><div class="clock" data-since="${esc(op.in)}">${fmtT(hm(new Date(op.in)))}</div></div></div>
+    ${op?`${op.selfieAi&&op.selfieAi.ok===false?`<div class="hint warn">${L('BLISS logo not visible in your clock-in selfie.','打卡自拍里看不到 BLISS logo。')} <label class="btn sm" style="cursor:pointer;margin-top:6px">${ic('cam')} ${L('Retake selfie','重拍自拍')}<input type="file" accept="image/*" capture="user" data-up="reselfie" data-id="${esc(op.id)}" hidden></label></div>`:op.selfie&&AIC['s'+op.id]?`<div class="tiny muted">${L('Checking your selfie…','正在检查自拍…')}</div>`:''}<div class="row"><div class="grow"><div class="muted small">${L('Clocked in at','上班打卡')}</div><div class="clock" data-since="${esc(op.in)}">${fmtT(hm(new Date(op.in)))}</div></div></div>
       <button class="btn big block" data-act="clockOut" data-id="${op.id}">${ic('clock')} ${L('Clock out','下班打卡')}</button>`
+    :A.assets?`<label class="btn pri big block" style="cursor:pointer">${ic('clock')} ${L('Clock in','上班打卡')}<input type="file" accept="image/*" capture="user" data-up="selfie" hidden></label>
+      <div class="tiny muted" style="text-align:center">${L('Take a selfie with the BLISS logo behind you.','请在 BLISS logo 前自拍打卡。')}</div>`
     :`<button class="btn pri big block" data-act="clockIn">${ic('clock')} ${L('Clock in','上班打卡')}</button>`}
     ${todayP.filter(p=>p.out).map(p=>`<div class="small muted">${fmtT(hm(new Date(p.in)))} – ${fmtT(hm(new Date(p.out)))} · ${fmtH(punchHrs(p))} h</div>`).join('')}
   </div>
@@ -679,6 +683,7 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
     if(!p)c=Date.now()>atTime(d,s.start).getTime()+(D.settings.lateGrace||0)*6e4?chip('bad',L('Not clocked in','未打卡')):chip('',L('Not started','未开始'));
     else if(!p.out)c=chip(p.late?'warn':'ok',(p.late?L(`Late ${p.late}m · `,`迟到${p.late}分 · `):'')+L('In ','上班 ')+fmtT(hm(new Date(p.in))));
     else c=chip(p.late?'warn':'ok',`${fmtH(ps.reduce((a,x)=>a+punchHrs(x),0))} h`+(p.late?L(` · late ${p.late}m`,` · 迟到${p.late}分`):''));
+    if(p?.selfieAi&&p.selfieAi.ok===false)c=chip('warn',L('Selfie: no logo','自拍无 logo'))+' '+c;
     return `<div class="li">${p?.selfie?`<img src="${BLOB}${esc(p.selfie)}" alt="Clock-in selfie" class="av" style="object-fit:cover;cursor:zoom-in;padding:0" data-act="viewPh" data-pid="${esc(p.selfie)}" data-cap="${esc(empName(s.empId))} · clock-in ${esc(fmtT(hm(new Date(p.in))))}">`:avatar(s.empId)}<div class="grow"><div class="t">${esc(empName(s.empId))}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)}</div></div>${c}</div>`}).join('')}</div>`
    :`<div class="card empty"><b>${L('No shifts scheduled today','今天没有排班')}</b><button class="btn sm" data-act="tab" data-k="sched">${L('Open schedule','去排班')}</button></div>`}
   ${(()=>{const dd=ORD().filter(o=>o.status==='ordered'&&(!o.expected||o.expected<=d));return dd.length?`<h3>Deliveries to receive today</h3><div class="card flush list">${dd.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · shows on staff Today tasks</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}</div>`:''})()}
@@ -1335,7 +1340,7 @@ function typesSheet(){SH=null;const T={list:typeList().map(t=>({...t}))};
 function typesGrab(){document.querySelectorAll('[data-tn]').forEach(el=>{const t=SH.T.list[+el.dataset.tn];if(t)t.name=el.value})}
 function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEach(t=>{t.days=t.days?.length?t.days:[...ALLDAYS];t.items=t.items||[];
    if(t.byDay){const m=new Map();[1,2,3,4,5,6,0].forEach(d=>(t.dayItems?.[d]||[]).forEach(x=>{const k=x.id;if(m.has(k)){const y=m.get(k);if(y.rep==='weekly'&&!y.days.includes(d))y.days.push(d)}else m.set(k,{...x,rep:x.rep&&x.rep!=='daily'?x.rep:'weekly',days:x.rep&&x.rep!=='daily'?x.days:[d]})}));t.items=[...m.values()];delete t.byDay;delete t.dayItems}});
-  TK={E,cur:Math.max(0,E.findIndex(t=>t.id===type)),day:parseYmd(bizDate()).getDay(),del:null};
+  TK={E,cur:Math.max(0,E.findIndex(t=>t.id===type)),day:parseYmd(bizDate()).getDay(),del:null,loc:LOCS().length>1?curLoc():''};
   openSheet({title:()=>'Tasks & checklists',body:()=>{const t=TK.E[TK.cur];if(!t)return `<button class="btn pri" data-act="tkNew">${ic('plus')} New task</button>`;const l=tkList();
    return `<div class="chips">${TK.E.map((x,i)=>`<button class="${i===TK.cur?'on':''}" data-act="tkPick" data-i="${i}"><span>${esc(fmtT(x.time||'22:00'))}${x.dayTimes&&Object.keys(x.dayTimes).length?' *':''}</span><b style="font-size:13px">${esc(x.name||'Task')}</b></button>`).join('')}<button data-act="tkNew"><span>New</span><b>${ic('plus')}</b></button></div>
    <div class="card stack">
@@ -1345,8 +1350,11 @@ function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEa
     ${t.dayTimes?`<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${[1,2,3,4,5,6,0].filter(i=>t.days.includes(i)).map(i=>`<label class="f" style="min-width:0">${DOW[i]}<input class="in" style="min-width:0;width:100%" type="time" id="tkdt_${i}" value="${esc(t.dayTimes[i]||'')}" placeholder="${esc(t.time||'')}"></label>`).join('')}</div><p class="tiny muted" style="margin:0">Leave a day empty to use the usual time (${fmtT(t.time||'22:00')}).</p>`:''}
    </div>
    <p class="small muted">Set how often each item repeats, like an alarm: every day, some weekdays, once a month, or one date only. 📷 = staff must take a photo. ☑ = staff just tap to check it off. Add an example photo to show what "done right" looks like.</p>
-   <div class="card flush list" data-sortable="tkitems">${l.length?l.map((x,i)=>`<div class="li" style="gap:6px;padding-block:8px;padding-left:6px;flex-wrap:wrap" data-sid="${i}">
+   ${LOCS().length>1?`<div class="row wrapr" style="gap:6px;align-items:center"><span class="tiny muted">Store</span>${[['','All stores'],...LOCS().map(l2=>[l2.id,l2.name])].map(([k,n])=>`<button class="btn sm ${(TK.loc||'')===k?'pri':''}" data-act="tkLoc" data-k="${k}">${esc(n)}</button>`).join('')}</div>
+    ${TK.loc?`<div class="tiny muted">Showing what staff at ${esc(locName(TK.loc))} see. New items you add here are for ${esc(locName(TK.loc))} only.</div>`:''}`:''}
+   <div class="card flush list" data-sortable="tkitems">${l.length?l.map((x,i)=>TK.loc&&!itemAtLoc(x,TK.loc)?'':`<div class="li" style="gap:6px;padding-block:8px;padding-left:6px;flex-wrap:wrap" data-sid="${i}">
      <div class="row" style="flex:1 1 100%;gap:4px;min-width:0">${DRAG_H}<input class="in grow" id="ti_${i}" value="${esc(x.name)}" aria-label="Item ${i+1}" style="min-width:0"></div>
+     ${LOCS().length>1?`<select class="in" data-tiloc="${i}" aria-label="Store" style="width:auto;min-height:34px;padding:4px 8px"><option value="">Both stores</option>${LOCS().map(l2=>`<option value="${esc(l2.id)}" ${x.locs?.length===1&&x.locs[0]===l2.id?'selected':''}>${esc(l2.name)} only</option>`).join('')}</select>`:''}
      <button class="btn sm" data-act="tiPhoto" data-i="${i}" title="Photo or check">${x.photo===false?'☑ Check':'📷 Photo'}</button>
      ${x.ref?`<img src="${BLOB}${esc(x.ref)}" alt="Example" data-act="viewPh" data-pid="${esc(x.ref)}" data-cap="Example: ${esc(x.name)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;cursor:zoom-in"><button class="btn sm" data-act="tiRefDel" data-i="${i}" aria-label="Remove example photo">✕</button>`
        :`<label class="btn sm" style="cursor:pointer">+ Example<input type="file" accept="image/*" data-up="tref" data-i="${i}" hidden></label>`}
@@ -1364,7 +1372,7 @@ let TK=null;
 const tkList=()=>{const t=TK.E[TK.cur];if(!t)return[];if(t.byDay){t.dayItems=t.dayItems||{};return t.dayItems[TK.day]=t.dayItems[TK.day]||[]}return t.items};
 function tkGrab(){const t=TK?.E[TK.cur];if(!t||!$('#tk_name'))return;t.name=$('#tk_name').value;t.time=$('#tk_time').value||t.time;
   if(t.dayTimes)ALLDAYS.forEach(i=>{const el=$('#tkdt_'+i);if(el){if(el.value)t.dayTimes[i]=el.value;else delete t.dayTimes[i]}});tkList().forEach((x,i)=>{const el=$('#ti_'+i);if(el)x.name=el.value;
-  const r=document.querySelector(`[data-tirep="${i}"]`);if(r)x.rep=r.value;const dm=document.querySelector(`[data-tidom="${i}"]`);if(dm)x.dom=dm.value==='last'?'last':+dm.value;const on=document.querySelector(`[data-tionce="${i}"]`);if(on)x.date=on.value})}
+  const r=document.querySelector(`[data-tirep="${i}"]`);if(r)x.rep=r.value;const dm=document.querySelector(`[data-tidom="${i}"]`);if(dm)x.dom=dm.value==='last'?'last':+dm.value;const on=document.querySelector(`[data-tionce="${i}"]`);if(on)x.date=on.value;const lc=document.querySelector(`[data-tiloc="${i}"]`);if(lc){if(lc.value)x.locs=[lc.value];else delete x.locs}})}
 function pinSheet(title,pin,onOk){let v='';const draw=()=>{const d=$('#pindots');if(d)d.innerHTML=[...Array(pin.length)].map((_,i)=>`<i class="${i<v.length?'f':''}"></i>`).join('')};
   openSheet({title:()=>title,body:()=>`<div class="pindots" id="pindots"></div><div class="pin">${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>k===''?'<span></span>':`<button data-pin="${k}" aria-label="${k}">${k}</button>`).join('')}</div><div id="pinerr" class="small" style="text-align:center;color:var(--bad);min-height:20px"></div>`,
    mount:()=>{draw();$('#sheet .pin').onclick=e=>{const b=e.target.closest('[data-pin]');if(!b)return;const k=b.dataset.pin;if(k==='⌫')v=v.slice(0,-1);else if(v.length<pin.length)v+=k;$('#pinerr').textContent='';draw();
@@ -1499,7 +1507,8 @@ const ACT={
  tkDayPick:d=>{tkGrab();TK.day=+d.k;drawSheet()},
  tkCopy:d=>{tkGrab();const t=TK.E[TK.cur];t.dayItems[+d.k]=tkList().map(x=>({...x,id:x.id}));toast(`Copied to ${DOW[+d.k]}`);drawSheet()},
  tiWd:d=>{tkGrab();const x=tkList()[+d.i];if(!x)return;const k=+d.k;x.days=(x.days||[]).includes(k)?x.days.filter(v=>v!==k):[...(x.days||[]),k];drawSheet()},
- tiAdd:()=>{tkGrab();const v=$('#ti_new').value.trim();if(!v){$('#ti_new').focus();return}tkList().push({id:slug(v)+'-'+uidGen().slice(-3),name:v,photo:true});drawSheet();setTimeout(()=>$('#ti_new')?.focus(),0)},
+ tiAdd:()=>{tkGrab();const v=$('#ti_new').value.trim();if(!v){$('#ti_new').focus();return}tkList().push({id:slug(v)+'-'+uidGen().slice(-3),name:v,photo:true,...(TK.loc?{locs:[TK.loc]}:{})});drawSheet();setTimeout(()=>$('#ti_new')?.focus(),0)},
+ tkLoc:d=>{tkGrab();TK.loc=d.k||'';drawSheet()},
  tiPhoto:d=>{tkGrab();const x=tkList()[+d.i];if(x){x.photo=x.photo===false?true:false;drawSheet()}},
  tiRefDel:d=>{tkGrab();const x=tkList()[+d.i];if(x){delete x.ref;drawSheet()}},
  tiMv:d=>{tkGrab();const l=tkList(),i=+d.i,j=i+(+d.n);if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];drawSheet()},
@@ -1594,7 +1603,9 @@ document.addEventListener('change',async e=>{const t=e.target;
   else if(kind==='files'){await onFilesUpload(t);t.value=''}
   else if(kind==='tguide'){const fs=[...(t.files||[])];if(!fs.length||!TR)return;tgGrab();toast('Uploading…');for(const f of fs){const id=await uploadImg(f);if(id)TR.S[TR.cur].items[TR.gi].photos.push(id)}drawSheet()}
   else if(kind==='tref'){const f=t.files?.[0];if(!f||!TK)return;tkGrab();toast('Uploading example…');const id=await uploadImg(f);if(!id)return;const x=tkList()[+t.dataset.i];if(x){x.ref=id;drawSheet()}}
-  else if(kind==='selfie'){const f=t.files?.[0];if(!f)return;const t0=new Date();const lab=t.closest('label');if(lab){lab.style.opacity=.6;lab.firstChild&&0}toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(lab)lab.style.opacity='';if(!id)return;await doClockIn(id,t0)}
+  else if(kind==='selfie'){const f=t.files?.[0];if(!f)return;const t0=new Date();const lab=t.closest('label');if(lab){lab.style.opacity=.6;lab.firstChild&&0}toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(lab)lab.style.opacity='';if(!id)return;const pid=await doClockIn(id,t0);if(pid)compress(f).then(b=>aiCheckSelfie(pid,id,b)).catch(()=>aiCheckSelfie(pid,id))}
+  else if(kind==='reselfie'){const f=t.files?.[0];if(!f)return;const pid=t.dataset.id;toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(!id)return;
+    if(await W(A.db.doc('punches/'+pid).update({selfie:id,selfieAi:null}))){D.punches[pid]={...D.punches[pid],selfie:id,selfieAi:null};render();compress(f).then(b=>aiCheckSelfie(pid,id,b)).catch(()=>aiCheckSelfie(pid,id))}}
   else if(kind==='shot'){const fs=[...(t.files||[])];if(!fs.length)return;grabOrderLines();for(const f of fs){const blob=await compress(f);SH_ORDER.shots.push({blob,url:URL.createObjectURL(blob)})}SH_ORDER.msg='';drawSheet()}
   else if(kind==='recv'){const fs=[...(t.files||[])];if(!fs.length)return;const note=$('#r_note')?.value;const q=(D.orders[SH_RECV.id].lines||[]).map((_,i)=>$('#rq'+i)?.value);SH_RECV.busy=true;drawSheet();
     for(const f of fs){const id=await uploadImg(f);if(id)SH_RECV.photos.push(id)}SH_RECV.busy=false;drawSheet();if(note!=null)$('#r_note').value=note;q.forEach((v,i)=>{const el=$('#rq'+i);if(el&&v!=null)el.value=v})}
@@ -2052,8 +2063,20 @@ function chartSheet(){let ws=UI.week||weekStart(today());
 async function doClockIn(selfie,now){const me=actor();if(!me)return;if(openPunch(me)){toast(L('Already clocked in','已经打过卡'));return}now=now||new Date();const d=bizDate();
   const sh=shiftsOn(d,me);let best=null;sh.forEach(s=>{const dt=Math.abs(now-atTime(d,s.start));if(!best||dt<best.dt)best={s,dt}});
   let late=0;if(best){const m=(now-atTime(d,best.s.start))/6e4;if(m>(D.settings.lateGrace||0))late=Math.round(m)}
-  const body={empId:me,loc:locOf(me),date:d,in:now.toISOString(),out:null,shiftId:best?.s.id||null,late,selfie:selfie||null};
-  if(await W(A.db.doc('punches/'+uidGen()).set(body)))toast(late?L(`Clocked in · ${late} min late`,`已打卡 · 迟到 ${late} 分钟`):L('Clocked in. Have a great shift!','已打卡，上班愉快！'))}
+  const body={empId:me,loc:locOf(me),date:d,in:now.toISOString(),out:null,shiftId:best?.s.id||null,late,selfie:selfie||null};const pid=uidGen();
+  if(await W(A.db.doc('punches/'+pid).set(body))){D.punches[pid]={id:pid,...body};toast(late?L(`Clocked in · ${late} min late`,`已打卡 · 迟到 ${late} 分钟`):L('Clocked in. Have a great shift!','已打卡，上班愉快！'));return pid}return null}
+/* AI: the clock-in selfie should show a person at the store with the BLISS logo (B with a leaf, or the word BLISS) */
+async function aiCheckSelfie(pid,photoId,blob){if(!A.sample||AIC['s'+pid])return;AIC['s'+pid]=true;render();
+  try{blob=blob||await blobOf(photoId);if(!blob)return;
+    const r=await A.sample.json(`This is a clock-in selfie from a staff member at BLISS, a matcha shop. The rule: the selfie must be taken in the store with the BLISS logo visible behind the person.
+The BLISS logo is a white or green outline letter "B" with a leaf inside it, and/or the word "BLISS" (often with "MATCHA AND BEYOND"); it may be on a wall, sign, window, cup, menu board or apron.
+Check: 1) a person's face is visible; 2) the BLISS logo or word BLISS is visible anywhere in the photo (it can be small, partly covered or at an angle).
+Return JSON only: {"person": true|false, "logo": true|false, "note": "if something is missing, say what in at most 10 words, else empty"}`,{images:[blob],modelTier:'default'});
+    const ok=r?.logo!==false&&r?.person!==false;const res={ok,logo:r?.logo!==false,person:r?.person!==false,note:String(r?.note||'').slice(0,100),photo:photoId,at:new Date().toISOString()};
+    if(D.punches[pid]?.selfie!==photoId)return;
+    await A.db.doc('punches/'+pid).update({selfieAi:res});D.punches[pid]={...D.punches[pid],selfieAi:res};
+    if(!ok)toast(L('BLISS logo not visible — please retake your selfie','看不到 BLISS logo，请重拍自拍'));
+  }catch(e){console.warn('ai selfie',e)}finally{delete AIC['s'+pid];render()}}
 async function doClockOut(id){const p=D.punches[id];if(!p)return;const out=new Date().toISOString();
   if(await W(A.db.doc('punches/'+id).update({out})))toast(L(`Clocked out · ${fmtH(punchHrs({...p,out}))} h`,`已下班 · ${fmtH(punchHrs({...p,out}))} 小时`))}
 function empTimeSheet(emp,ps,pl){const pe=addDays(ps,pl-1);
