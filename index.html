@@ -285,11 +285,15 @@ const tasksOn=d=>TASKS().filter(T=>slotsOf(T.type,d).length);
 const taskName=type=>TASKS().find(t=>t.type===type)?.name()||'Task';
 const LOCS=()=>D.settings.locations?.length?D.settings.locations:DEF_SET.locations;
 const locOf=e=>D.employees[e]?.loc||LOCS()[0].id;
+// home store + other stores a person can also work at (employees.locs); shifts and punches record the store they were at
+const empStores=e=>{const h=locOf(e);return [h,...(D.employees[e]?.locs||[]).filter(l=>l!==h&&LOCS().some(x=>x.id===l))]};
+const worksAt=(e,l)=>empStores(e).includes(l);
+const shLoc=s=>s.loc||locOf(s.empId);
 const LOCKEY={wh:['west hartford','farmington ave','06107','06119','06117','06110'],nh:['new haven','olive st','06511','06510','06513']};
 function matchLoc(txt){txt=String(txt||'').toLowerCase();if(!txt)return null;for(const l of LOCS()){const keys=[...(LOCKEY[l.id]||[]),l.name.toLowerCase()];if(keys.some(k=>txt.includes(k)))return l.id}return null}
 const locName=l=>LOCS().find(x=>x.id===l)?.name||l;
-function curLoc(){if(LOC_OVR)return LOC_OVR;let l;try{const m=mode();if(m==='emp'&&!isMgr)l=locOf(actor());else if(isMgr&&!isOwner&&D.links[uid]?.empId)l=locOf(D.links[uid].empId);else l=UI.loc}catch(e){l=UI.loc}return LOCS().some(x=>x.id===l)?l:LOCS()[0].id}
-const emps=()=>Object.values(D.employees).filter(e=>e.active!==false&&locOf(e.id)===curLoc());
+function curLoc(){if(LOC_OVR)return LOC_OVR;let l;try{const m=mode();if(m==='emp'&&!isMgr){const st=empStores(actor());l=st.includes(UI.loc)?UI.loc:st[0]}else if(isMgr&&!isOwner&&D.links[uid]?.empId){const st=empStores(D.links[uid].empId);l=st.includes(UI.loc)?UI.loc:st[0]}else l=UI.loc}catch(e){l=UI.loc}return LOCS().some(x=>x.id===l)?l:LOCS()[0].id}
+const emps=()=>Object.values(D.employees).filter(e=>e.active!==false&&worksAt(e.id,curLoc()));
 const C=()=>{const L=curLoc(),o={};Object.values(D.counts).forEach(c=>{if((c.loc||'wh')===L)o[c.date]=c});return o};
 const ORD=()=>Object.values(D.orders).filter(o=>(o.loc||'wh')===curLoc());
 const TAXDEF={fica:7.65,futa:0.6,suta:2.2};
@@ -369,13 +373,14 @@ function render(force){if(DRAGGING){setTimeout(()=>render(force),300);return}
   try{h=m==='loading'?`<div class="empty"><b>${L('Loading…','加载中…')}</b></div>`:m==='nodb'?vNoDb():m==='pick'?vPick():m==='unlinked'?vUnlinked():(VIEWS[UI.tab]||(()=>''))()}catch(e){console.error(e);h=`<div class="hint warn">${esc(e.message)}</div>`}
   if(UI.pv&&isMgr)h=`<div class="hint" style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span class="grow"><b>Preview:</b> you are seeing what ${UI.pv==='mgr'?'a store manager':(UI.kActor?esc(empName(UI.kActor))+' (staff)':'staff')} sees${UI.pv==='mgr'?' at '+esc(locName(curLoc())):''}.</span><button class="btn sm" data-act="pvExit">Exit preview</button></div>`+h;
   v.innerHTML=h;mountView()}
+const storePick=st=>`<select class="hbtn" id="locsel" aria-label="Store">${st.map(l=>`<option value="${l}" ${curLoc()===l?'selected':''}>${esc(locName(l))}</option>`).join('')}</select>`;
 function drawHeader(m){
   const loc=esc(locName(curLoc()));const tag=t=>`<span class="hbtn" style="background:none">${t}</span>`;let r='';
-  if(m==='mgr'&&!ownerView()&&!UI.pv)r=tag(loc)+(UI.kiosk?`<button class="hbtn" data-act="kioskLock">Lock</button>`:'');
-  else if(m==='mgr')r=(UI.tab==='owner'?`<select class="hbtn" id="ownsel" aria-label="Stores">${[['all','All stores'],...LOCS().map(l=>[l.id,l.name])].map(([k,n])=>`<option value="${k}" ${(UI.pscope||'all')===k?'selected':''}>${esc(n)}</option>`).join('')}</select>`:(ownerView()||UI.pv||!D.links[uid])?`<select class="hbtn" id="locsel" aria-label="Store">${LOCS().map(l=>`<option value="${l.id}" ${curLoc()===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select>`:tag(loc))+(UI.kiosk?`<button class="hbtn" data-act="kioskLock">Lock</button>`:'');
+  if(m==='mgr'&&!ownerView()&&!UI.pv)r=(D.links[uid]?.empId&&empStores(D.links[uid].empId).length>1&&!UI.kiosk?storePick(empStores(D.links[uid].empId)):tag(loc))+(UI.kiosk?`<button class="hbtn" data-act="kioskLock">Lock</button>`:'');
+  else if(m==='mgr')r=(UI.tab==='owner'?`<select class="hbtn" id="ownsel" aria-label="Stores">${[['all','All stores'],...LOCS().map(l=>[l.id,l.name])].map(([k,n])=>`<option value="${k}" ${(UI.pscope||'all')===k?'selected':''}>${esc(n)}</option>`).join('')}</select>`:(ownerView()||UI.pv||!D.links[uid])?`<select class="hbtn" id="locsel" aria-label="Store">${LOCS().map(l=>`<option value="${l.id}" ${curLoc()===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select>`:empStores(D.links[uid].empId).length>1?storePick(empStores(D.links[uid].empId)):tag(loc))+(UI.kiosk?`<button class="hbtn" data-act="kioskLock">Lock</button>`:'');
   else if(m==='pick')r=tag(loc)+(UI.pv?`<button class="hbtn" data-act="pvExit">Exit preview</button>`:`<button class="hbtn" data-act="mgrUnlock">Manager</button>`);
   else if(m==='emp'&&isMgr)r=tag(esc(empName(UI.kActor)))+`<button class="hbtn" data-act="kioskOut">${UI.pv?'Switch':'Done'}</button>`;
-  else if(m==='emp')r=tag(`${esc(empName(actor()))} · ${loc}`);
+  else if(m==='emp')r=empStores(actor()).length>1?storePick(empStores(actor())):tag(`${esc(empName(actor()))} · ${loc}`);
   $('#hdr').innerHTML=`<div class="logo"><img class="mk" src="logo-mark.png" alt=""><span class="tx"><b>BLISS</b><small>${m==='mgr'?'Matcha &amp; Beyond':loc}</small></span></div>${r}`;const os=$('#ownsel');if(os)os.onchange=()=>{UI.pscope=os.value;render(true)};const ls2=$('#locsel');if(ls2)ls2.onchange=()=>{UI.loc=ls2.value;ls.set('loc',UI.loc);UI.pDate=null;render(true)};
   }
 function subTabs(tab,opts){const cur=UI.sub[tab]||opts[0][0];return `<div class="seg" role="tablist">${opts.map(([k,n])=>`<button role="tab" class="${cur===k?'on':''}" data-act="sub" data-tab="${tab}" data-k="${k}">${n}</button>`).join('')}</div>`}
@@ -408,7 +413,7 @@ function taskState(date,type,loc){
   return{st,label,filled,total,doc,deadline:dl};
 }
 const stChip=s=>({ontime:'ok',late:'warn',missed:'bad',progress:'info',todo:''}[s]||'');
-function shiftsOn(date,emp){return Object.values(D.shifts).filter(s=>s.date===date&&shiftVisible(s)&&(emp?s.empId===emp:locOf(s.empId)===curLoc())).sort((a,b)=>toMin(a.start)-toMin(b.start))}
+function shiftsOn(date,emp){return Object.values(D.shifts).filter(s=>s.date===date&&shiftVisible(s)&&(emp?s.empId===emp:shLoc(s)===curLoc())).sort((a,b)=>toMin(a.start)-toMin(b.start))}
 const shiftHrs=s=>{let m=toMin(s.end)-toMin(s.start);if(m<0)m+=1440;return m/60};
 const openPunch=emp=>Object.values(D.punches).find(p=>p.empId===emp&&!p.out);
 const punchHrs=p=>p.out?Math.max(0,(new Date(p.out)-new Date(p.in))/36e5):0;
@@ -546,10 +551,10 @@ const whoName=(r,doc)=>r?.byName||(r?.by&&D.employees[r.by]?empName(r.by):uidNam
 function reviewIssues(){const t=bizDate();const r=[];for(let i=0;i<14;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const doc=photoDoc(d,T.type);if(doc?.review?.status==='issue'&&!doc.review.ownerSeen)r.push({k:'revIssue',d,type:T.type,doc,loc:curLoc()})})}return r}
 function attention(){const a=[];const t=bizDate();if(isOwner&&UI.pv!=='mgr'&&UI.pv!=='emp')a.push(...reviewIssues());
   ORD().forEach(o=>{if(o.status==='issue'&&!o.issueSeen)a.push({k:'order',o});if(o.status==='ordered'&&o.expected&&o.expected<t)a.push({k:'late',o})});
-  const seen=+(ls.get('availSeen')||0);Object.entries(D.avail).forEach(([e,v])=>{if(v.updatedAt&&new Date(v.updatedAt).getTime()>seen&&D.employees[e]&&locOf(e)===curLoc())a.push({k:'avail',e})});
+  const seen=+(ls.get('availSeen')||0);Object.entries(D.avail).forEach(([e,v])=>{if(v.updatedAt&&new Date(v.updatedAt).getTime()>seen&&D.employees[e]&&worksAt(e,curLoc()))a.push({k:'avail',e})});
   if(t>availDue(t)){const nw=nextWk(t);emps().forEach(e=>{if(!D.avail[e.id]?.weeks?.[nw])a.push({k:'availMiss',e:e.id})})}
   Object.keys(D.pending).forEach(p=>{if(!D.links[p])a.push({k:'link',p})});
-  Object.values(D.punches).forEach(p=>{if(!p.out&&p.date<t&&locOf(p.empId)===curLoc())a.push({k:'punch',p})});
+  Object.values(D.punches).forEach(p=>{if(!p.out&&p.date<t&&shLoc(p)===curLoc())a.push({k:'punch',p})});
   a.unshift(...pubAttention());
   return a}
 
@@ -669,7 +674,7 @@ if(x.k==='review')return `<div class="li tap" data-act="goPhotos" data-d="${x.d}
     if(x.k==='punch')return `<div class="li tap" data-act="punchEdit" data-id="${x.p.id}">${chip('bad',L('Clock-out','下班卡'))}<div class="grow">${esc(empName(x.p.empId))} · ${fmtD(x.p.date,{month:'short',day:'numeric'})} ${L('missing clock-out','忘记下班打卡')}</div>${ic('chev')}</div>`;return''}).join('')}</div>`:''}
 function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();const lc=latestCount();
   const low=D.items.filter(it=>{const s=stockStatus(it,stockQty(it.id)?.q)[0];return s==='bad'||s==='warn'}).length;
-  const onNow=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&locOf(p.empId)===curLoc()).length;const tdone=tasksOn(d).filter(T=>['ontime','late'].includes(taskState(d,T.type).st)).length+(C()[d]?1:0);
+  const onNow=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&shLoc(p)===curLoc()).length;const tdone=tasksOn(d).filter(T=>['ontime','late'].includes(taskState(d,T.type).st)).length+(C()[d]?1:0);
   const arriving=ORD().filter(o=>o.status==='ordered'&&(!o.expected||o.expected<=d)).length;
   return `<div class="stack">${isMgr&&!isOwner&&!D.links[uid]?`<div class="hint warn">Your account isn't linked to a store yet. Ask the owner to link you in Team → People, then you'll only see your store.</div>`:''}<div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})} · ${esc(locName(curLoc()))}</div><h2>${L('Today at BLISS','BLISS 今日')}</h2></div>
   <div class="stats"><div class="stat"><b>${onNow}</b><span>${L('Clocked in now','正在上班')}</span></div><div class="stat"><b>${tdone}/${tasksOn(d).length+1}</b><span>${L('Tasks done','任务完成')}</span></div><div class="stat"><b style="color:${low?'var(--warn)':'inherit'}">${low}</b><span>${L('Low / out items','库存偏低')}</span></div><div class="stat"><b>${arriving}</b><span>${L('Deliveries due','待到货')}</span></div></div>
@@ -828,11 +833,11 @@ async function onFilesUpload(inp){const fs=[...(inp.files||[])];if(!fs.length)re
     try{const r=await A.assets.upload(f,{type:f.type||'application/octet-stream',ext});added.push({id:uidGen(),name:f.name.replace(/\.[^.]+$/,''),ext,path:r.id,size:f.size,cat:'',loc:curLoc(),at:new Date().toISOString(),by:myName()})}
     catch(e){console.warn(e);toast(`Could not upload ${f.name}`)}}
   UI.fileBusy=null;if(added.length&&await saveFileLists([...(D.files||[]),...added],null))toast(`${added.length} file${added.length>1?'s':''} added. Tap Edit to set a category.`);render()}
-function teamPeople(){const es=Object.values(D.employees).filter(e=>locOf(e.id)===curLoc()).sort((a,b)=>(a.active===false)-(b.active===false)||(b.role==='Manager')-(a.role==='Manager')||(a.role==='Trainee')-(b.role==='Trainee')||a.name.localeCompare(b.name));const pend=Object.entries(D.pending).filter(([p])=>!D.links[p]);
+function teamPeople(){const es=Object.values(D.employees).filter(e=>worksAt(e.id,curLoc())).sort((a,b)=>(a.active===false)-(b.active===false)||(b.role==='Manager')-(a.role==='Manager')||(a.role==='Trainee')-(b.role==='Trainee')||a.name.localeCompare(b.name));const pend=Object.entries(D.pending).filter(([p])=>!D.links[p]);
   const linked=Object.fromEntries(Object.entries(D.links).map(([u,v])=>[v.empId,u]));
   return `${pend.length?`<div class="card stack"><h3>${L('Accounts waiting to be linked','等待关联的账号')}</h3><p class="small muted">${L('These people opened the app. Pick who each one is.','这些人打开了 app，请选择他们对应的员工。')}</p>${pend.map(([p])=>`<div class="row"><span class="grow" data-pname="${esc(p)}">…</span><select class="in" style="width:auto" id="lk_${esc(p)}"><option value="">${L('Choose…','选择…')}</option>${es.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select><button class="btn sm pri" data-act="linkAcct" data-u="${esc(p)}">${L('Link','关联')}</button></div>`).join('')}</div>`:''}
   <button class="btn pri" data-act="empEdit">${ic('plus')} ${L('Add team member','添加员工')}</button>
-  <div class="card flush list">${es.map(e=>`<div class="li tap" data-act="empEdit" data-id="${e.id}" tabindex="0">${avatar(e.id)}<div class="grow"><div class="t">${esc(e.name)}</div><div class="small muted">${esc(e.role||'Staff')}${e.phone?' · '+esc(e.phone):''}${wageLabel(e.id)?' · '+esc(wageLabel(e.id)):''}${linked[e.id]?' · '+L('app linked','已关联账号'):''}</div></div>${e.active===false?chip('',L('Inactive','停用')):''}${ic('chev')}</div>`).join('')||`<div class="empty">${L('No team members yet.','还没有员工。')}</div>`}</div>
+  <div class="card flush list">${es.map(e=>`<div class="li tap" data-act="empEdit" data-id="${e.id}" tabindex="0">${avatar(e.id)}<div class="grow"><div class="t">${esc(e.name)}</div><div class="small muted">${esc(e.role||'Staff')}${e.phone?' · '+esc(e.phone):''}${wageLabel(e.id)?' · '+esc(wageLabel(e.id)):''}${linked[e.id]?' · '+L('app linked','已关联账号'):''}</div></div>${locOf(e.id)!==curLoc()?chip('info','From '+esc(locName(locOf(e.id)))):empStores(e.id).length>1?chip('info','Also '+empStores(e.id).slice(1).map(l=>esc(locName(l))).join(', ')):''}${e.active===false?chip('',L('Inactive','停用')):''}${ic('chev')}</div>`).join('')||`<div class="empty">${L('No team members yet.','还没有员工。')}</div>`}</div>
   ${!D.links[uid]&&es.length?`<div class="card stack"><h3>${L('Do you also work shifts?','你自己也上班吗？')}</h3><p class="small muted">${L('Link your own account to your name so you can clock in.','把你的账号关联到你的名字，就能自己打卡。')}</p><div class="row"><select class="in grow" id="lk_self">${es.map(e=>`<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select><button class="btn" data-act="linkSelf">${L('This is me','这是我')}</button></div></div>`:''}`}
 function teamTrain(){const es=emps().filter(e=>e.role==='Trainee');const sub=UI.ttSub==='list'?'list':'check';
   const seg=`<div class="seg" role="tablist" aria-label="Training"><button role="tab" class="${sub==='check'?'on':''}" data-act="ttSub" data-k="check">Trainees</button><button role="tab" class="${sub==='list'?'on':''}" data-act="ttSub" data-k="list">Training list</button></div>`;
@@ -865,9 +870,9 @@ function teamSet(){const s=D.settings;const cfg=coverCfg();
   const cur=G.find(g=>g[0]===UI.setCat);
   if(cur)return `<button class="btn sm" data-act="setCat" data-k="">${ic('left')} Settings</button><h3>${cur[2]}</h3>${cur[4]()}`;
   return `<div class="card flush list">${G.map(([k,i,t,sub])=>`<div class="li tap" data-act="setCat" data-k="${k}" tabindex="0">${ic(i)}<div class="grow"><div class="t">${t}</div><div class="small muted">${sub}</div></div>${ic('chev')}</div>`).join('')}</div>`}
-function storeToday(l){return withLoc(l,()=>{const d=bizDate();const sh=shiftsOn(d);const on=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&locOf(p.empId)===l).length;
+function storeToday(l){return withLoc(l,()=>{const d=bizDate();const sh=shiftsOn(d);const on=Object.values(D.punches).filter(p=>!p.out&&p.date===d&&shLoc(p)===l).length;
   const lc=latestCount();const low=lc?D.items.filter(it=>['bad','warn'].includes(stockStatus(it,stockQty(it.id)?.q)[0])).length:null;
-  const tasks=tasksOn(d).map(T=>({T,s:taskState(d,T.type)}));const counted=groupState('daily',d)?.st==='done';const late=Object.values(D.punches).filter(p=>p.date===d&&p.late>0&&locOf(p.empId)===l).length;
+  const tasks=tasksOn(d).map(T=>({T,s:taskState(d,T.type)}));const counted=groupState('daily',d)?.st==='done';const late=Object.values(D.punches).filter(p=>p.date===d&&p.late>0&&shLoc(p)===l).length;
   return{d,sh,on,low,tasks,counted,late,att:attention().length,arriving:ORD().filter(o=>o.status==='ordered').length}})}
 function ownerPeriod(a){const m=UI.opm||'week';if(m==='month'){const d=parseYmd(a);const s=ymd(new Date(d.getFullYear(),d.getMonth(),1));const e=ymd(new Date(d.getFullYear(),d.getMonth()+1,0));return{s,e,n:diffDays(s,e)+1}}
   const e=addDays(weekStart(a),6);const n=m==='2w'?14:7;return{s:addDays(e,1-n),e,n}}
@@ -1256,6 +1261,7 @@ function empSheet(id){const e=id?D.employees[id]:{name:'',email:'',role:'Staff',
   openSheet({title:()=>id?esc(e.name):L('New team member','新员工'),body:()=>`
    <label class="f">${L('Name','姓名')}<input class="in" id="e_name" value="${esc(e.name)}"></label>
    <label class="f">Location<select class="in" id="e_loc">${LOCS().map(l=>`<option value="${l.id}" ${(e.loc||curLoc())===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></label>
+   ${LOCS().length>1?`<div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:var(--muted)">Can also work at<div class="row wrapr" style="gap:12px">${LOCS().map(l=>`<label class="row small" style="gap:6px;color:var(--ink);font-weight:500"><input type="checkbox" data-eloc="${esc(l.id)}" ${(e.locs||[]).includes(l.id)?'checked':''}> ${esc(l.name)}</label>`).join('')}</div><span class="tiny" style="font-weight:400">They can switch stores at the top of their app, be scheduled there, clock in there and do that store's tasks. Their main location is always included.</span></div>`:''}
    <div class="g2"><label class="f">${L('Email','邮箱')}<input class="in" type="email" id="e_email" value="${esc(e.email||'')}"></label><label class="f">Phone<input class="in" type="tel" inputmode="tel" id="e_phone" value="${esc(e.phone||'')}" placeholder="(860) 555-0123"></label></div>
    ${(()=>{const lockMgr=!isOwner&&e.role==='Manager';const roles=isOwner||lockMgr?['Staff','Shift Lead','Manager','Trainee']:['Staff','Shift Lead','Trainee'];
      return `<div class="g2"><label class="f">${L('Role','职位')}<select class="in" id="e_role" ${lockMgr?'disabled':''}>${roles.map(r=>`<option ${e.role===r?'selected':''}>${r}</option>`).join('')}</select></label><span></span></div>${lockMgr?'<p class="tiny muted">Only an owner can change a manager\'s role.</p>':isOwner?'':'<p class="tiny muted">Only an owner can add a manager.</p>'}`})()}
@@ -1526,12 +1532,12 @@ const ACT={
  shPreset:d=>{$('#sh_start').value=d.a;$('#sh_end').value=d.b;$('#sh_start').dispatchEvent(new Event('change'))},
  shEmp:(d,el)=>{SH.emp=el.value},
  shiftSave:async d=>{const emp=document.querySelector('input[name=sh_emp]:checked')?.value;if(!emp){toast(L('Choose who works this shift','请选择员工'));return}
-   const body={empId:emp,loc:locOf(emp),date:$('#sh_date').value,start:$('#sh_start').value,end:$('#sh_end').value,note:$('#sh_note').value.trim()};const bk=$('#sh_backup')?.value;if(bk)body.backup=bk;const nb=$('#sh_needbk');if(nb&&!nb.checked)body.noBackup=true;else if(!nb&&id0(d.id)?.noBackup)body.noBackup=true;if(!body.date||!body.start||!body.end)return;
+   const body={empId:emp,loc:worksAt(emp,curLoc())?curLoc():locOf(emp),date:$('#sh_date').value,start:$('#sh_start').value,end:$('#sh_end').value,note:$('#sh_note').value.trim()};const bk=$('#sh_backup')?.value;if(bk)body.backup=bk;const nb=$('#sh_needbk');if(nb&&!nb.checked)body.noBackup=true;else if(!nb&&id0(d.id)?.noBackup)body.noBackup=true;if(!body.date||!body.start||!body.end)return;
    if(await W(A.db.doc('shifts/'+(d.id||uidGen())).set(body))){UI.day=body.date;closeSheet()}},
  shiftDel:async d=>{if(await W(A.db.doc('shifts/'+d.id).delete()))closeSheet()},
- copyWeek:async d=>{const prev=addDays(d.ws,-7);const src=Object.values(D.shifts).filter(s=>s.date>=prev&&s.date<=addDays(prev,6)&&locOf(s.empId)===curLoc());if(!src.length){toast(L('Last week has no shifts','上周没有排班'));return}
+ copyWeek:async d=>{const prev=addDays(d.ws,-7);const src=Object.values(D.shifts).filter(s=>s.date>=prev&&s.date<=addDays(prev,6)&&shLoc(s)===curLoc());if(!src.length){toast(L('Last week has no shifts','上周没有排班'));return}
    const exist=Object.values(D.shifts).filter(s=>s.date>=d.ws&&s.date<=addDays(d.ws,6));let n=0;
-   for(const s of src){const nd=addDays(s.date,7);if(exist.some(x=>x.empId===s.empId&&x.date===nd&&x.start===s.start))continue;if(await W(A.db.doc('shifts/'+uidGen()).set({empId:s.empId,loc:locOf(s.empId),date:nd,start:s.start,end:s.end,note:s.note||''})))n++}
+   for(const s of src){const nd=addDays(s.date,7);if(exist.some(x=>x.empId===s.empId&&x.date===nd&&x.start===s.start))continue;if(await W(A.db.doc('shifts/'+uidGen()).set({empId:s.empId,loc:shLoc(s),date:nd,start:s.start,end:s.end,note:s.note||''})))n++}
    toast(L(`Copied ${n} shifts`,`已复制 ${n} 个班次`))},
  per:d=>{const n=+d.n;if(n===0){UI.ps=weekStart(today());UI.pl=7}else UI.ps=addDays(UI.ps||weekStart(today()),n*(UI.pl||7));render()},
  empTime:d=>empTimeSheet(d.id,d.ps,+d.pl),punchEdit:d=>punchSheet(d.id),
@@ -1555,7 +1561,7 @@ const ACT={
    if(D.mgrSet.pins?.[d.id])await W(A.db.doc('mgr/settings').set({...D.mgrSet,pins:drop(D.mgrSet.pins)}));
    D.former={...(D.former||{}),[d.id]:e.name};delete D.employees[d.id];closeSheet();toast(`${e.name} removed`);render()},
  empSave:async d=>{const name=$('#e_name').value.trim();if(!name){toast(L('Enter a name','请填写姓名'));return}const id=d.id||slug(name)+'-'+uidGen().slice(-4);
-   const body={name,loc:$('#e_loc').value,email:$('#e_email').value.trim(),phone:$('#e_phone').value.trim(),role:$('#e_role').value,color:document.querySelector('input[name=e_color]:checked')?.value||COLORS[0],active:$('#e_active').checked};
+   const body={name,loc:$('#e_loc').value,locs:[...document.querySelectorAll('[data-eloc]')].filter(x=>x.checked&&x.dataset.eloc!==$('#e_loc').value).map(x=>x.dataset.eloc),email:$('#e_email').value.trim(),phone:$('#e_phone').value.trim(),role:$('#e_role').value,color:document.querySelector('input[name=e_color]:checked')?.value||COLORS[0],active:$('#e_active').checked};
    const prev=D.employees[id]?{...D.employees[id]}:null;
    if(body.role==='Manager'&&!isOwner&&prev?.role!=='Manager'){toast('Only an owner can add a manager');return}
    if(!await W(A.db.doc('employees/'+id).set(body)))return;
@@ -1737,7 +1743,7 @@ function checkPlan(plan,ws,ems,keep,n){n=n||7;const we=addDays(ws,n-1);const war
 let AS=null;
 function asRules(){const loc=curLoc(),cfg=D.schedCfg||{};return{keep:(cfg.rules?.[loc])||[],week:(cfg.weekRules?.[loc+'_'+(AS?.ws||'')])||[]}}
 async function asRulesSet(keep,week){const loc=curLoc();const cfg={...(D.schedCfg||{})};cfg.rules={...(cfg.rules||{}),[loc]:keep};const wr={...(cfg.weekRules||{})};Object.keys(wr).forEach(k=>{if(k.slice(-10)<addDays(today(),-60))delete wr[k]});wr[loc+'_'+AS.ws]=week;cfg.weekRules=wr;D.schedCfg=cfg;drawSheet();await W(A.db.doc('mgr/sched').set(cfg))}
-const weekShifts=(ws,n)=>Object.values(D.shifts).filter(s=>s.date>=ws&&s.date<=addDays(ws,(n||AS?.n||7)-1)&&locOf(s.empId)===curLoc());
+const weekShifts=(ws,n)=>Object.values(D.shifts).filter(s=>s.date>=ws&&s.date<=addDays(ws,(n||AS?.n||7)-1)&&shLoc(s)===curLoc());
 const isAutoShift=s=>s.auto===true||s.note==='Auto';
 function asLoadDraft(){const dr=D.schedCfg?.drafts?.[curLoc()+'_'+AS.ws+'_'+AS.n]||(AS.n===7?D.schedCfg?.drafts?.[curLoc()+'_'+AS.ws]:null);AS.plan=dr?.plan||null;AS.summary=dr?.summary||'';AS.draftAt=dr?.at||null;AS.appliedAt=dr?.appliedAt||null;if(dr&&dr.keepExisting!=null)AS.keepExisting=dr.keepExisting;AS.msg='';AS.err=false}
 async function asSaveDraft(extra){const cfg={...(D.schedCfg||{})};const dr={...(cfg.drafts||{})};Object.keys(dr).forEach(k=>{if((k.split('_')[1]||'')<addDays(today(),-60))delete dr[k]});
@@ -1809,7 +1815,7 @@ async function asApply(){if(AS.applying)return;const C_=AS.checked;if(!C_?.ok.le
   const all=weekShifts(ws,AS.n);const kept=AS.keepExisting?all.filter(s=>!isAutoShift(s)):[];const del=all.filter(s=>!kept.includes(s));
   for(const s of del){await W(A.db.doc('shifts/'+s.id).delete())}
   const same=(a,b)=>a.empId===b.empId&&a.date===b.date&&a.start===b.start&&a.end===b.end;const added=[];
-  let n=0;for(const s of C_.ok){if(kept.some(k=>same(k,s))||added.some(k=>same(k,s)))continue;if(await W(A.db.doc('shifts/'+uidGen()).set({empId:s.empId,loc:locOf(s.empId),date:s.date,start:s.start,end:s.end,note:'Auto',auto:true}))){n++;added.push(s)}}
+  let n=0;for(const s of C_.ok){if(kept.some(k=>same(k,s))||added.some(k=>same(k,s)))continue;if(await W(A.db.doc('shifts/'+uidGen()).set({empId:s.empId,loc:worksAt(s.empId,curLoc())?curLoc():locOf(s.empId),date:s.date,start:s.start,end:s.end,note:'Auto',auto:true}))){n++;added.push(s)}}
   AS.appliedAt=new Date().toISOString();await asSaveDraft();toast(`Schedule applied · ${n} shifts`);UI.week=ws;UI.day=null;AS=null;closeSheet()}finally{if(AS)AS.applying=false}}
 function needsSheet(){const loc=curLoc();const ed=Object.fromEntries([0,1,2,3,4,5,6].map(i=>[i,needsFor(loc,i).map(x=>({...x}))]));
   const grab=()=>{[0,1,2,3,4,5,6].forEach(i=>ed[i].forEach((x,j)=>{const a=$(`#nd_s_${i}_${j}`),b=$(`#nd_e_${i}_${j}`),c=$(`#nd_n_${i}_${j}`);if(a)x.start=a.value;if(b)x.end=b.value;if(c)x.n=Math.max(1,parseInt(c.value)||1)}))};
@@ -1960,7 +1966,7 @@ ACT.fcCushion=async d=>{if(!isOwner)return;const v=+d.v;if(+fcCfg().buffer===v)r
    Labor: past days use actual clock-in hours; otherwise scheduled shifts × each person's cost (payroll rate + employer payroll tax, cash rate, 1.5× over the weekly
    overtime limit); days with no shifts yet use the forecast's people-per-hour × the store's average hourly cost. */
 const fcTaxPct=()=>{const t=taxRates();return ((+t.fica||0)+(+t.futa||0)+(+t.suta||0))/100};
-function fcAvgRate(loc){const tx=fcTaxPct();const r=Object.values(D.employees).filter(e=>e.active!==false&&locOf(e.id)===loc).map(e=>{const w=wageOf(e.id);return w.pay?w.pay*(1+tx):w.cash||0}).filter(x=>x>0);return r.length?r.reduce((a,b)=>a+b,0)/r.length:null}
+function fcAvgRate(loc){const tx=fcTaxPct();const r=Object.values(D.employees).filter(e=>e.active!==false&&worksAt(e.id,loc)).map(e=>{const w=wageOf(e.id);return w.pay?w.pay*(1+tx):w.cash||0}).filter(x=>x>0);return r.length?r.reduce((a,b)=>a+b,0)/r.length:null}
 // cost per scheduled hour for one person in one Monday–Sunday week
 function fcWeekRate(empId,ws,cache){const k=empId+'|'+ws;if(cache[k]!=null)return cache[k];const W_=wageOf(empId),tx=fcTaxPct();
   const h=Object.values(D.shifts).filter(s=>s.empId===empId&&s.date>=ws&&s.date<=addDays(ws,6)).reduce((a,s)=>a+shiftHrs(s),0);
@@ -1970,8 +1976,8 @@ function fcRows(loc,from,n){const d0=bizDate(),H=hourlyOf(loc),avg=fcAvgRate(loc
   return [...Array(n)].map((_,i)=>{const d=addDays(from,i),past=d<d0;let net=null,tax=null,tips=null,recv=null,wx=null,ok=true;
     if(past){const v=H[d];if(v&&dayTot(v)>0){const m=dayMoney(v);net=m.net;if(m.full){tax=m.tax;tips=m.tips;recv=m.recv}}else ok=false}
     else{const F=fcDay(loc,d);if(F.ok){net=F.tot;tax=F.tax??null;tips=F.tips??null;recv=F.recv??null;wx=F.wx}else ok=false}
-    const sh=Object.values(D.shifts).filter(s=>s.date===d&&locOf(s.empId)===loc);let lh=0,lc=null,src='none';
-    const pu=past?Object.values(D.punches).filter(x=>x.date===d&&locOf(x.empId)===loc):[];
+    const sh=Object.values(D.shifts).filter(s=>s.date===d&&shLoc(s)===loc);let lh=0,lc=null,src='none';
+    const pu=past?Object.values(D.punches).filter(x=>x.date===d&&shLoc(x)===loc):[];
     if(pu.length){const tx=fcTaxPct();lh=pu.reduce((a,x)=>a+punchHrs(x),0);lc=pu.reduce((a,x)=>{const W_=wageOf(x.empId);return a+punchHrs(x)*(W_.pay?W_.pay*(1+tx):W_.cash||0)},0);src='actual'}
     else if(sh.length){lh=sh.reduce((a,s)=>a+shiftHrs(s),0);lc=sh.reduce((a,s)=>a+shiftHrs(s)*fcWeekRate(s.empId,weekStart(d),cache),0);src='sched'}
     else if(!past&&needsFor(loc,parseYmd(d).getDay()).length){lh=needsAt(loc,d).reduce((a,x)=>a+((toMin(x.end)-toMin(x.start))/60)*(x.n||1),0);lc=avg!=null?lh*avg:null;src='est'}
@@ -2075,7 +2081,7 @@ function schedChart(shifts,ws,n,gaps,me){gaps=gaps||[];const days=[...Array(n)].
   return `<div class="stack">${gantt}${gaps.length?`<div class="tiny" style="color:var(--bad)">Red underline = not enough people at that time.</div>`:''}${grid}</div>`}
 const LANG_HOUR=h=>h===0?'12a':h===12?'12p':h<12?h+'a':(h-12)+'p';
 function chartSheet(){let ws=UI.week||weekStart(today());
-  openSheet({live:true,title:()=>`Schedule chart · ${esc(locName(curLoc()))}`,body:()=>{const sh=Object.values(D.shifts).filter(s=>s.date>=ws&&s.date<=addDays(ws,6)&&locOf(s.empId)===curLoc());
+  openSheet({live:true,title:()=>`Schedule chart · ${esc(locName(curLoc()))}`,body:()=>{const sh=Object.values(D.shifts).filter(s=>s.date>=ws&&s.date<=addDays(ws,6)&&shLoc(s)===curLoc());
     return `<div class="row"><button class="btn sm" data-act="chW" data-n="-7" aria-label="Previous week">${ic('left')}</button><b class="grow" style="text-align:center">${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(addDays(ws,6),{month:'short',day:'numeric'})}</b><button class="btn sm" data-act="chW" data-n="7" aria-label="Next week">${ic('chev')}</button></div>
     ${sh.length?schedChart(sh,ws,7,[]):'<div class="empty">No shifts this week.</div>'}`}});
   ACT.chW=d=>{ws=addDays(ws,+d.n);UI.week=ws;drawSheet()}}
@@ -2083,7 +2089,7 @@ function chartSheet(){let ws=UI.week||weekStart(today());
 async function doClockIn(selfie,now){const me=actor();if(!me)return;if(openPunch(me)){toast(L('Already clocked in','已经打过卡'));return}now=now||new Date();const d=bizDate();
   const sh=shiftsOn(d,me);let best=null;sh.forEach(s=>{const dt=Math.abs(now-atTime(d,s.start));if(!best||dt<best.dt)best={s,dt}});
   let late=0;if(best){const m=(now-atTime(d,best.s.start))/6e4;if(m>(D.settings.lateGrace||0))late=Math.round(m)}
-  const body={empId:me,loc:locOf(me),date:d,in:now.toISOString(),out:null,shiftId:best?.s.id||null,late,selfie:selfie||null};const pid=uidGen();
+  const body={empId:me,loc:curLoc(),date:d,in:now.toISOString(),out:null,shiftId:best?.s.id||null,late,selfie:selfie||null};const pid=uidGen();
   if(await W(A.db.doc('punches/'+pid).set(body))){D.punches[pid]={id:pid,...body};toast(late?L(`Clocked in · ${late} min late`,`已打卡 · 迟到 ${late} 分钟`):L('Clocked in. Have a great shift!','已打卡，上班愉快！'));return pid}return null}
 /* AI: the clock-in selfie should show a person at the store with the BLISS logo (B with a leaf, or the word BLISS) */
 async function aiCheckSelfie(pid,photoId,blob){if(!A.sample||AIC['s'+pid])return;AIC['s'+pid]=true;render();
@@ -2177,13 +2183,13 @@ const first=id=>empName(id).split(' ')[0];
 const cvClash=(emp,c)=>Object.values(D.shifts).some(x=>x.empId===emp&&x.date===c.date&&x.id!==(c.shiftId||c.id)&&(()=>{const a=toMin(x.start);let b=toMin(x.end);if(b<=a)b+=1440;const s=toMin(c.start);let e=toMin(c.end);if(e<=s)e+=1440;return a<e&&s<b})());
 // First guess at who can cover (the server checks again, including max weekly hours).
 function coverEligLocal(s){const loc=s.loc||locOf(s.empId);
-  return Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&locOf(e.id)===loc&&!cvClash(e.id,s)&&!['no','off'].includes(availFor(e.id,s.date,s.start,s.end))).map(e=>e.id)}
+  return Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&worksAt(e.id,loc)&&!cvClash(e.id,s)&&!['no','off'].includes(availFor(e.id,s.date,s.start,s.end))).map(e=>e.id)}
 async function cvRun(p,okMsg){try{const r=await p;if(okMsg)toast(okMsg);return r??true}catch(e){console.warn(e);toast(e?.message||'Something went wrong');return null}}
 const cvNotify=(a,cid)=>CV()?.notify(a,cid).catch(e=>console.warn('cover notify',e));
 
 // Staff (or a manager for someone): "Can't make it"
 function cantSheet(sid){const s=D.shifts[sid];if(!s)return;const forOther=mode()==='mgr'&&s.empId!==actor();
-  const mates=Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&locOf(e.id)===(s.loc||locOf(s.empId))).sort((a,b)=>a.name.localeCompare(b.name));
+  const mates=Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&worksAt(e.id,shLoc(s))).sort((a,b)=>a.name.localeCompare(b.name));
   const el=coverEligLocal(s);const uh=coverCfg().urgentHours;const urgent=Date.now()>=atTime(s.date,s.start).getTime()-uh*36e5;
   openSheet({title:()=>forOther?`${esc(first(s.empId))} can't come`:"Can't make this shift",body:()=>`
    <div class="card row">${ic('cal')}<div class="grow"><div class="t">${fmtD(s.date,{weekday:'long',month:'short',day:'numeric'})}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)}${forOther?' · '+esc(empName(s.empId)):''}</div></div></div>
@@ -2197,9 +2203,9 @@ function cantSheet(sid){const s=D.shifts[sid];if(!s)return;const forOther=mode()
    foot:()=>`<button class="btn" data-act="closeSheet">Back</button><button class="btn pri" data-act="cvSend" data-id="${sid}">Send</button>`,
    mount:()=>{document.querySelectorAll('input[name=cv_kind]').forEach(r=>r.addEventListener('change',()=>{$('#cv_swapf').hidden=r.value!=='swap'||!r.checked}))}})}
 
-function coverStaffCard(me){if(!me)return'';const loc=locOf(me);
+function coverStaffCard(me){if(!me)return'';const st=empStores(me);
   const mine=covers().filter(c=>c.empId===me&&cvStart(c)>Date.now()-36e5&&['open','filled'].includes(c.status)&&c.date>=addDays(today(),-1));
-  const ask=coverOpen().filter(c=>shiftVisible(c)&&c.empId!==me&&c.loc===loc&&(c.kind==='swap'?c.swapTo===me:((c.elig||[]).includes(me)||!cvClash(me,c))));
+  const ask=coverOpen().filter(c=>shiftVisible(c)&&c.empId!==me&&st.includes(c.loc)&&(c.kind==='swap'?c.swapTo===me:((c.elig||[]).includes(me)||!cvClash(me,c))));
   if(!ask.length&&!mine.length)return'';
   return `${ask.length?`<div class="card stack" style="border-left:4px solid var(--warn)"><div class="row"><span style="font-size:20px">🙋</span><h3 class="grow">${ask.length===1?'A shift needs cover':ask.length+' shifts need cover'}</h3></div>
    <div class="list">${ask.map(c=>{const vol=c.volunteers?.[me];const urg=coverUrgent(c)&&c.kind!=='swap';return `<div class="li" style="padding-inline:0;align-items:flex-start"><div class="grow tap" data-act="cvOpen" data-id="${esc(c.id)}"><div class="t">${cvWhen(c)}</div><div class="small muted">${c.kind==='swap'?`${esc(first(c.empId))} asked you to take this shift`:`${esc(first(c.empId))} can't make it`}${urg?' · first to accept gets it':''}</div></div>
@@ -2230,7 +2236,7 @@ function coverSheet(cid){openSheet({live:true,title:()=>{const c=D.cover[cid];re
   const head=`<div class="card stack"><div class="row">${avatar(c.empId)}<div class="grow"><div class="t">${esc(empName(c.empId))}${c.kind==='swap'?` → ${esc(empName(c.swapTo))}`:''}</div><div class="small muted">${cvWhen(c)} · ${esc(locName(c.loc))}</div></div>${chip({open:coverUrgent(c)?'bad':'warn',filled:'ok',cancelled:'',expired:''}[st]||'',{open:coverUrgent(c)&&c.kind!=='swap'?'Urgent':'Open',filled:'Covered',cancelled:'Called off',expired:'Not covered'}[st]||st)}</div>${c.reason?`<div class="small">“${esc(c.reason)}”</div>`:''}${st==='filled'?`<div class="t" style="color:var(--ok)">${esc(empName(c.assigned))} is covering.</div>`:''}</div>`;
   if(!mgr){const vol=c.volunteers?.[me];const can=st==='open'&&c.empId!==me&&(c.kind!=='swap'||c.swapTo===me);
    return head+(can?(vol?`<div class="hint">You offered. The manager will confirm.</div>${isMgr?'':`<button class="btn block" data-act="cvWithdraw" data-id="${esc(cid)}">Withdraw my offer</button>`}`:`<button class="btn pri big block" data-act="cvTake" data-id="${esc(cid)}">${c.kind==='swap'?"Yes, I'll take it":'I can take it'}</button><div class="small muted">${coverUrgent(c)&&c.kind!=='swap'?'First to accept gets it.':'The manager picks from everyone who offers.'}</div>`):'')+(st==='open'&&c.empId===me?`<button class="btn block" data-act="cvCancel" data-id="${esc(cid)}">I can come after all</button>`:'')}
-  const vols=c.volunteers||{};const cand=Object.values(D.employees).filter(e=>e.active!==false&&e.id!==c.empId&&locOf(e.id)===c.loc).sort((a,b)=>(vols[b.id]?1:0)-(vols[a.id]?1:0)||((c.elig||[]).includes(b.id)?1:0)-((c.elig||[]).includes(a.id)?1:0)||a.name.localeCompare(b.name));
+  const vols=c.volunteers||{};const cand=Object.values(D.employees).filter(e=>e.active!==false&&e.id!==c.empId&&worksAt(e.id,c.loc)).sort((a,b)=>(vols[b.id]?1:0)-(vols[a.id]?1:0)||((c.elig||[]).includes(b.id)?1:0)-((c.elig||[]).includes(a.id)?1:0)||a.name.localeCompare(b.name));
   return head+(st==='open'?`<div class="eyebrow">Give the shift to</div><div class="card flush list">${cand.map(e=>{const clash=cvClash(e.id,c);return `<div class="li">${avatar(e.id)}<div class="grow"><div class="t">${esc(e.name)}</div><div class="small muted">${vols[e.id]?`<b style="color:var(--ok)">${c.kind==='swap'?'Agreed':'Offered'}</b>${vols[e.id].via&&vols[e.id].via!=='app'?' by '+esc(vols[e.id].via):''} · `:''}${esc(e.phone||'no phone')}</div></div>${clash?chip('bad','Already on'):availChip(availFor(e.id,c.date,c.start,c.end))}<button class="btn sm ${vols[e.id]?'pri':''}" data-act="cvAssign" data-id="${esc(cid)}" data-e="${esc(e.id)}">Assign</button></div>`}).join('')}</div>
     <button class="btn block" data-act="cvCancel" data-id="${esc(cid)}">${esc(first(c.empId))} can come after all</button>`:'')+
    `<div class="eyebrow">What happened</div><div class="card stack" style="gap:6px">${(c.log||[]).map(l=>`<div class="row small" style="gap:10px;align-items:flex-start"><span class="muted" style="width:92px;flex:none">${fmtDT(l.at)}</span><span class="grow">${esc(l.ev)}</span></div>`).join('')||'<div class="small muted">—</div>'}</div>`}})}
@@ -2279,7 +2285,7 @@ const id0=id=>id?D.shifts[id]:null;
 /* ---------- backups: every shift should have someone free to cover it ---------- */
 // Free for the whole shift per their availability, same store, not already working then.
 function backupCands(s){const loc=s.loc||locOf(s.empId);const ws=weekStart(s.date),we=addDays(ws,6);const wk=id=>Object.values(D.shifts).filter(x=>x.empId===id&&x.date>=ws&&x.date<=we).reduce((a,x)=>a+shiftHrs(x),0);
-  return Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&locOf(e.id)===loc&&!cvClash(e.id,s)&&availFor(e.id,s.date,s.start,s.end)==='yes').sort((a,b)=>wk(a.id)-wk(b.id)||a.name.localeCompare(b.name)).map(e=>e.id)}
+  return Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&worksAt(e.id,loc)&&!cvClash(e.id,s)&&availFor(e.id,s.date,s.start,s.end)==='yes').sort((a,b)=>wk(a.id)-wk(b.id)||a.name.localeCompare(b.name)).map(e=>e.id)}
 // The chosen backup (a manager can pick one; otherwise the free person with the fewest hours that week).
 function backupSetCard(){if(!isMgr)return'';const on=backupOn();return `<div class="card stack"><h3>Backups</h3><p class="small muted">${on?'Every shift gets a backup: someone free for the whole shift (from availability), who is asked first if the person can\'t come. Shifts with no one free are flagged in Schedule. You can turn this off for single shifts when you edit them.':'Turn on to give every shift a backup person who is asked first if someone can\'t come.'}</p><button class="btn ${on?'':'pri'}" data-act="backupToggle">${on?'Turn off backups':'Turn on backups'}</button></div>`}
 const backupOn=()=>D.settings.backupOn!==false;
@@ -2361,7 +2367,7 @@ function pubFrom(){let ws=nextWk();for(let i=0;i<8;i++){if(!Object.values(D.shif
 /* ---------- replace who works a shift (tap a shift in the chart) ---------- */
 function swapSheet(sid){const back=SH;openSheet({live:true,title:()=>{const s=D.shifts[sid];return s?`Replace ${esc(first(s.empId))}`:'Shift'},body:()=>{const s=D.shifts[sid];if(!s)return'<div class="empty">This shift was removed.</div>';
   const loc=s.loc||locOf(s.empId);const ws=weekStart(s.date),we=addDays(ws,6);const wk=id=>Object.values(D.shifts).filter(x=>x.empId===id&&x.date>=ws&&x.date<=we).reduce((a,x)=>a+shiftHrs(x),0);const max=D.schedCfg?.maxHrs||{};const bk=backupOf(s);
-  const rows=Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&locOf(e.id)===loc).map(e=>{const clash=cvClash(e.id,s);const av=availFor(e.id,s.date,s.start,s.end);const h=wk(e.id);const over=num(max[e.id])&&h+shiftHrs(s)>num(max[e.id]);
+  const rows=Object.values(D.employees).filter(e=>e.active!==false&&e.id!==s.empId&&worksAt(e.id,loc)).map(e=>{const clash=cvClash(e.id,s);const av=availFor(e.id,s.date,s.start,s.end);const h=wk(e.id);const over=num(max[e.id])&&h+shiftHrs(s)>num(max[e.id]);
     const g=clash?3:av==='yes'?0:av==='partial'||av==='unknown'?1:2;return{e,clash,av,h,over,g}}).sort((a,b)=>a.g-b.g||(b.e.id===bk)-(a.e.id===bk)||(b.e.role==='Manager')-(a.e.role==='Manager')||a.h-b.h||a.e.name.localeCompare(b.e.name));
   const grp=[[0,'Free the whole time'],[1,'Maybe (partly free or availability not filled in)'],[2,'Not available then'],[3,'Already working then']];
   return `<div class="card row">${avatar(s.empId)}<div class="grow"><div class="t">${esc(empName(s.empId))}</div><div class="small muted">${fmtD(s.date,{weekday:'long',month:'short',day:'numeric'})} · ${fmtT(s.start)}–${fmtT(s.end)} · ${fmtH(shiftHrs(s))} h</div></div><button class="btn sm" data-act="swapEdit" data-id="${esc(sid)}">Edit times</button></div>
@@ -2375,7 +2381,7 @@ Object.assign(ACT,{
  swapEdit:d=>{const s=D.shifts[d.id];if(s)shiftSheet(d.id,s.date)},
  swapDo:async d=>{const s=D.shifts[d.id];if(!s)return;const e=D.employees[d.e];const warn=cvClash(d.e,s)?`\n${e.name} is already working then.`:['no','off'].includes(availFor(d.e,s.date,s.start,s.end))?`\n${e.name} said they're not available then.`:'';
    if(!confirm(`Give ${fmtD(s.date,{weekday:'short',month:'short',day:'numeric'})} ${fmtT(s.start)}–${fmtT(s.end)} to ${e.name} instead of ${empName(s.empId)}?${warn}`))return;
-   const body={...s,empId:d.e,loc:locOf(d.e),replaced:s.empId};delete body.id;delete body.backup;
+   const body={...s,empId:d.e,loc:shLoc(s),replaced:s.empId};delete body.id;delete body.backup;
    if(!await W(A.db.doc('shifts/'+d.id).set(body)))return;D.shifts[d.id]={id:d.id,...body};
    // the owner's own change doesn't need a "changed since you approved" alert
    const loc=body.loc,ws=weekStart(s.date),k=pubKey(loc,ws),p=PUB().weeks?.[k];
@@ -2489,7 +2495,7 @@ const bonusCfg=()=>({perShift:0,minPct:100,noIssues:true,onTime:false,via:'payro
 const bonusOn=()=>num(bonusCfg().perShift)>0;
 // One worked day = one shift (several punches on the same day are joined). A task belongs to the shift when it is due between clock-in and clock-out (+ photo grace).
 function bonusDays(emp,P){const c=bonusCfg();const by={};P.filter(p=>p.out).forEach(p=>{(by[p.date]=by[p.date]||[]).push(p)});
-  return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,ps])=>{const a=Math.min(...ps.map(p=>new Date(p.in).getTime())),b=Math.max(...ps.map(p=>new Date(p.out).getTime()))+(D.settings.photoGrace||0)*6e4;const loc=locOf(emp);const late=Math.max(0,...ps.map(p=>p.late||0));
+  return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,ps])=>{const a=Math.min(...ps.map(p=>new Date(p.in).getTime())),b=Math.max(...ps.map(p=>new Date(p.out).getTime()))+(D.settings.photoGrace||0)*6e4;const loc=ps[0].loc||locOf(emp);const late=Math.max(0,...ps.map(p=>p.late||0));
     const due=tasksOn(date).filter(T=>{const t=atTime(date,T.time(date)).getTime();return t>=a&&t<=b}).map(T=>({T,s:taskState(date,T.type,loc)}));
     const on=due.filter(x=>x.s.st==='ontime').length,iss=due.filter(x=>x.s.doc?.review?.status==='issue').length;const pct=due.length?Math.round(on/due.length*100):100;
     const why=[];if(pct<num(c.minPct))why.push(`tasks on time ${on}/${due.length}`);if(c.noIssues&&iss)why.push(`${iss} task${iss>1?'s':''} flagged`);if(c.onTime&&late)why.push(`late ${late} min`);
