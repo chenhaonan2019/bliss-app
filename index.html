@@ -910,7 +910,7 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
       <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
       <div class="small muted">${t.low==null?'No count yet':`${t.low} low / out`} · ${t.arriving} deliveries due</div></div>`}).join('')}</div>
       <p class="tiny muted">Tap a store to open it.</p>
-      ${(()=>{const d=bizDate();const l=Object.values(D.orders).filter(o=>o.track&&(o.status==='ordered'?(!o.expected||o.expected<=addDays(d,1)):(o.receivedDate===d||String(o.track.deliveredAt||'').slice(0,10)===d)&&o.status!=='canceled')).sort(trkSort);return l.length?`<h3>${L('Deliveries','配送')}</h3>${l.map(o=>trkCard(o,'orderView')).join('')}`:''})()}
+      ${(()=>{const d=bizDate();const l=Object.values(D.orders).filter(o=>o.track&&(o.track.ask&&!o.track.ask.answer||o.status==='ordered'?(!o.expected||o.expected<=addDays(d,1)):(o.receivedDate===d||String(o.track.deliveredAt||'').slice(0,10)===d)&&o.status!=='canceled')).sort(trkSort);return l.length?`<h3>${L('Deliveries','配送')}</h3>${l.map(o=>trkCard(o,'orderView')).join('')}`:''})()}
       <h3>Photo reviews · last 7 days</h3>
       <div class="g2">${L2.map(l=>{const r=reviewStats(l.id);return `<div class="card stack" style="min-width:0;gap:8px"><div class="row"><b class="grow">${esc(l.name)}</b>${r.waiting?chip('warn',`${r.waiting} waiting`):r.done?chip('ok','All reviewed'):''}</div>
         <div class="small"><b>${r.reviewed}</b> of <b>${r.done}</b> finished tasks reviewed${r.issues?` · <span style="color:var(--bad)">${r.issues} with issues</span>`:''}${r.missed?` · ${r.missed} not done`:''}</div>
@@ -1244,10 +1244,17 @@ function trkCard(o,act){const t=o.track||{};const e=trkEta(o);const st=trkStep(o
      <span style="font-size:28px">${canc?'❌':st>=4?'✅':st===3?'📦':st>=1?'🚗':'🧾'}</span></div>
    ${canc?'':`<div class="trkbar">${TRK.map((x,i)=>`<div class="${i<=st?'on':''}${i===st?' cur':''}"><i></i><span>${L(x[1],x[2])}</span></div>`).join('')}</div>`}
    ${bits.length?`<div class="tiny muted">${bits.map(esc).join(' · ')}${t.signature?` · <b style="color:var(--warn)">${L('signature needed','需要签收')}</b>`:''}</div>`:''}
-   ${(t.canceled||[]).length?`<div class="hint warn small">${L('Canceled (out of stock)','缺货取消')}: ${t.canceled.map(esc).join(', ')}</div>`:''}
+   ${(t.canceled||[]).length&&!(t.ask&&isMgr)?`<div class="hint warn small">${L('Canceled (out of stock)','缺货取消')}: ${t.canceled.map(esc).join(', ')}</div>`:''}
+   ${t.ask&&isMgr?askBox(o):''}
    ${o.status==='ordered'&&st===3&&act!=='receive'&&act!=='none'?`<button class="btn pri" data-act="receive" data-id="${o.id}">${ic('box')} ${L('Receive delivery','收货')}</button>`:''}</div>`}
+// Claude's take when items were canceled: pattern, impact on the next opening, and choices for the owner
+function askBox(o){const a=o.track.ask;const ans=a.answer;
+  return `<div class="stack" style="gap:8px;background:${ans?'var(--sunk)':'var(--warn-bg)'};border-radius:12px;padding:12px"><div class="row" style="gap:6px"><b class="grow" style="color:${ans?'inherit':'var(--warn)'}">${a.urgent&&!ans?'⚠️ ':''}${esc(L(a.en.title,a.zh.title))}</b><span class="tiny muted">Claude</span></div>
+   <div class="small" style="white-space:pre-wrap">${esc(L(a.en.body,a.zh.body))}</div>
+   ${ans?`<div class="small"><b>${L('Decided','已决定')}:</b> ${esc(L(a.options[ans.i]?.en||ans.text,a.options[ans.i]?.zh||ans.text))} <span class="tiny muted">· ${esc(ans.by||'')} ${fmtDT(ans.at)}</span> <button class="btn sm" data-act="askUndo" data-id="${o.id}" style="margin-left:6px">${L('Change','修改')}</button></div>`
+   :`<div class="stack" style="gap:6px">${a.options.map((x,i)=>`<button class="btn sm" style="justify-content:flex-start;text-align:left;white-space:normal" data-act="askPick" data-id="${o.id}" data-i="${i}">${esc(L(x.en,x.zh))}</button>`).join('')}</div><div class="tiny muted">${L("Nothing is ordered automatically — this only records the decision so everyone knows.",'不会自动下单，只是记录决定，让大家知道。')}</div>`}</div>`}
 // deliveries to show on Today: tracked ones that are coming today or were delivered/received today, plus untracked ones due
-function trkToday(d){return ORD().filter(o=>{const t=o.track;if(!t)return false;if(o.status==='ordered')return !o.expected||o.expected<=addDays(d,1)||rankT(t.stage)>=1;return (o.receivedDate===d||String(t.deliveredAt||'').slice(0,10)===d)&&o.status!=='canceled'}).sort(trkSort)}
+function trkToday(d){return ORD().filter(o=>{const t=o.track;if(!t)return false;if(t.ask&&!t.ask.answer)return true;if(o.status==='ordered')return !o.expected||o.expected<=addDays(d,1)||rankT(t.stage)>=1;return (o.receivedDate===d||String(t.deliveredAt||'').slice(0,10)===d)&&o.status!=='canceled'}).sort(trkSort)}
 const trkSort=(a,b)=>((a.status==='ordered'?10-trkStep(a):20)-(b.status==='ordered'?10-trkStep(b):20))||String(a.expected).localeCompare(String(b.expected));
 const rankT=s=>TRK.findIndex(x=>x[0]===s);
 function trkSection(d,act){const l=trkToday(d);if(!l.length)return'';const live=l.filter(o=>o.status==='ordered');
@@ -2106,6 +2113,9 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())re
    ${hsyncLine()}
   </div>`}
 ACT.fcWeek=()=>fcDetailSheet(addDays(bizDate(),0),8);
+ACT.askPick=async d=>{const o=D.orders[d.id];if(!o?.track?.ask)return;const x=o.track.ask.options[+d.i];
+  const track={...o.track,ask:{...o.track.ask,answer:{i:+d.i,text:x?.en||'',by:myName(),at:new Date().toISOString()}}};if(await W(A.db.doc('orders/'+d.id).update({track})))toast(L('Saved. Managers can see your decision.','已记录，经理能看到你的决定。'))};
+ACT.askUndo=async d=>{const o=D.orders[d.id];if(!o?.track?.ask)return;const track={...o.track,ask:{...o.track.ask,answer:null}};await W(A.db.doc('orders/'+d.id).update({track}))};
 ACT.tnEdit=d=>taskNoteSheet(d.type,d.date);
 ACT.evSheet=()=>{if(!isOwner){toast('Only the owner can change holidays and events');return}evSheet()};
 ACT.evDel=async d=>{const c=fcCfg();await evSave({events:(c.events||[]).filter(x=>x.id!==d.id)},'Event removed')};

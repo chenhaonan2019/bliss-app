@@ -440,7 +440,7 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
   const loc = locFromAddr(p.address, locs);
   const wDate = p.windowDate || (p.eta ? day : null);
   if (!row && ref) { // an order someone typed in by hand for the same store and day → attach to it
-    row = orders.filter((o) => o.data.store === store && o.data.status !== "canceled" && o.data.kind !== "stockin" && !o.data.ref && (!loc || o.data.loc === loc) && (!wDate || !o.data.expected || Math.abs(Date.parse(o.data.expected) - Date.parse(wDate)) <= 864e5))
+    row = orders.filter((o) => open(o) && o.data.kind !== "stockin" && !o.data.ref && (!loc || o.data.loc === loc) && wDate && o.data.expected === wDate)
       .sort((a, b) => String(b.data.createdAt).localeCompare(String(a.data.createdAt)))[0];
   }
   if (!row && ["reminder", "items_canceled"].includes(p.stage) && !ref) return null;
@@ -471,9 +471,9 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
   t.events = [...(t.events || []), ev].sort((a: Json, b: Json) => String(a.at).localeCompare(String(b.at))).slice(-25);
   t.at = now.toISOString(); d.track = t;
   // first run: an order that was already delivered hours ago isn't waiting for anyone any more
-  if (isNew && p.stage === "delivered" && now.getTime() - Date.parse(at) > 3600e3) Object.assign(d, { status: "received", receivedAt: at, receivedDate: etParts(new Date(at)).ymd, receivedBy: "email", recvNote: "Delivered before tracking started (from the store email)", issueSeen: true });
+  if (p.stage === "delivered" && d.status === "ordered" && now.getTime() - Date.parse(at) > 3600e3) Object.assign(d, { status: "received", receivedAt: at, receivedDate: etParts(new Date(at)).ymd, receivedBy: "email", recvNote: "Delivered before tracking started (from the store email)", issueSeen: true });
   const advanced = rank(t.stage) > rank(prev) || p.stage === "items_canceled" || p.stage === "canceled" || isNew;
-  return { id: row?.id || `em${Date.parse(at).toString(36)}${Math.random().toString(36).slice(2, 6)}`, data: d, isNew, event: advanced ? p.stage : null, prevStage: prev };
+  return { id: row?.id || (ref ? "em_" + ref.replace(/[^A-Za-z0-9]+/g, "_") : `em${Date.parse(at).toString(36)}${Math.random().toString(36).slice(2, 6)}`), data: d, isNew, event: advanced ? p.stage : null, prevStage: prev };
 }
 
 // Alert text for a stage change.
@@ -514,12 +514,47 @@ async function deliveryCtx(org: string) {
     if (dv.owner === "all" || (dv.owner === "key" && who === "plan")) members.filter((m) => m.role === "owner").forEach((m) => ids.add(m.user_id));
     return [...ids];
   }
-  return { locs, recipients, push, locName: (id: string) => locs.find((l) => l.id === id)?.name || id };
+  const owners = members.filter((m) => m.role === "owner").map((m) => m.user_id);
+  return { locs, recipients, push, owners, settings: settings || {}, locName: (id: string) => locs.find((l) => l.id === id)?.name || id };
 }
 const orderUrl = (id: string) => `${(env("APP_URL") || "").replace(/\/$/, "")}/?order=${id}`;
 async function alertOrder(org: string, ctx: Json, id: string, o: Json, stage: string) {
   const a = deliveryAlert(o, stage, ctx.locName(o.loc), ctx.locs.length > 1); if (!a || !ctx.push) return 0;
   return await sendPush(ctx.recipients(o.loc, a.who), a.title, a.body, orderUrl(id));
+}
+
+// Items canceled (out of stock): look at the bigger picture like a store manager would — has this item been
+// canceled before, did any other order bring it, how much is left, when does the store open next — and ask
+// the owner to decide. Never orders anything by itself.
+async function cancelInsight(org: string, ctx: Json, id: string, o: Json, orders: { id: string; data: Json }[]) {
+  const key = env("ANTHROPIC_API_KEY"); const t = o.track || {}; if (!key || !(t.canceled || []).length) return null;
+  const since = Date.now() - 21 * 864e5;
+  const recent = orders.filter((x) => x.id !== id && Date.parse(x.data.createdAt || x.data.date || "") > since && (x.data.loc || "wh") === o.loc)
+    .map((x) => ({ store: x.data.store, ordered: x.data.date, due: x.data.expected, status: x.data.status, stage: x.data.track?.stage, canceled: x.data.track?.canceled || [], arrived: x.data.track?.names || (x.data.lines || []).map((l: Json) => l.name) }));
+  const [items, counts] = await Promise.all([docOf(org, "config/items"), q(`docs?select=data&org_id=eq.${org}&coll=eq.counts&order=updated_at.desc&limit=6`) as Promise<Json[]>]);
+  const cnt = counts.map((c) => c.data).filter((c) => (c.loc || "wh") === o.loc)[0];
+  const stock = (items?.list || []).map((it: Json) => ({ name: it.name, unit: it.unit, min: it.min, par: it.par, lastCount: cnt?.counts?.[it.id] ?? null }));
+  const now = etParts(); const hrs = ctx.settings.hours?.[o.loc] || {}; const prep = ctx.settings.prepMin ?? 90;
+  const nextDays = [0, 1, 2].map((i) => { const d = addDays(now.ymd, i); const h = hrs[dow(d)]; return h ? { date: d, weekday: DAYS[dow(d)], opens: h[0], closes: h[1], staffArrive: `${String(Math.floor((toMin(h[0]) - prep) / 60)).padStart(2, "0")}:${String((toMin(h[0]) - prep) % 60).padStart(2, "0")}` } : { date: d, closed: true }; });
+  const prompt = `You help the owner of a bubble tea / matcha cafe (${ctx.locName(o.loc)}) run supplies. ${o.store} just canceled items from an order because they were out of stock.
+Now (New York): ${now.ymd} ${now.hm}. Think like a sharp store manager: has the same item been canceled in other recent orders? Did another order bring it? How much was left at the last count? Will the store run out before it can be restocked (staff arrive for prep at staffArrive, store opens at opens)? Is ordering the same item from ${o.store} again likely to fail?
+Reply with JSON only:
+{"urgent":true|false,
+ "zh":{"title":"short push title in Chinese, under 30 chars","body":"2-4 short sentences in Chinese: what was canceled, the pattern (e.g. second time in a row, ordered 4 got 0), the impact on the next opening, and what you suggest. Plain, specific, no fluff."},
+ "en":{"title":"same in English, under 45 chars","body":"same in English"},
+ "options":[{"zh":"...","en":"..."}  (2-3 short choices for the owner, e.g. buy it elsewhere today, use a substitute, already handled; include quantities when it makes sense)]}
+Data:
+${JSON.stringify({ order: { store: o.store, number: t.no, due: o.expected, window: t.wStart ? `${t.wStart}-${t.wEnd}` : null, eta: t.eta, stage: t.stage, items: t.items, canceled: t.canceled, arrivedItems: t.names || [] }, recentOrdersThisStore: recent.slice(0, 15), inventory: stock.slice(0, 80), nextDays })}`;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: env("MODEL_DEFAULT") || "claude-sonnet-5-5", max_tokens: 900, messages: [{ role: "user", content: prompt }] }) });
+    if (!r.ok) { console.warn("insight", r.status, (await r.text()).slice(0, 200)); return null; }
+    const j = await r.json(); const txt = (j.content || []).map((c: Json) => c.text || "").join("");
+    const a = JSON.parse(txt.slice(txt.indexOf("{"), txt.lastIndexOf("}") + 1));
+    if (!a?.zh?.body || !a?.en?.body) return null;
+    return { at: new Date().toISOString(), urgent: !!a.urgent, zh: { title: String(a.zh.title || "").slice(0, 60), body: String(a.zh.body).slice(0, 600) }, en: { title: String(a.en.title || "").slice(0, 80), body: String(a.en.body).slice(0, 800) },
+      options: (Array.isArray(a.options) ? a.options : []).slice(0, 3).map((x: Json) => ({ zh: String(x.zh || x.en || "").slice(0, 60), en: String(x.en || x.zh || "").slice(0, 80) })), items: t.canceled, answer: null };
+  } catch (e) { console.warn("insight", e); return null; }
 }
 
 export async function onMail(org: string, msgs: Json[]) {
@@ -538,6 +573,14 @@ export async function onMail(org: string, msgs: Json[]) {
     else { await q(`docs?org_id=eq.${org}&path=eq.${encodeURIComponent("orders/" + r.id)}`, { method: "PATCH", body: JSON.stringify({ data: r.data, updated_at: new Date().toISOString() }) }); const i = orders.findIndex((o) => o.id === r.id); orders[i] = { id: r.id, data: r.data }; }
     // Don't alert for old emails (first run, or the script was off for a while)
     const recent = Date.now() - Date.parse(m.date || "") < 3 * 3600e3;
+    if (r.event === "items_canceled" && recent) {
+      const ask = await cancelInsight(org, ctx, r.id, r.data, orders);
+      if (ask) {
+        r.data.track.ask = ask; await merge(org, `orders/${r.id}`, { track: { ask } });
+        if (ctx.push) { const url = orderUrl(r.id); await sendPush(ctx.owners, ask.zh.title, ask.zh.body, url); await sendPush(ctx.recipients(r.data.loc, "plan").filter((u: string) => !ctx.owners.includes(u)), ask.en.title, ask.en.body, url); }
+        continue;
+      }
+    }
     if (r.event && recent && (r.data.status === "ordered" || r.event === "canceled")) await alertOrder(org, ctx, r.id, r.data, r.event!);
   }
   const ids = [...seen].slice(-600);

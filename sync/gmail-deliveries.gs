@@ -18,6 +18,15 @@ function setup() {
 }
 
 function poll() {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(1000)) return; // the previous run is still going
+  try { pollOnce(); } finally { lock.releaseLock(); }
+}
+
+// start over: forget which emails were already sent
+function reset() { PropertiesService.getScriptProperties().deleteAllProperties(); }
+
+function pollOnce() {
   const props = PropertiesService.getScriptProperties();
   const seen = JSON.parse(props.getProperty('seen') || '[]');
   const known = {}; seen.forEach(function (id) { known[id] = 1; });
