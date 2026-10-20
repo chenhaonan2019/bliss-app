@@ -579,6 +579,40 @@ ${JSON.stringify({ order: { store: o.store, number: t.no, due: o.expected, windo
   } catch (e) { console.warn("insight", e); return null; }
 }
 
+// Price check: for each item, find the identical packaged product at BJ's and at Walmart (web search), with
+// price and how many count units one purchase holds, so the app can put each item in the cheaper cart.
+export async function priceCheck(org: string, ids: string[], loc: string) {
+  const key = env("ANTHROPIC_API_KEY"); if (!key) throw new Error("no ANTHROPIC_API_KEY");
+  const items = ((await docOf(org, "config/items"))?.list || []).filter((it: Json) => ids.includes(it.id)).slice(0, 8);
+  if (!items.length) return { items: {} };
+  const where = loc === "nh" ? "New Haven, CT 06511" : "West Hartford, CT 06107";
+  const prompt = `A matcha cafe in ${where} buys supplies by delivery from BJ's Wholesale Club (bjs.com) and Walmart (walmart.com).
+For EACH item below, use web search to find the product at BJ's and at Walmart, and its current price. Prefer the IDENTICAL product (same brand, same size) at both stores so prices compare fairly; if the item names a brand/size, match it. If a store doesn't carry it, use the closest equivalent and say so in "note".
+"per" = how many of the item's count unit ("unit") one purchase gives (e.g. unit "gallon", BJ's sells a 2-pack of 1 gal → per 2; unit "oz", a 96 oz bottle → per 96). Use the product page or search result price; never guess a price — use null if not found.
+Reply with JSON only: {"items":{"<id>":{"BJ's":{"product":"...","price":number|null,"per":number|null,"url":"https://...","stock":"in stock"|"out of stock"|"unknown","note":""},"Walmart":{...}}}}
+Items: ${JSON.stringify(items.map((it: Json) => ({ id: it.id, name: it.name, unit: it.unit || "unit", buyingNow: (it.buy || []).map((b: Json) => ({ store: b.store, label: b.label, per: b.per, price: b.price })) })))}`;
+  const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: env("MODEL_DEFAULT") || "claude-sonnet-5-5", max_tokens: 4000, messages: [{ role: "user", content: prompt }],
+      tools: [{ type: "web_search_20250305", name: "web_search", max_uses: Math.min(16, items.length * 2 + 2), user_location: { type: "approximate", city: loc === "nh" ? "New Haven" : "West Hartford", region: "Connecticut", country: "US", timezone: TZ } }] }) });
+  if (!r.ok) throw new Error("claude " + r.status + " " + (await r.text()).slice(0, 200));
+  const j = await r.json(); const blocks = (j.content || []).filter((c: Json) => c.type === "text").map((c: Json) => c.text || "");
+  const txt = blocks.filter((b: string) => b.includes("{")).pop() || "{}";
+  const a = JSON.parse(txt.slice(txt.indexOf("{"), txt.lastIndexOf("}") + 1));
+  const at = new Date().toISOString(); const out: Json = {};
+  for (const it of items) {
+    const x = a.items?.[it.id]; if (!x) continue; out[it.id] = {};
+    for (const st of ["BJ's", "Walmart"]) {
+      const v = x[st]; if (!v) continue;
+      out[it.id][st] = { product: String(v.product || "").slice(0, 120), price: isFinite(+v.price) && +v.price > 0 ? +v.price : null, per: isFinite(+v.per) && +v.per > 0 ? +v.per : null,
+        url: /^https:\/\//.test(String(v.url || "")) ? String(v.url).slice(0, 400) : null, stock: ["in stock", "out of stock"].includes(v.stock) ? v.stock : "unknown", note: String(v.note || "").slice(0, 120), at };
+    }
+  }
+  const prev = (await docOf(org, "mgr/prices")) || {};
+  const data = { items: { ...(prev.items || {}), ...out }, at };
+  await q("docs", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ org_id: org, path: "mgr/prices", coll: "mgr", doc_id: "prices", data }) });
+  return { items: out };
+}
+
 // keep working after the reply is sent (Supabase Edge Runtime); elsewhere just let it run
 const later = (p: Promise<unknown>) => { const er = (globalThis as any).EdgeRuntime; p.catch((e) => console.warn("later", e)); if (er?.waitUntil) er.waitUntil(p); };
 
@@ -707,6 +741,10 @@ async function handle(req: Request): Promise<Response> {
     if (body.action === "open") return json(await notifyOpen(org, String(body.cid)));
     if (body.action === "responded" || body.action === "assigned") return json(await notifyChange(org, String(body.cid)));
     if (body.action === "sched") return json(await notifySched(org, mem.role, body));
+    if (body.action === "prices") { // manager/owner: compare BJ's vs Walmart for these items now
+      if (mem.role === "staff") return json({ error: "forbidden" }, 403);
+      return json(await priceCheck(org, (Array.isArray(body.items) ? body.items : []).map(String), String(body.loc || "wh")));
+    }
     if (body.action === "alts") { // manager/owner: look for canceled items at other stores now
       if (mem.role === "staff") return json({ error: "forbidden" }, 403);
       const oid = String(body.order || ""); const orders = (await docsOf(org, "orders")).map((r) => ({ id: r.doc_id, data: r.data }));

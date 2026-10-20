@@ -446,7 +446,7 @@ function lastQty(id,before){const c=C();const ds=Object.keys(c).sort().reverse()
 // each buy option says how many count units one purchase holds (Walmart 2 lb bag = 7 lemons, 20 kg box = 200 bags).
 const buyOpts=it=>{const b=(it?.buy||[]).filter(x=>num(x.per)>0);if(b.length)return b;const pk=num(it?.packSize)||1;return pk>1?[{id:'pack',label:`Pack of ${pk}`,per:pk,store:it?.store||''}]:[]};
 const unitOpt=it=>({id:'unit',label:`1 ${it?.unit||'unit'}`,per:1});
-const lineMult=l=>{const it=itemById(l.itemId);if(!it)return 1;if(l.buyId==='unit')return 1;const o=l.buyId&&buyOpts(it).find(x=>x.id===l.buyId);return o?num(o.per):(num(it.packSize)||1)};
+const lineMult=l=>{if(num(l.per)>0)return num(l.per);const it=itemById(l.itemId);if(!it)return 1;if(l.buyId==='unit')return 1;const o=l.buyId&&buyOpts(it).find(x=>x.id===l.buyId);return o?num(o.per):(num(it.packSize)||1)};
 const lineUnits=l=>(num(l.recvQty)??num(l.qty)??0)*lineMult(l);
 const r2=n=>Math.round(n*100)/100;
 // Optional bigger count unit, e.g. coconut water: 1 box = 11 bottles. Staff can count "1 box + 4 bottles".
@@ -600,6 +600,8 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
     ${todayP.filter(p=>p.out).map(p=>`<div class="small muted">${fmtT(hm(new Date(p.in)))} – ${fmtT(hm(new Date(p.out)))} · ${fmtH(punchHrs(p))} h</div>`).join('')}
   </div>
   ${coverStaffCard(me)}${pushCard()}
+  ${(()=>{if(!isMgr)return'';const dr=smartDraft();if(!dr.length)return'';if(!UI.rdTried&&rdNeedCheck().length){UI.rdTried=true;setTimeout(()=>rdAutoCheck(),500)}const by={};dr.forEach(r=>{by[r.st]=(by[r.st]||0)+(r.cost||0)});const sv=dr.reduce((a,r)=>a+(r.save>0?r.save:0),0);
+    return `<div class="card row tap" data-act="orderList" tabindex="0" style="border-left:4px solid var(--brand)"><span style="font-size:22px">🛒</span><div class="grow"><div class="t">${L(`Reorder ready · ${dr.length} low item${dr.length>1?'s':''}`,`待补货 · ${dr.length} 样偏低`)}</div><div class="small muted">${Object.entries(by).map(([st,t])=>`${esc(st)}${t?' ~'+money(t):''}`).join(' · ')}${sv>0.5?` · ${L('saves','省')} ${money(sv)}`:''} · ${L('review & confirm','检查并确认')}</div></div>${ic('chev')}</div>`})()}
   ${trkSection(d)}
   ${availCard(me)}
   <h3>${L('Today’s tasks','今日任务')}</h3>
@@ -910,7 +912,7 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
       <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
       <div class="small muted">${t.low==null?'No count yet':`${t.low} low / out`} · ${t.arriving} deliveries due</div></div>`}).join('')}</div>
       <p class="tiny muted">Tap a store to open it.</p>
-      ${(()=>{const d=bizDate();const l=Object.values(D.orders).filter(o=>o.track&&(o.track.ask&&!o.track.ask.answer||o.status==='ordered'?(!o.expected||o.expected<=addDays(d,1)):(o.receivedDate===d||String(o.track.deliveredAt||'').slice(0,10)===d)&&o.status!=='canceled')).sort(trkSort);return l.length?`<h3>${L('Deliveries','配送')}</h3>${l.map(o=>trkCard(o,'orderView')).join('')}`:''})()}
+      ${(()=>{const d=bizDate();const l=Object.values(D.orders).filter(o=>o.track&&(o.track.ask&&!o.track.ask.answer||o.status==='ordered'?(!o.expected||o.expected<=addDays(d,1)):(o.receivedDate===d||String(o.track.deliveredAt||'').slice(0,10)===d)&&o.status!=='canceled')).sort(trkSort);return l.length?LOCS().map(lc=>{const m=l.filter(o=>(o.loc||'wh')===lc.id);return m.length?`<h3>${L('Deliveries','配送')} · ${esc(lc.name)}</h3>${m.map(o=>trkCard(o,'orderView')).join('')}`:''}).join(''):''})()}
       <h3>Photo reviews · last 7 days</h3>
       <div class="g2">${L2.map(l=>{const r=reviewStats(l.id);return `<div class="card stack" style="min-width:0;gap:8px"><div class="row"><b class="grow">${esc(l.name)}</b>${r.waiting?chip('warn',`${r.waiting} waiting`):r.done?chip('ok','All reviewed'):''}</div>
         <div class="small"><b>${r.reviewed}</b> of <b>${r.done}</b> finished tasks reviewed${r.issues?` · <span style="color:var(--bad)">${r.issues} with issues</span>`:''}${r.missed?` · ${r.missed} not done`:''}</div>
@@ -1169,11 +1171,44 @@ async function itemSave(id){const name=$('#it_name').value.trim();if(!name){toas
   {const bl=$('#it_bigl').value.trim(),bp=num($('#it_bigp').value);if(bl&&bp>1)it.big={label:bl,per:bp};else if(bl||bp!=null){if(bl&&!(bp>1)){toast('Enter how many count units the bigger unit holds');return}}}
   const list=id?D.items.map(x=>x.id===id?it:x):[...D.items,it];if(await W(A.db.doc('config/items').set({list}))){D.items=list;closeSheet()}}
 
-function orderListSheet(){const sug=suggestions();const by={};sug.forEach(s=>{const k=s.it.store||'Other';(by[k]=by[k]||[]).push(s)});
-  openSheet({title:()=>L('Order list','订货清单'),body:()=>sug.length?`<p class="small muted">${L('Based on the latest count: items at or below the reorder line, topped up to target. Tap a link to open the product, add it to your cart, then pay yourself.','根据最近一次盘点：低于补货线的物品，补到目标数量。点链接打开商品页加入购物车，最后由你自己付款。')}</p>
-   ${Object.entries(by).map(([st,arr])=>`<div class="card stack"><div class="row"><h3 class="grow">${esc(st)}</h3><button class="btn sm" data-act="copyList" data-st="${esc(st)}">${L('Copy','复制')}</button><button class="btn sm pri" data-act="orderFromList" data-st="${esc(st)}">${L('Mark as ordered','标记已下单')}</button></div>
-    ${arr.map(s=>{const u=storeUrl(s.it);return `<div class="row"><div class="grow"><div style="font-weight:600">${esc(s.it.name)}</div><div class="tiny muted">${L('Have','现有')} ${s.q} ${esc(s.it.unit||'')} · ${L('target','目标')} ${s.it.par}${s.opt?` · buy ${esc(s.opt.label)} (= ${s.opt.per} ${esc(s.it.unit||'')})`:''}</div></div><b>× ${s.packs}</b>${u?`<a class="btn sm" href="${esc(u)}" target="_blank" rel="noopener">${ic('link')} ${L('Open','打开')}</a>`:''}</div>`}).join('')}</div>`).join('')}`
-   :`<div class="empty"><b>${L('Nothing to reorder','暂时不需要补货')}</b>${L('Everything is above the reorder line in the latest count.','最近一次盘点的所有物品都高于补货线。')}</div>`})}
+/* ---------- smart reorder: low items → the cheaper of BJ's / Walmart for the same product → a draft order per store ---------- */
+const RSTORES=["BJ's",'Walmart'];
+// price of one count unit at a store: Claude's web price check (≤ 21 days old), else the last purchase there, else the item's buy option
+function unitAt(it,st){const P=D.prices?.[it.id]?.[st];
+  if(P&&num(P.price)>0&&num(P.per)>0&&Date.now()-Date.parse(P.at)<21*864e5)return{u:num(P.price)/num(P.per),price:num(P.price),per:num(P.per),label:P.product,url:P.url,src:'web',at:P.at,stock:P.stock};
+  const h=Object.values(D.orders).filter(o=>o.store===st&&o.kind!=='stockin').sort((a,b)=>String(b.receivedDate||b.date).localeCompare(String(a.receivedDate||a.date)))
+    .flatMap(o=>(o.lines||[]).filter(l=>l.itemId===it.id&&num(l.price)>0&&num(l.qty)>0).map(l=>({o,l})))[0];
+  if(h){const per=lineMult(h.l),price=num(h.l.price)*orderFactor(h.o)/num(h.l.qty);return{u:price/per,price,per,label:h.l.name,src:'paid',at:h.o.receivedDate||h.o.date}}
+  const b=(it.buy||[]).find(x=>x.store===st&&num(x.price)>0&&num(x.per)>0);if(b)return{u:num(b.price)/num(b.per),price:num(b.price),per:num(b.per),label:b.label,src:'item',buyId:b.id};
+  return null}
+const perUnit=(x,it)=>x.u<0.1?`${money(x.u*100)}/100 ${esc(it.unit||'')}`:`${money(x.u)}/${esc(it.unit||'unit')}`;
+function smartDraft(){const mv=UI.rdMove||{},qq=UI.rdQty||{};
+  return suggestions().map(s=>{const it=s.it,need=Math.max(0,num(it.par)-s.q);const at=Object.fromEntries(RSTORES.map(st=>[st,unitAt(it,st)]));
+    const ok=RSTORES.filter(st=>at[st]&&at[st].stock!=='out of stock');let st=mv[it.id]||(ok.length?ok.reduce((a,b)=>at[a].u<=at[b].u?a:b):(it.store||'Other'));
+    const x=at[st];const o=x?null:buyOpts(it).find(b=>b.store===st)||buyOpts(it)[0];const per=x?.per||num(o?.per)||1;
+    const auto=Math.max(1,Math.ceil(need/per));const packs=qq[it.id]??auto;const other=RSTORES.find(z=>z!==st);
+    const save=x&&at[other]?need*(at[other].u-x.u):null;
+    return{it,q:s.q,need,st,x,at,per,packs,auto,cost:x?packs*x.price:null,save,other,opt:o}})}
+function orderListSheet(){UI.rdMove=UI.rdMove||{};UI.rdQty=UI.rdQty||{};rdAutoCheck();
+  openSheet({live:true,title:()=>L('Suggested order','建议订货'),body:()=>{const dr=smartDraft();if(!dr.length)return `<div class="empty"><b>${L('Nothing to reorder','暂时不需要补货')}</b>${L('Everything is above the reorder line in the latest count.','最近一次盘点的所有物品都高于补货线。')}</div>`;
+   const by={};dr.forEach(r=>{(by[r.st]=by[r.st]||[]).push(r)});const saved=dr.reduce((a,r)=>a+(r.save>0?r.save:0),0);
+   return `<p class="small muted">${L('From the latest count: items at or below the reorder line, topped up to target. Each item goes to whichever of BJ\'s / Walmart is cheaper per unit for the same product. Check the quantities, then confirm — you still place the order on the store\'s site; the app tracks it from the confirmation email.','根据最近一次盘点：低于补货线的物品补到目标数量。每样东西按同一商品的单价，放到 BJ\'s 或 Walmart 更便宜的那边。确认数量后点确认——仍需在商店网站下单，app 会从确认邮件自动跟踪。')}</p>
+   ${UI.rdBusy?`<div class="hint">🔎 ${L('Claude is checking BJ\'s and Walmart prices…','Claude 正在查 BJ\'s 和 Walmart 的价格…')}</div>`:''}
+   ${saved>0.5?`<div class="hint" style="background:var(--ok-bg);color:var(--ok)">${L(`Splitting by price saves about ${money(saved)} vs buying everything at the pricier store.`,`按价格分开买，比都在贵的那家买大约省 ${money(saved)}。`)}</div>`:''}
+   ${Object.entries(by).map(([st,arr])=>{const tot=arr.reduce((a,r)=>a+(r.cost||0),0);const unk=arr.filter(r=>r.cost==null).length;
+    return `<div class="card stack"><div class="row"><h3 class="grow">${esc(st)} <span class="small muted" style="font-weight:400">· ${arr.length} ${L('items','样')}${tot?` · ~${money(tot)}`:''}${unk?` · ${unk} ${L('no price','无价格')}`:''}</span></h3></div>
+    ${st==='Walmart'&&tot&&tot<35?`<div class="hint warn small">${L('Under $35 — Walmart charges a delivery fee below that. Consider adding items or moving them to BJ\'s.','不到 $35，Walmart 会收运费。可以多加几样或移到 BJ\'s。')}</div>`:''}
+    ${arr.map(r=>{const it=r.it,u=r.x?.url||storeUrl({...it,store:st});const cmp=RSTORES.map(z=>r.at[z]?`${z} ${perUnit(r.at[z],it)}${r.at[z].stock==='out of stock'?' ('+L('out','缺货')+')':''}`:`${z} —`).join(' · ');
+     return `<div class="stack" style="gap:4px;border-top:1px solid var(--line);padding-top:8px"><div class="row" style="gap:8px"><div class="grow"><div style="font-weight:600">${esc(it.name)}</div>
+      <div class="tiny muted">${L('Have','现有')} ${r.q} ${esc(it.unit||'')} · ${L('target','目标')} ${it.par}${r.x?` · ${esc(r.x.label||'')} ${money(r.x.price)} (${r.per} ${esc(it.unit||'')})`:r.opt?` · ${esc(r.opt.label)}`:''}</div></div>
+      <button class="btn sm" data-act="rdQ" data-id="${it.id}" data-d="-1" aria-label="Less">−</button><b style="min-width:28px;text-align:center">${r.packs}</b><button class="btn sm" data-act="rdQ" data-id="${it.id}" data-d="1" aria-label="More">+</button></div>
+      <div class="row wrapr" style="gap:6px"><span class="tiny muted grow">${cmp}${r.save>0.05?` · <b style="color:var(--ok)">${L('saves','省')} ${money(r.save)}</b>`:''}</span>${u?`<a class="btn sm" href="${esc(u)}" target="_blank" rel="noopener">${ic('link')} ${L('Open','打开')}</a>`:''}<button class="btn sm" data-act="rdMove" data-id="${it.id}" data-st="${esc(r.other)}">${L('Move to','改到')} ${esc(r.other)}</button></div></div>`}).join('')}
+    <div class="row" style="gap:8px"><button class="btn sm" data-act="rdCopy" data-st="${esc(st)}">${L('Copy list','复制清单')}</button><button class="btn pri grow" data-act="rdConfirm" data-st="${esc(st)}">${L(`Confirm ${st} order`,`确认 ${st} 订单`)}</button></div></div>`}).join('')}
+   <div class="row" style="gap:8px"><button class="btn sm" data-act="rdCheck">${UI.rdBusy?L('Checking…','查询中…'):'🔎 '+L('Check prices now','现在查价格')}</button><span class="tiny muted grow">${L('Prices: "web" = Claude checked the store sites, otherwise your last purchase.','价格来源：Claude 查的网站价格，或你上次购买的价格。')}</span></div>`}})}
+// look up prices automatically for low items that have no recent web price at both stores (at most once a day per item)
+function rdNeedCheck(){return suggestions().map(s=>s.it).filter(it=>{const P=D.prices?.[it.id]||{};const last=Math.max(0,...RSTORES.map(st=>Date.parse(P[st]?.at||0)||0));return Date.now()-last>864e5&&!RSTORES.every(st=>P[st]&&Date.now()-Date.parse(P[st].at)<7*864e5)})}
+async function rdAutoCheck(force){const c=window.blissCover;if(!isMgr||!c?.prices||UI.rdBusy)return;const ids=(force?suggestions().map(s=>s.it):rdNeedCheck()).map(it=>it.id).slice(0,8);if(!ids.length){if(force)toast(L('Prices are up to date','价格已是最新'));return}
+  UI.rdBusy=true;drawSheet&&SH&&drawSheet();try{const r=await c.prices(ids,curLoc());if(r?.items){D.prices={...(D.prices||{}),...r.items}}}catch(e){console.warn(e);if(force)toast(String(e.message||e))}finally{UI.rdBusy=false;if(SH)drawSheet();else render()}}
 
 function orderNewSheet(prefill,stockIn){const st={loc:curLoc(),store:prefill?.store||"BJ's",date:today(),expected:addDays(today(),1),window:'',lines:prefill?.lines||(stockIn?[{name:'',qty:null,price:null,itemId:''}]:[]),shots:[],busy:false,msg:'',mode:stockIn?'instock':'deliver',recv:today()};SH_ORDER=st;
   openSheet({title:()=>st.mode==='instock'?'Add stock':L('New order','新订单'),body:()=>`
@@ -2114,6 +2149,17 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())re
    ${hsyncLine()}
   </div>`}
 ACT.fcWeek=()=>fcDetailSheet(addDays(bizDate(),0),8);
+ACT.rdQ=d=>{const r=smartDraft().find(x=>x.it.id===d.id);if(!r)return;UI.rdQty={...UI.rdQty,[d.id]:Math.max(0,r.packs+ +d.d)};drawSheet()};
+ACT.rdMove=d=>{UI.rdMove={...UI.rdMove,[d.id]:d.st};const q={...UI.rdQty};delete q[d.id];UI.rdQty=q;drawSheet()};
+ACT.rdCheck=()=>rdAutoCheck(true);
+const rdText=st=>smartDraft().filter(r=>r.st===st&&r.packs>0).map(r=>`${r.x?.label||r.it.name} × ${r.packs}${r.x?.url?' '+r.x.url:''}`).join('\n');
+ACT.rdCopy=async d=>{try{await navigator.clipboard.writeText(rdText(d.st));toast(L('Copied','已复制'))}catch{toast(L("Couldn't copy",'复制失败'))}};
+ACT.rdConfirm=async d=>{const rows=smartDraft().filter(r=>r.st===d.st&&r.packs>0);if(!rows.length){toast(L('Nothing to order here','这里没有要订的'));return}
+  const lines=rows.map(r=>({name:r.x?.label||r.it.name,qty:r.packs,itemId:r.it.id,price:r.x?Math.round(r.packs*r.x.price*100)/100:null,per:r.per,...(r.x?.url?{url:r.x.url}:{})}));
+  const body={loc:curLoc(),store:d.st,date:today(),expected:addDays(today(),1),window:'',lines,screenshot:null,screenshots:[],status:'ordered',src:'draft',createdAt:new Date().toISOString(),createdBy:actor()||'manager',confirmedBy:myName()};
+  try{await navigator.clipboard.writeText(rdText(d.st))}catch{}
+  if(await W(A.db.doc('orders/'+uidGen()).set(body))){rows.forEach(r=>{delete UI.rdQty[r.it.id];delete UI.rdMove[r.it.id]});
+    toast(L(`Saved. List copied — place it on ${d.st}; the confirmation email will link to this order.`,`已保存，清单已复制——去 ${d.st} 下单，确认邮件会自动关联到这个订单。`));drawSheet()}};
 ACT.askPick=async d=>{const o=D.orders[d.id];if(!o?.track?.ask)return;const x=o.track.ask.options[+d.i];
   const track={...o.track,ask:{...o.track.ask,answer:{i:+d.i,text:x?.en||'',by:myName(),at:new Date().toISOString()}}};if(await W(A.db.doc('orders/'+d.id).update({track})))toast(L('Saved. Managers can see your decision.','已记录，经理能看到你的决定。'))};
 ACT.askAlts=async d=>{if(UI.altsBusy)return;const c=window.blissCover;if(!c?.alts){toast('Not available offline');return}UI.altsBusy=d.id;render();toast(L('Claude is checking other stores… about a minute','Claude 正在查其他店的库存，大约一分钟'));
@@ -2368,7 +2414,7 @@ async function boot(){
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:d.data().days||{}};FCM={}}if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
