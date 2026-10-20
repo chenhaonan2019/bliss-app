@@ -1,6 +1,6 @@
 // BLISS Manager · "cover" Edge Function — phone alerts: finding someone to cover a shift, and live delivery tracking.
 //
-//   POST {action:"mail", msgs} + header x-google-token   Apps Script in the owner's Gmail (sync/gmail-deliveries.gs): BJ's / Walmart emails
+//   POST {action:"mail", msgs, token}   Apps Script in the owner's Gmail (sync/gmail-deliveries.gs): BJ's / Walmart emails
 //   POST {action:"open", org_id, cid}        app: a cover request was created → work out who can cover, notify them + managers
 //   POST {action:"responded"|"assigned", org_id, cid}  app: someone offered / a manager picked someone → notify
 //   POST {action:"vapid"}                    app: public key for phone push notifications
@@ -615,8 +615,9 @@ async function handle(req: Request): Promise<Response> {
 
   // Store emails from the owner's Gmail (Apps Script, signed with the owner's Google token)
   if (body.action === "mail") {
-    const email = await googleEmail(String(req.headers.get("x-google-token") || ""));
-    if (!email) return json({ error: "unauthorized", why: WHY || (req.headers.get("x-google-token") ? "?" : "no token header") }, 401);
+    const gtok = String(body.token || req.headers.get("x-google-token") || "");
+    const email = await googleEmail(gtok);
+    if (!email) return json({ error: "unauthorized", why: (WHY || "?") + ` (token ${gtok.length} chars, ${gtok.split(".").length} parts)` }, 401);
     const own = (await q(`members?select=org_id&role=eq.owner&email=eq.${encodeURIComponent(email)}`)) as Json[];
     if (!own.length) return json({ error: "forbidden", email }, 403);
     try { const res: Json[] = []; for (const o of own) res.push(...await onMail(o.org_id, Array.isArray(body.msgs) ? body.msgs : [])); return json({ ok: true, res }); }

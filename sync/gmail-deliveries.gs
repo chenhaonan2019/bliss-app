@@ -34,8 +34,7 @@ function poll() {
   const batch = msgs.slice(0, 12);
   const r = UrlFetchApp.fetch(BLISS_FN, {
     method: 'post', contentType: 'application/json', muteHttpExceptions: true,
-    headers: { 'x-google-token': ScriptApp.getIdentityToken() },
-    payload: JSON.stringify({ action: 'mail', msgs: batch }),
+    payload: JSON.stringify({ action: 'mail', msgs: batch, token: ScriptApp.getIdentityToken() }),
   });
   if (r.getResponseCode() === 200) {
     batch.forEach(function (m) { seen.push(m.id); });
