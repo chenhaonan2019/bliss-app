@@ -4,6 +4,7 @@ name: Menusifu sync
 on:
   schedule:
     - cron: "17 9 * * *"   # every day ~5:17am New York time (GitHub may start it a little late)
+    - cron: "7 14 * * *"   # ~10:07am again, so a failed early run is caught up the same morning
   workflow_dispatch:       # "Run workflow" button for a manual run
     inputs:
       full:

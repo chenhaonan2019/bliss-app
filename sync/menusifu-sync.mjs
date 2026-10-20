@@ -75,41 +75,55 @@ async function describePage(page) {
 }
 
 // Open Breakdowns once so the page makes its own hourly-report request, and reuse its headers.
-// Open Breakdowns so the page makes its own report requests, then try each one's headers on a recent day:
+// Open Breakdowns so the page makes its own report requests, then try each request's headers on a recent day:
 // the one that returns the hourly "Sales Summary" table is the Breakdowns report. (Checking the page's own reply
 // doesn't work early in the morning: today has no sales yet, so Menusifu sends no hourly table for today.)
+// Breakdowns sends two requests with the same report id (filter options, then the data), so every distinct
+// request is kept, not one per report id. If none works, switch tabs and try again.
 async function captureHeaders(page) {
   const cands = [], seen = new Set();
   let armed = false;
   page.on("request", (r) => {
     if (!armed || !r.url().includes("/cloud-report-service/fetchReportData")) return;
-    const h = r.headers(), k = h.reportid || h.reportId || JSON.stringify(h);
+    const h = r.headers(), k = JSON.stringify(h) + "|" + (r.postData() || "").replace(/"\d{4}-\d\d-\d\d"/g, "");
     if (!seen.has(k)) { seen.add(k); cands.push(h); }
   });
-  const tab = page.getByText("Breakdowns", { exact: true }).first();
-  await tab.waitFor({ timeout: 30000 });
-  await page.waitForTimeout(3000);
-  armed = true;
-  await tab.click();
-  await page.waitForTimeout(6000);
   const keep = ["accept", "content-type", "_domain", "_merchantid", "reportid", "merchants", "businessid", "token"];
   const pick = (h) => Object.fromEntries(Object.entries(h).filter(([k]) => keep.includes(k.toLowerCase())));
   const merchant = Object.keys(STORES)[0], y = addDays(nyDate(), -1);
-  for (const h of cands.reverse()) {            // Breakdowns' request comes last
-    const hdr = pick(h);
-    for (const d of [y, addDays(y, -1), addDays(y, -7)]) {
-      const ok = await page.evaluate(async ({ hdr, merchant, d, end, types }) => {
-        const r = await fetch("/api/cloud-report-service/fetchReportData", { method: "POST", headers: { ...hdr, merchants: JSON.stringify([merchant]) },
-          body: JSON.stringify({ orderType: types, curDate: { startDate: d, endDate: end }, linkFrontEnd: "dateRange", secret: "", frontEndTest: "", locale: "en-US" }) });
-        if (!r.ok) return false;
-        const j = await r.json().catch(() => null);
-        return (j?.reportData?.serviceData || []).some((x) => x.title === "Sales Summary" && x.style === "table" && (x.data?.labels || []).some((l) => /^\d\d(AM|PM)$/.test(l)));
-      }, { hdr, merchant, d, end: addDays(d, 1), types: ORDER_TYPES }).catch(() => false);
-      if (ok) { log(`hourly report found (${cands.length} report requests seen)`); return hdr; }
+  const works = (hdr) => page.evaluate(async ({ hdr, merchant, days, types, adds }) => {
+    for (const d of days) {
+      const end = adds[d];
+      const r = await fetch("/api/cloud-report-service/fetchReportData", { method: "POST", headers: { ...hdr, merchants: JSON.stringify([merchant]) },
+        body: JSON.stringify({ orderType: types, curDate: { startDate: d, endDate: end }, linkFrontEnd: "dateRange", secret: "", frontEndTest: "", locale: "en-US" }) }).catch(() => null);
+      if (!r || !r.ok) continue;
+      const j = await r.json().catch(() => null);
+      if ((j?.reportData?.serviceData || []).some((x) => x.title === "Sales Summary" && x.style === "table" && (x.data?.labels || []).some((l) => /^\d\d(AM|PM)$/.test(l)))) return true;
     }
+    return false;
+  }, { hdr, merchant, types: ORDER_TYPES, days: [y, addDays(y, -1), addDays(y, -7)], adds: Object.fromEntries([y, addDays(y, -1), addDays(y, -7)].map((d) => [d, addDays(d, 1)])) }).catch(() => false);
+  const tried = new Set();
+  for (let attempt = 1; attempt <= 3; attempt++) {
+    if (attempt > 1) {                         // go back to Overview, then open Breakdowns again
+      const ov = page.getByText("Overview", { exact: true }).first();
+      if (await ov.count()) { await ov.click().catch(() => {}); await page.waitForTimeout(4000); }
+    }
+    const tab = page.getByText("Breakdowns", { exact: true }).first();
+    await tab.waitFor({ timeout: 30000 });
+    await page.waitForTimeout(3000);
+    armed = true;
+    await tab.click();
+    for (let i = 0; i < 40 && cands.length < 2; i++) await page.waitForTimeout(500);   // up to 20 s
+    await page.waitForTimeout(2000);
+    for (const h of [...cands].reverse()) {    // the data request comes last
+      const hdr = pick(h), k = JSON.stringify(hdr);
+      if (tried.has(k)) continue; tried.add(k);
+      if (await works(hdr)) { log(`hourly report found on try ${attempt} (${cands.length} report requests seen)`); return hdr; }
+    }
+    log(`try ${attempt}: hourly report not found yet (${cands.length} report requests seen)`);
   }
   await describePage(page);
-  throw new Error(`The hourly report did not load (${cands.length} report requests seen)`);
+  throw new Error(`The hourly report did not load (${cands.length} report requests seen, 3 tries)`);
 }
 
 async function fetchDay(page, hdr, merchant, date) {
