@@ -183,6 +183,13 @@ input.in:focus,select.in:focus,textarea.in:focus{outline:2px solid var(--matcha)
 .sec-t{display:flex;align-items:center;justify-content:space-between;gap:10px}
 .hint{background:var(--info-bg);color:var(--info);border-radius:12px;padding:10px 12px;font-size:13px}
 .hint.warn{background:var(--warn-bg);color:var(--warn)}
+.howacc{display:flex;flex-direction:column;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.howsec+.howsec{border-top:1px solid var(--line)}
+.howhd{display:flex;align-items:center;gap:12px;width:100%;padding:12px 14px;background:none;border:0;color:inherit;font:inherit;cursor:pointer;min-height:56px}
+.howhd:hover{background:var(--sunk)}.howsec.open .howhd{background:var(--sunk)}
+.howdot{width:10px;height:28px;border-radius:5px;flex:none}
+.howcv{color:var(--muted);transition:transform .15s;display:flex}.howsec.open .howcv{transform:rotate(90deg)}
+.howlist .li{padding-left:36px}
 .trkbar{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}.trkbar>div{display:flex;flex-direction:column;gap:4px;min-width:0}
 .trkbar i{display:block;height:6px;border-radius:3px;background:var(--line)}.trkbar .on i{background:var(--brand)}.trkbar .cur i{animation:trkp 1.6s ease-in-out infinite}
 .trkbar span{font-size:10.5px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.trkbar .cur span{color:var(--ink);font-weight:700}
@@ -2769,8 +2776,9 @@ function howtoCard(){const all=[...guideItems('guide'),...guideItems('training')
   const mgrE=isMgr&&mode()==='mgr';
   return `<div class="card stack"><div class="row wrapr"><h3 class="grow">${esc(D.guideCfg?.howTitle||'How-to')}</h3>${mgrE?`<button class="btn sm" data-act="howRename">Rename</button><button class="btn sm" data-act="trainEdit" data-k="${HK}">${ic('list')} Edit</button>`:''}</div><input class="in" id="how_q" type="search" placeholder="Search: steamer, boba, sweetness, refund…" value="${esc(UI.howQ||'')}" autocomplete="off">
    ${q?(hits.length?`<div class="list">${hits.slice(0,12).map(x=>`<div class="li tap" data-act="guideGo" data-k="${x.k}" data-s="${x.sec.id}" data-i="${x.it.id}" tabindex="0" style="padding-inline:0"><div class="grow"><div class="t">${esc(x.it.name)}</div><div class="small muted">${esc(x.sec.title)}</div></div>${ic('chev')}</div>`).join('')}</div>`:'<div class="small muted">Nothing found.</div>')
-    :`<div class="chips">${HS.map((sec,si)=>`<button data-act="howSec" data-s="${sec.id}" class="${UI.howSec===sec.id?'on':''}"><span>${(sec.items||[]).length} topics</span><b style="font-size:13px">${esc(sec.title)}</b></button>`).join('')}</div>
-     ${UI.howSec?`<div class="list">${(HS.find(x=>x.id===UI.howSec)?.items||[]).map(it=>`<div class="li tap" data-act="guideGo" data-k="${HK}" data-s="${UI.howSec}" data-i="${it.id}" tabindex="0" style="padding-inline:0"><div class="grow t">${esc(it.name)}</div>${ic('chev')}</div>`).join('')}</div>`:''}`}</div>`}
+    :`<div class="howacc">${HS.map((sec,si)=>{const open=UI.howSec===sec.id;const its=sec.items||[];return `<div class="howsec${open?' open':''}">
+      <button class="howhd" data-act="howSec" data-s="${sec.id}" aria-expanded="${open}"><span class="howdot" style="background:${GC[si%GC.length]}"></span><span class="grow" style="text-align:left"><b>${esc(sec.title)}</b><span class="tiny muted" style="display:block">${its.length} ${its.length===1?'topic':'topics'}</span></span><span class="howcv">${ic('chev')}</span></button>
+      ${open?`<div class="howlist">${its.map(it=>`<div class="li tap" data-act="guideGo" data-k="${HK}" data-s="${sec.id}" data-i="${it.id}" tabindex="0"><div class="grow t">${esc(it.name)}</div>${ic('chev')}</div>`).join('')}</div>`:''}</div>`}).join('')}</div>`}</div>`}
 // Editor: how-to text, "done when", photos for one item.
 function itemGuideEdit(i){trGrab();const back=SH;const sec=TR.S[TR.cur];const it=sec.items[i];it.photos=it.photos||[];TR.gi=i;
   openSheet({title:()=>`How-to · ${esc(it.name||'Item')}`,body:()=>`<label class="f">Item name<input class="in" id="tg_name" maxlength="80" value="${esc(it.name||'')}"></label><label class="f">You're done when (what the trainer checks)<input class="in" id="tg_check" maxlength="200" value="${esc(it.check||'')}" placeholder="e.g. Whisks on their own with no clumps"></label>
