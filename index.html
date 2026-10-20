@@ -289,8 +289,8 @@ function defaultTasks(){const s=D.settings,sl=D.slots||{};const cp=l=>(l||[]).ma
       :{id:'deep',name:'Deep cleaning',time:s.closeBy||'22:00',days:ALLDAYS,items:cp(sl.deep?.length?sl.deep:[{id:'deep-cleaning',name:'Deep cleaning for today'}])}]}
 const taskList=()=>D.taskCfg?.length?D.taskCfg:defaultTasks();
 // Due time can differ by weekday (dayTimes {0..6:'HH:MM'}); otherwise the task's usual time.
-const taskTime=(t,d)=>t.dayTimes?.[parseYmd(d||bizDate()).getDay()]||t.time||'22:00';
-const TASKS=()=>taskList().map(t=>({type:t.id,cfg:t,name:()=>t.name||'Task',time:d=>taskTime(t,d)}));
+const taskTime=(t,d,loc)=>{const w=parseYmd(d||bizDate()).getDay();const b=t.byLoc?.[loc||curLoc()];return b?.dayTimes?.[w]||b?.time||t.dayTimes?.[w]||t.time||'22:00'};
+const TASKS=()=>taskList().map(t=>({type:t.id,cfg:t,name:()=>t.name||'Task',time:(d,loc)=>taskTime(t,d,loc)}));
 const taskOnDay=(t,date)=>!t.days||!t.days.length||t.days.includes(parseYmd(date).getDay());
 const tasksOn=d=>TASKS().filter(T=>slotsOf(T.type,d).length);
 const taskName=type=>TASKS().find(t=>t.type===type)?.name()||'Task';
@@ -418,7 +418,7 @@ const slotDone=(doc,id)=>!!(doc?.photos?.[id]||doc?.checks?.[id]);
 const photoDoc=(date,type,loc)=>D.photos[`${loc||curLoc()}_${date}_${type}`];
 function taskState(date,type,loc){
   const slots=slotsOf(type,date),doc=photoDoc(date,type,loc);const filled=slots.filter(s=>slotDone(doc,s.id)).length,total=slots.length;
-  const t=TASKS().find(x=>x.type===type)?.time(date)||'22:00';const dl=new Date(atTime(date,t).getTime()+(D.settings.photoGrace||0)*6e4);
+  const t=TASKS().find(x=>x.type===type)?.time(date,loc)||'22:00';const dl=new Date(atTime(date,t).getTime()+(D.settings.photoGrace||0)*6e4);
   if(!total)return{st:'none',label:L('None today','今天无'),filled:0,total:0,doc,deadline:dl};
   const done=total>0&&filled>=total;let st,label;
   if(done){const at=doc.completedAt?new Date(doc.completedAt):null;st=at&&at>dl?'late':'ontime';label=st==='late'?L('Done late','逾时完成'):L('Done on time','按时完成')}
@@ -1497,15 +1497,16 @@ function typesGrab(){document.querySelectorAll('[data-tn]').forEach(el=>{const t
 function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEach(t=>{t.days=t.days?.length?t.days:[...ALLDAYS];t.items=t.items||[];
    if(t.byDay){const m=new Map();[1,2,3,4,5,6,0].forEach(d=>(t.dayItems?.[d]||[]).forEach(x=>{const k=x.id;if(m.has(k)){const y=m.get(k);if(y.rep==='weekly'&&!y.days.includes(d))y.days.push(d)}else m.set(k,{...x,rep:x.rep&&x.rep!=='daily'?x.rep:'weekly',days:x.rep&&x.rep!=='daily'?x.days:[d]})}));t.items=[...m.values()];delete t.byDay;delete t.dayItems}});
   const LS=LOCS().map(l=>l.id);if(LS.length>1)E.forEach(t=>{t.items=t.items.flatMap(x=>Array.isArray(x.locs)&&x.locs.length?(x.locs.length>1?x.locs.map(l=>({...JSON.parse(JSON.stringify(x)),locs:[l]})):[x]):LS.map(l=>({...JSON.parse(JSON.stringify(x)),locs:[l]})))});
+  if(LS.length>1)E.forEach(t=>{t.byLoc=t.byLoc||{};LS.forEach(l=>{t.byLoc[l]=t.byLoc[l]||{time:t.time||'22:00',...(t.dayTimes?{dayTimes:{...t.dayTimes}}:{})}})});
   TK={E,cur:Math.max(0,E.findIndex(t=>t.id===type)),day:parseYmd(bizDate()).getDay(),del:null,loc:LS.length>1?curLoc():''};
   openSheet({title:()=>'Tasks & checklists',body:()=>{const t=TK.E[TK.cur];if(!t)return `<button class="btn pri" data-act="tkNew">${ic('plus')} New task</button>`;const l=tkList();
-   return `<div class="chips">${TK.E.map((x,i)=>`<button class="${i===TK.cur?'on':''}" data-act="tkPick" data-i="${i}"><span>${esc(fmtT(x.time||'22:00'))}${x.dayTimes&&Object.keys(x.dayTimes).length?' *':''}</span><b style="font-size:13px">${esc(x.name||'Task')}</b></button>`).join('')}<button data-act="tkNew"><span>New</span><b>${ic('plus')}</b></button></div>
+   return `<div class="chips">${TK.E.map((x,i)=>`<button class="${i===TK.cur?'on':''}" data-act="tkPick" data-i="${i}"><span>${esc(fmtT(tkTV(x).time||'22:00'))}${tkTV(x).dayTimes&&Object.keys(tkTV(x).dayTimes).length?' *':''}</span><b style="font-size:13px">${esc(x.name||'Task')}</b></button>`).join('')}<button data-act="tkNew"><span>New</span><b>${ic('plus')}</b></button></div>
    <div class="card stack">
-    <div class="g2"><label class="f">Task name<input class="in" id="tk_name" maxlength="40" value="${esc(t.name||'')}" placeholder="e.g. Morning opening"></label><label class="f">Due by<input class="in" type="time" id="tk_time" value="${esc(t.time||'22:00')}"></label></div>
+    <div class="g2"><label class="f">Task name<input class="in" id="tk_name" maxlength="40" value="${esc(t.name||'')}" placeholder="e.g. Morning opening"></label><label class="f">${TK.loc?L(`Due by · ${esc(locName(TK.loc))}`,`截止时间 · ${esc(locName(TK.loc))}`):'Due by'}<input class="in" type="time" id="tk_time" value="${esc(tkTV(t).time||'22:00')}"></label></div>
     <div class="f" style="gap:6px;display:flex;flex-direction:column;font-size:13px;font-weight:600;color:var(--muted)">Days<div class="row wrapr" style="gap:6px">${[1,2,3,4,5,6,0].map(i=>`<button class="btn sm ${t.days.includes(i)?'pri':''}" data-act="tkDay" data-k="${i}" aria-pressed="${t.days.includes(i)}">${WD()[i]}</button>`).join('')}</div></div>
     <label class="f">Instructions for staff (optional)<textarea class="in" id="tk_instr" rows="3" placeholder="e.g. Use the blue cloths for counters. Sanitizer goes in the red bucket. Take photos after the floor is dry.">${esc(t.instr||'')}</textarea></label>
-    <label class="row" style="gap:8px"><input type="checkbox" data-act="tkDT" ${t.dayTimes?'checked':''}> <span class="small">Different time on some days</span></label>
-    ${t.dayTimes?`<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${[1,2,3,4,5,6,0].filter(i=>t.days.includes(i)).map(i=>`<label class="f" style="min-width:0">${DOW[i]}<input class="in" style="min-width:0;width:100%" type="time" id="tkdt_${i}" value="${esc(t.dayTimes[i]||'')}" placeholder="${esc(t.time||'')}"></label>`).join('')}</div><p class="tiny muted" style="margin:0">Leave a day empty to use the usual time (${fmtT(t.time||'22:00')}).</p>`:''}
+    <label class="row" style="gap:8px"><input type="checkbox" data-act="tkDT" ${tkTV(t).dayTimes?'checked':''}> <span class="small">Different time on some days</span></label>
+    ${tkTV(t).dayTimes?`<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${[1,2,3,4,5,6,0].filter(i=>t.days.includes(i)).map(i=>`<label class="f" style="min-width:0">${DOW[i]}<input class="in" style="min-width:0;width:100%" type="time" id="tkdt_${i}" value="${esc(tkTV(t).dayTimes[i]||'')}" placeholder="${esc(tkTV(t).time||'')}"></label>`).join('')}</div><p class="tiny muted" style="margin:0">Leave a day empty to use the usual time (${fmtT(tkTV(t).time||'22:00')}).</p>`:''}
    </div>
    <p class="small muted">Set how often each item repeats, like an alarm: every day, some weekdays, once a month, or one date only. 📷 = staff must take a photo. ☑ = staff just tap to check it off. Add an example photo to show what "done right" looks like.</p>
    ${TK.loc?`<div class="hint">${L(`Editing <b>${esc(locName(TK.loc))}</b>'s items. To change the other store, close this, switch store at the top, and open it again.`,`正在编辑 <b>${esc(locName(TK.loc))}</b> 的项目。要改另一家店，关掉这里，在最上面切换店铺后再打开。`)}</div>`:''}
@@ -1526,9 +1527,11 @@ function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEa
    <div class="g2"><button class="btn" data-act="tkDup">${ic('plus')} Duplicate this task</button><button class="btn bad" data-act="tkDel">${TK.del===t.id?'Tap again to delete':'Delete this task'}</button></div>`},
    foot:()=>`<button class="btn pri big" data-act="tkSave">Save all tasks</button>`})}
 let TK=null;
+// the due time being edited: this store's own when there are several stores
+const tkTV=t=>TK?.loc&&t?.byLoc?.[TK.loc]?t.byLoc[TK.loc]:t;
 const tkList=()=>{const t=TK.E[TK.cur];if(!t)return[];if(t.byDay){t.dayItems=t.dayItems||{};return t.dayItems[TK.day]=t.dayItems[TK.day]||[]}return t.items};
-function tkGrab(){const t=TK?.E[TK.cur];if(!t||!$('#tk_name'))return;t.name=$('#tk_name').value;t.time=$('#tk_time').value||t.time;{const ins=$('#tk_instr');if(ins){const v=ins.value.trim();if(v)t.instr=v;else delete t.instr}}
-  if(t.dayTimes)ALLDAYS.forEach(i=>{const el=$('#tkdt_'+i);if(el){if(el.value)t.dayTimes[i]=el.value;else delete t.dayTimes[i]}});tkList().forEach((x,i)=>{const el=$('#ti_'+i);if(el)x.name=el.value;const hw=$('#tih_'+i);if(hw){const v=hw.value.trim();if(v)x.how=v;else delete x.how}
+function tkGrab(){const t=TK?.E[TK.cur];if(!t||!$('#tk_name'))return;t.name=$('#tk_name').value;{const tv=tkTV(t);tv.time=$('#tk_time').value||tv.time}{const ins=$('#tk_instr');if(ins){const v=ins.value.trim();if(v)t.instr=v;else delete t.instr}}
+  {const tv=tkTV(t);if(tv.dayTimes)ALLDAYS.forEach(i=>{const el=$('#tkdt_'+i);if(el){if(el.value)tv.dayTimes[i]=el.value;else delete tv.dayTimes[i]}})}tkList().forEach((x,i)=>{const el=$('#ti_'+i);if(el)x.name=el.value;const hw=$('#tih_'+i);if(hw){const v=hw.value.trim();if(v)x.how=v;else delete x.how}
   const r=document.querySelector(`[data-tirep="${i}"]`);if(r)x.rep=r.value;const dm=document.querySelector(`[data-tidom="${i}"]`);if(dm)x.dom=dm.value==='last'?'last':+dm.value;const on=document.querySelector(`[data-tionce="${i}"]`);if(on)x.date=on.value;const lc=document.querySelector(`[data-tiloc="${i}"]`);if(lc){if(lc.value)x.locs=[lc.value];else delete x.locs}})}
 function pinSheet(title,pin,onOk){let v='';const draw=()=>{const d=$('#pindots');if(d)d.innerHTML=[...Array(pin.length)].map((_,i)=>`<i class="${i<v.length?'f':''}"></i>`).join('')};
   openSheet({title:()=>title,body:()=>`<div class="pindots" id="pindots"></div><div class="pin">${[1,2,3,4,5,6,7,8,9,'',0,'⌫'].map(k=>k===''?'<span></span>':`<button data-pin="${k}" aria-label="${k}">${k}</button>`).join('')}</div><div id="pinerr" class="small" style="text-align:center;color:var(--bad);min-height:20px"></div>`,
@@ -1655,7 +1658,7 @@ const ACT={
    if(await saveFileLists(pub,mg)){toast('Saved');closeSheet();render()}},
  fileDel:async d=>{if(SH.confirmDel!==d.id){SH.confirmDel=d.id;drawSheet();return}const isM=d.m==='1';const pub=isM?null:(D.files||[]).filter(x=>x.id!==d.id);const mg=isM?(D.mgrFiles||[]).filter(x=>x.id!==d.id):null;
    if(await saveFileLists(pub,mg)){toast('Deleted');closeSheet();render()}},
- tkDT:(d,el)=>{tkGrab();const t=TK.E[TK.cur];if(el.checked)t.dayTimes=t.dayTimes||{};else delete t.dayTimes;drawSheet()},
+ tkDT:(d,el)=>{tkGrab();const t=tkTV(TK.E[TK.cur]);if(el.checked)t.dayTimes=t.dayTimes||{};else delete t.dayTimes;drawSheet()},
  tkDup:()=>{tkGrab();const t=TK.E[TK.cur];if(!t)return;const c=JSON.parse(JSON.stringify(t));c.id='task-'+uidGen().slice(-6);c.name=(t.name||'Task')+' (copy)';
    c.items=(c.items||[]).map(x=>({...x,id:slug(x.name||'item')+'-'+uidGen().slice(-3)}));TK.E.splice(TK.cur+1,0,c);TK.cur=TK.cur+1;TK.del=null;drawSheet();toast('Task copied. Rename it, change the time, then Save.');setTimeout(()=>{const el=$('#tk_name');el&&(el.focus(),el.select())},0)},
  tkNew:()=>{tkGrab();const id='task-'+uidGen().slice(-6);TK.E.push({id,name:'New task',time:'12:00',days:[...ALLDAYS],items:[]});TK.cur=TK.E.length-1;drawSheet();setTimeout(()=>{const el=$('#tk_name');el&&(el.focus(),el.select())},0)},
@@ -1676,7 +1679,7 @@ const ACT={
    const badItem=TK.E.flatMap(t=>(t.items||[]).map(x=>({t,x}))).find(({x})=>String(x.name||'').trim()&&((x.rep==='weekly'&&!(x.days||[]).length)||((x.rep==='once'||x.rep==='every2w')&&!x.date)));
    if(badItem){TK.cur=TK.E.indexOf(badItem.t);drawSheet();toast(badItem.x.rep==='weekly'?`Pick at least one day for "${badItem.x.name}"`:`Pick a date for "${badItem.x.name}"`);return}
    const bad=TK.E.find(t=>!String(t.name||'').trim()||!t.days.length);if(bad){toast(!String(bad.name||'').trim()?'Every task needs a name':`Pick at least one day for ${bad.name}`);return}
-   const list=TK.E.map(t=>({id:t.id,name:t.name.trim(),time:t.time||'22:00',days:[...t.days].sort(),...(String(t.instr||'').trim()?{instr:String(t.instr).trim()}:{}),...(t.dayTimes&&Object.keys(t.dayTimes).some(k=>t.days.includes(+k)&&t.dayTimes[k])?{dayTimes:Object.fromEntries(Object.entries(t.dayTimes).filter(([k,v])=>v&&t.days.includes(+k)))}:{}),...(t.byDay?{byDay:true,dayItems:Object.fromEntries(ALLDAYS.map(i=>[i,clean(t.dayItems?.[i])])),items:[]}:{items:clean(t.items)})}));
+   const list=TK.E.map(t=>({id:t.id,name:t.name.trim(),time:t.time||'22:00',days:[...t.days].sort(),...(String(t.instr||'').trim()?{instr:String(t.instr).trim()}:{}),...(t.dayTimes&&Object.keys(t.dayTimes).some(k=>t.days.includes(+k)&&t.dayTimes[k])?{dayTimes:Object.fromEntries(Object.entries(t.dayTimes).filter(([k,v])=>v&&t.days.includes(+k)))}:{}),...(t.byLoc?{byLoc:Object.fromEntries(Object.entries(t.byLoc).map(([l,b])=>[l,{time:b.time||t.time||'22:00',...(b.dayTimes&&Object.keys(b.dayTimes).some(k=>t.days.includes(+k)&&b.dayTimes[k])?{dayTimes:Object.fromEntries(Object.entries(b.dayTimes).filter(([k,v])=>v&&t.days.includes(+k)))}:{})}]))}:{}),...(t.byDay?{byDay:true,dayItems:Object.fromEntries(ALLDAYS.map(i=>[i,clean(t.dayItems?.[i])])),items:[]}:{items:clean(t.items)})}));
    if(await W(A.db.doc('config/tasks').set({list}))){D.taskCfg=list;toast('Tasks saved');closeSheet();render()}},
  wk:d=>{UI.week=addDays(UI.week||weekStart(today()),+d.n);UI.day=null;render()},day:d=>{UI.day=d.d;render()},
  shiftEdit:d=>shiftSheet(d.id,d.d),
@@ -2811,7 +2814,7 @@ const bonusOn=()=>num(bonusCfg().perShift)>0;
 // One worked day = one shift (several punches on the same day are joined). A task belongs to the shift when it is due between clock-in and clock-out (+ photo grace).
 function bonusDays(emp,P){const c=bonusCfg();const by={};P.filter(p=>p.out).forEach(p=>{(by[p.date]=by[p.date]||[]).push(p)});
   return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,ps])=>{const a=Math.min(...ps.map(p=>new Date(p.in).getTime())),b=Math.max(...ps.map(p=>new Date(p.out).getTime()))+(D.settings.photoGrace||0)*6e4;const loc=ps[0].loc||locOf(emp);const late=Math.max(0,...ps.map(p=>p.late||0));
-    const due=tasksOn(date).filter(T=>{const t=atTime(date,T.time(date)).getTime();return t>=a&&t<=b}).map(T=>({T,s:taskState(date,T.type,loc)}));
+    const due=tasksOn(date).filter(T=>{const t=atTime(date,T.time(date,loc)).getTime();return t>=a&&t<=b}).map(T=>({T,s:taskState(date,T.type,loc)}));
     const on=due.filter(x=>x.s.st==='ontime').length,iss=due.filter(x=>x.s.doc?.review?.status==='issue').length;const pct=due.length?Math.round(on/due.length*100):100;
     const why=[];if(pct<num(c.minPct))why.push(`tasks on time ${on}/${due.length}`);if(c.noIssues&&iss)why.push(`${iss} task${iss>1?'s':''} flagged`);if(c.onTime&&late)why.push(`late ${late} min`);
     return{date,due,on,iss,pct,late,ok:!why.length,why}})}
