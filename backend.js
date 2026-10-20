@@ -163,8 +163,12 @@
       },
       // After a "no permission" error: if this person's access changed (role changed or removed), reload.
       recheck: async () => {
-        const { data } = await SB.rpc("claim_membership");
-        const now = (data || []).find((x) => x.org_id === ORG);
+        // Never reload on a failed check (phones often have no network for a moment after the camera closes),
+        // or while someone is taking a photo or uploading.
+        if (window.BLISS_BUSY?.()) return;
+        const { data, error } = await SB.rpc("claim_membership");
+        if (error || !Array.isArray(data) || window.BLISS_BUSY?.()) return;
+        const now = data.find((x) => x.org_id === ORG);
         if (!now || now.role !== ROLE) location.reload();
       },
       renameOrg: async (name) => { await rpc("rename_org", { new_name: name }); window.blissAccount.org = name.trim(); },

@@ -565,7 +565,8 @@ async function compress(file){try{const url=URL.createObjectURL(file);const img=
   const max=1600;let w=img.naturalWidth,h=img.naturalHeight;const s=Math.min(1,max/Math.max(w,h));w=Math.round(w*s);h=Math.round(h*s);
   const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);URL.revokeObjectURL(url);
   const b=await new Promise(r=>c.toBlob(r,'image/jpeg',.78));return b||file}catch(e){return file}}
-async function uploadImg(file){if(!A.assets){toast(L('Photo upload is not available on this account. Ask the manager.','此账号不能上传照片，请联系经理。'));return null}
+async function uploadImg(file){UPLOADS++;try{return await uploadImg0(file)}finally{UPLOADS--}}
+async function uploadImg0(file){if(!A.assets){toast(L('Photo upload is not available on this account. Ask the manager.','此账号不能上传照片，请联系经理。'));return null}
   const b=await compress(file);const type=b.type&&['image/jpeg','image/png','image/webp','image/gif'].includes(b.type)?b.type:'image/jpeg';
   try{const r=await A.assets.upload(b,{type});return r.id}catch(e){console.warn(e);toast(errMsg(e));return null}}
 
@@ -1608,6 +1609,19 @@ document.addEventListener('click',e=>{const el=e.target.closest('[data-act]');if
   if(el.tagName!=='INPUT'&&el.tagName!=='LABEL')e.preventDefault();f(el.dataset,el)});
 document.addEventListener('keydown',e=>{if((e.key==='Enter'||e.key===' ')&&e.target.matches('.li.tap[data-act],.card.tap[data-act],[role=button][data-act]')){e.preventDefault();e.target.click()}if(e.key==='Escape'){if($('#viewer').innerHTML)$('#viewer').innerHTML='';else if(SH)closeSheet()}});
 document.addEventListener('input',e=>{const t=e.target;if(t.id==='how_q'){UI.howQ=t.value;const pos=t.selectionStart;render(true);const n=$('#how_q');if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch{}}return}if(t.id==='file_q'){UI.fileQ=t.value;const pos=t.selectionStart;render(true);const n=$('#file_q');if(n){n.focus();try{n.setSelectionRange(pos,pos)}catch{}}return}if(SH_ORDER&&(t.id==='o_fee'||/^ol_[qp]\d+$/.test(t.id))){grabOrderLines();const el=$('#o_totals');if(el)el.innerHTML=orderTotalsHtml(SH_ORDER)}});
+/* File pickers. While the camera is open the app may redraw (new data arrives) and replace the <input> that opened it,
+   so the photo is lost. Every file input in the app instead opens one input that lives outside the page and is never redrawn;
+   its change event reaches the handlers below with the same data-* attributes. */
+const PICK=document.createElement('input');PICK.type='file';PICK.tabIndex=-1;PICK.setAttribute('aria-hidden','true');
+PICK.style.cssText='position:fixed;left:-200px;top:0;width:1px;height:1px;opacity:0;pointer-events:none';document.body.appendChild(PICK);
+let PICKING=0,UPLOADS=0;window.BLISS_BUSY=()=>PICKING>Date.now()||UPLOADS>0;
+const PICK_ATTR=/^(data-.+|accept|capture|multiple)$/;
+document.addEventListener('click',e=>{const t=e.target;if(!(t instanceof HTMLInputElement)||t.type!=='file'||t===PICK)return;
+  e.preventDefault();[...PICK.attributes].forEach(a=>{if(PICK_ATTR.test(a.name))PICK.removeAttribute(a.name)});
+  [...t.attributes].forEach(a=>{if(PICK_ATTR.test(a.name))PICK.setAttribute(a.name,a.value)});
+  PICK.value='';PICKING=Date.now()+10*60e3;try{PICK.click()}catch(err){PICKING=0}},true);
+PICK.addEventListener('change',()=>{PICKING=Date.now()+20e3},true);
+window.addEventListener('focus',()=>{if(PICKING&&!PICK.files?.length)PICKING=Date.now()+5e3});
 document.addEventListener('change',async e=>{const t=e.target;
   if(t.matches('select[data-act=orderLoc]')){const id=t.dataset.id;if(await W(A.db.doc('orders/'+id).update({loc:t.value}))){toast('Moved to '+locName(t.value));closeSheet()}return}
   if((t.id==='as_from'||t.id==='as_to')&&AS){asGrab();const f=$('#as_from').value,to=$('#as_to').value;if(!f)return;let n=to?diffDays(f,to)+1:AS.n;if(t.id==='as_from'&&to&&to<f)n=AS.n;n=Math.max(1,Math.min(21,n));AS.ws=f;AS.n=n;asLoadDraft();drawSheet();return}
