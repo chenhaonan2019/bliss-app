@@ -191,10 +191,9 @@ async function staffingNeeds(info) {
   const ctx = vm.createContext({ fetch, console, Math, Date, JSON, Object, Array, Promise, String, Number, isFinite, parseInt, parseFloat, WeakMap, Set, Intl, encodeURIComponent });
   vm.runInContext(`
     const localStorage={getItem:()=>null,setItem:()=>{}};
-    const D={hourly:${JSON.stringify(hourly)},schedCfg:{forecast:${JSON.stringify(info.forecast || {})}},settings:{staffing:${JSON.stringify(info.staffing || {})}}};
+    const D={hourly:${JSON.stringify(hourly)},schedCfg:{forecast:${JSON.stringify(info.forecast || {})}},settings:${JSON.stringify({ staffing: info.staffing || {}, ...(info.settings || {}) })}};
     const DOW=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
     const DEF_NEEDS=[{start:'11:00',end:'17:00',n:2},{start:'17:00',end:'22:30',n:2}];
-    function needsFor(loc,dow){const l=D.settings.staffing?.[loc]?.[dow];return Array.isArray(l)?l:DEF_NEEDS}
     const pad=n=>String(n).padStart(2,'0');const ymd=d=>d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate());
     const parseYmd=s=>{const[y,m,d]=String(s).split('-').map(Number);return new Date(y,(m||1)-1,d||1)};
     const today=()=>${JSON.stringify(today)};const addDays=(s,n)=>{const d=parseYmd(s);d.setDate(d.getDate()+n);return ymd(d)};

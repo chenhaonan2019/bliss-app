@@ -671,6 +671,7 @@ begin
                       from docs where org_id = o and doc_id like 'hourly\_%' and doc_id <> 'hourly_sync'
                         and coll in ('owner', 'mgr')), '{}'::jsonb),
     'staffing', (select data -> 'staffing' from docs where org_id = o and path = 'config/settings'),
+    'settings', (select jsonb_strip_nulls(jsonb_build_object('staffing', data -> 'staffing', 'hours', data -> 'hours', 'prepMin', data -> 'prepMin', 'cleanMin', data -> 'cleanMin')) from docs where org_id = o and path = 'config/settings'),
     'forecast', (select data -> 'forecast' from docs where org_id = o and path = 'mgr/sched'));
 end $$;
 

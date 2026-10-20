@@ -1695,7 +1695,6 @@ document.addEventListener('change',async e=>{const t=e.target;
 /* ---------- auto-scheduling ---------- */
 const PRIO=[['high','Preferred'],['normal','Normal'],['low','Less']];
 const DEF_NEEDS=[{start:'11:00',end:'17:00',n:2},{start:'17:00',end:'22:30',n:2}];
-function needsFor(loc,dow){const st=D.settings.staffing?.[loc];const l=st?.[dow];return Array.isArray(l)?l:DEF_NEEDS}
 /* ---------- sales forecast → staffing ----------
    Hourly sales history (mgr/hourly_<store>) → forecast for each future hour → number of people.
    Forecast = recent same-weekday average (newer weeks count more, odd days trimmed)
@@ -1703,6 +1702,23 @@ function needsFor(loc,dow){const st=D.settings.staffing?.[loc];const l=st?.[dow]
    People   = 1 up to "one person max" ($150 by default), then one more per "$ per person" ($100).
    Staffing uses forecast + a safety margin based on how much that hour usually swings,
    so busy, unpredictable hours (weekends) get a bit more cover automatically. */
+/* store hours (from Google) → someone starts prep 1½ h before opening and stays 30 min after closing to clean */
+const HOURS_DEF={wh:{0:['11:00','21:00'],1:['11:30','21:00'],2:['11:30','21:00'],3:['11:30','21:00'],4:['11:30','21:00'],5:['11:00','22:00'],6:['11:00','22:00']},
+  nh:{0:['11:30','21:00'],1:['11:30','21:00'],2:['11:30','21:00'],3:['11:30','21:00'],4:['11:30','21:00'],5:['11:30','21:00'],6:['11:00','21:00']}};
+const prepMin=()=>D.settings.prepMin??90,cleanMin=()=>D.settings.cleanMin??30;
+function storeHrs(loc,dow){const all=D.settings.hours||{};const h=(all[loc]||HOURS_DEF[loc]||{})[dow];return Array.isArray(h)&&h[0]&&h[1]?h:null}
+function storeSpan(loc,dow){const h=storeHrs(loc,dow);if(!h)return null;const a=toMin(h[0])-prepMin();let b=toMin(h[1])+cleanMin();if(b<=a)b+=1440;return[a,b]}
+const hhmmM=m=>pad(Math.floor(m/60)%24)+':'+pad(m%60);
+// make the day's needed shifts start exactly at prep time and end exactly at cleaning time
+function fitSpan(needs,sp){if(!sp||!needs.length)return needs;const[A,B]=sp;
+  let out=needs.map(n=>{const s=toMin(n.start);let e=toMin(n.end);if(e<=s)e+=1440;return{...n,s:Math.max(s,A),e:Math.min(e,B)}}).filter(n=>n.e-n.s>=30);
+  if(!out.length)return[{start:hhmmM(A),end:hhmmM(B),n:1}];
+  const lo=Math.min(...out.map(n=>n.s)),hi=Math.max(...out.map(n=>n.e));
+  if(lo>A){const f=out.find(n=>n.s===lo);if((f.n||1)===1)f.s=A;else out.unshift({s:A,e:lo,n:1})}
+  if(hi<B){const l=out.filter(n=>n.e===hi).pop();if((l.n||1)===1)l.e=B;else out.push({s:hi,e:B,n:1})}
+  return out.map(({s,e,...n})=>({...n,start:hhmmM(s),end:hhmmM(e)}))}
+function needsFor(loc,dow){const l=D.settings.staffing?.[loc]?.[dow];const sp=storeSpan(loc,dow);
+  if(!Array.isArray(l))return sp?[{start:hhmmM(sp[0]),end:hhmmM(sp[1]),n:1}]:D.settings.hours?.[loc]?[]:DEF_NEEDS;return fitSpan(l,sp)}
 const FC_DEF={on:true,cap:100,max1:150,minStaff:1,buffer:0.5,weeks:8};
 const FC_BUF=[[0,'Lean','Staff to the average'],[0.5,'Normal','Small cushion for busy swings'],[1,'Safe','Bigger cushion, fewer rushes']];
 const DEF_GEO={wh:{lat:41.7621,lon:-72.742,name:'West Hartford, CT'},nh:{lat:41.3046,lon:-72.9157,name:'New Haven, CT'}};
@@ -1803,8 +1819,8 @@ const fcNeedsOf=(loc,date)=>(D.fcneeds||{})[loc]?.[date]||null;
 const fcUse=loc=>fcCfg().on!==false&&(isOwner?fcHas(loc):!!Object.keys((D.fcneeds||{})[loc]||{}).length);
 // a manager/owner can change one day by hand; that day then ignores the forecast and usual shifts
 const needsOverOf=(loc,date)=>{const v=D.schedCfg?.needsOver?.[loc+'_'+date];return Array.isArray(v)?v:null};
-function needsAt(loc,date){const ov=needsOverOf(loc,date);if(ov)return ov;if(!fcUse(loc))return needsFor(loc,parseYmd(date).getDay());if(isOwner)return fcNeeds(loc,date).needs;
-  const x=fcNeedsOf(loc,date);return x&&!needsFor(loc,parseYmd(date).getDay()).length?[]:x?.needs||needsFor(loc,parseYmd(date).getDay())}
+function needsAt(loc,date){const ov=needsOverOf(loc,date);if(ov)return fitSpan(ov,storeSpan(loc,parseYmd(date).getDay()));if(!fcUse(loc))return needsFor(loc,parseYmd(date).getDay());if(isOwner)return fcNeeds(loc,date).needs;
+  const dw=parseYmd(date).getDay(),x=fcNeedsOf(loc,date);return x&&!needsFor(loc,dw).length?[]:x?.needs?fitSpan(x.needs,storeSpan(loc,dw)):needsFor(loc,dw)}
 /* people needed at each hour, for the summary line */
 function needsCurve(nds){const ts=[...new Set(nds.flatMap(n=>[toMin(n.start),toMin(n.end)]))].sort((a,b)=>a-b);const seg=[];for(let i=0;i<ts.length-1;i++){const t=ts[i];const c=nds.filter(n=>toMin(n.start)<=t&&t<toMin(n.end)).reduce((a,n)=>a+(n.n||1),0);const l=seg[seg.length-1];if(l&&l.c===c&&l.e===t)l.e=ts[i+1];else seg.push({s:t,e:ts[i+1],c})}return seg.filter(x=>x.c>0)}
 /* hourly sales import (CSV: date,hour,net_sales,orders — one store per file, or a store column) */
@@ -1889,7 +1905,7 @@ async function asGenerate(){const cfg=asGrab();A.db.doc('mgr/sched').set({...D.s
   AS.busy=true;AS.msg='';AS.err=false;AS.summary='';drawSheet();
   if(fcUse(curLoc())&&!wxNow(curLoc()))await Promise.race([wxAll(),new Promise(r=>setTimeout(r,6000))]);
   if(!A.sample){AS.plan=greedySchedule(ws,ems,keep,NN);AS.summary='Filled automatically by priority and fewest hours.';AS.busy=false;AS.draftAt=new Date().toISOString();AS.appliedAt=null;asSaveDraft();drawSheet();return}
-  const week=[...Array(NN)].map((_,i)=>{const date=addDays(ws,i);return{date,weekday:DOW[parseYmd(date).getDay()],needs:needsAt(curLoc(),date).map(x=>({start:x.start,end:x.end,count:x.n||1})),...(fcUse(curLoc())&&fcDay(curLoc(),date).ok?{salesForecast:isOwner?Math.round(fcDay(curLoc(),date).tot):undefined}:{})}});
+  const week=[...Array(NN)].map((_,i)=>{const date=addDays(ws,i);const sh=storeHrs(curLoc(),parseYmd(date).getDay());return{date,weekday:DOW[parseYmd(date).getDay()],...(sh?{storeOpens:sh[0],storeCloses:sh[1]}:{}),needs:needsAt(curLoc(),date).map(x=>({start:x.start,end:x.end,count:x.n||1})),...(fcUse(curLoc())&&fcDay(curLoc(),date).ok?{salesForecast:isOwner?Math.round(fcDay(curLoc(),date).tot):undefined}:{})}});
   const staff=ems.map(e=>({id:e.id,name:e.name,role:e.role||'Staff',priority:sPrio(e.id),maxHoursPerWeek:sMax(e.id),availabilityNote:D.avail[e.id]?.note||'',availability:Object.fromEntries(week.map(w=>[w.date,availWin(e.id,w.date)]))}));
   const prompt=`You are scheduling shifts for a bubble tea shop (BLISS, ${locName(curLoc())}) for the dates ${ws} to ${addDays(ws,NN-1)} (${NN} days).
 Data (JSON):
@@ -1899,6 +1915,7 @@ Each day's needs were set from the store's hourly sales forecast (salesForecast,
 Hard rules: only put a person on a shift that fits completely inside their availability; never double-book a person (no overlapping shifts on the same day); never exceed maxHoursPerWeek within any Monday-Sunday calendar week when it is set; use only the staff ids given; use 24-hour HH:MM times; do not repeat shifts that are already scheduled.
 Goals, in order: 1) fill every needed slot (count = number of people for that start-end); 2) follow the manager's instructions; 3) give more hours to priority "high", fewer to "low"; 4) spread hours fairly among equal priority; 5) avoid scheduling a Trainee alone in a slot when an experienced person is available.
 Shift shape: a needed slot may be covered by one person for the whole time or by consecutive shifts handed off between people (e.g. 10:00-15:00 then 15:00-21:30), as long as the required number of people is present at every moment. Each shift must be at least 3 hours; there is no maximum shift length (one person may cover a whole day if that fits their availability and the instructions). Give a person at most one shift per day (no split shifts). Shift times should fall on the hour or half hour.
+Store hours: each day's needs already start ${prepMin()} min before opening (prep) and end ${cleanMin()} min after closing (cleaning). Keep those exact first start and last end times — someone must be there for prep and for cleaning.
 If part of a slot cannot be covered, leave it and list it in "unfilled".
 Manager's instructions (follow all of them):
 ${(()=>{const R=asRules();const l=[...R.keep,...R.week].filter(r=>r.on!==false).map(r=>r.text);return l.length?l.map((t,i)=>`${i+1}. ${t}`).join('\n'):'(none)'})()}
@@ -1914,14 +1931,22 @@ async function asApply(){if(AS.applying)return;const C_=AS.checked;if(!C_?.ok.le
   let n=0;for(const s of C_.ok){if(kept.some(k=>same(k,s))||added.some(k=>same(k,s)))continue;if(await W(A.db.doc('shifts/'+uidGen()).set({empId:s.empId,loc:worksAt(s.empId,curLoc())?curLoc():locOf(s.empId),date:s.date,start:s.start,end:s.end,note:'Auto',auto:true}))){n++;added.push(s)}}
   AS.appliedAt=new Date().toISOString();await asSaveDraft();toast(`Schedule applied · ${n} shifts`);UI.week=ws;UI.day=null;AS=null;closeSheet()}finally{if(AS)AS.applying=false}}
 function needsSheet(){const loc=curLoc();const ed=Object.fromEntries([0,1,2,3,4,5,6].map(i=>[i,needsFor(loc,i).map(x=>({...x}))]));
-  const grab=()=>{[0,1,2,3,4,5,6].forEach(i=>ed[i].forEach((x,j)=>{const a=$(`#nd_s_${i}_${j}`),b=$(`#nd_e_${i}_${j}`),c=$(`#nd_n_${i}_${j}`);if(a)x.start=a.value;if(b)x.end=b.value;if(c)x.n=Math.max(1,parseInt(c.value)||1)}))};
+  const hrs=Object.fromEntries([0,1,2,3,4,5,6].map(i=>[i,[...(storeHrs(loc,i)||['',''])]]));let pm=prepMin(),cm=cleanMin();
+  const grabH=()=>{[0,1,2,3,4,5,6].forEach(i=>{const a=$('#hr_o_'+i),b=$('#hr_c_'+i);if(a)hrs[i]=[a.value,b.value]});const p=num($('#hr_pm')?.value),c=num($('#hr_cm')?.value);if(p!=null)pm=Math.max(0,p);if(c!=null)cm=Math.max(0,c)};
+  const grab=()=>{grabH();[0,1,2,3,4,5,6].forEach(i=>ed[i].forEach((x,j)=>{const a=$(`#nd_s_${i}_${j}`),b=$(`#nd_e_${i}_${j}`),c=$(`#nd_n_${i}_${j}`);if(a)x.start=a.value;if(b)x.end=b.value;if(c)x.n=Math.max(1,parseInt(c.value)||1)}))};
   openSheet({title:()=>`Shifts needed · ${esc(locName(loc))}`,body:()=>`<p class="small muted">For each day, list the shifts you need covered and how many people each one needs. Leave a day empty if the store is closed.</p>
-   ${[1,2,3,4,5,6,0].map(i=>`<div class="card stack"><div class="row"><b class="grow">${DOW[i]}</b><button class="btn sm" data-act="ndAdd" data-i="${i}">${ic('plus')} Shift</button>${i!==1?`<button class="btn sm" data-act="ndCopy" data-i="${i}">Same as Monday</button>`:''}</div>
+   <div class="card stack"><div class="row"><b class="grow">Store hours</b><span class="tiny muted">from Google</span></div>
+    <div class="row wrapr" style="gap:6px"><label class="small">Prep before opening <input class="in" type="number" min="0" step="15" id="hr_pm" value="${pm}" style="width:70px"> min</label><label class="small">Cleaning after closing <input class="in" type="number" min="0" step="15" id="hr_cm" value="${cm}" style="width:70px"> min</label></div>
+    ${[1,2,3,4,5,6,0].map(i=>`<div class="row" style="gap:6px"><span style="width:40px;flex:none">${DOW[i].slice(0,3)}</span><input class="in" type="time" id="hr_o_${i}" value="${esc(hrs[i][0])}" style="min-width:0" aria-label="${DOW[i]} opens"><span>–</span><input class="in" type="time" id="hr_c_${i}" value="${esc(hrs[i][1])}" style="min-width:0" aria-label="${DOW[i]} closes"></div>`).join('')}
+    <div class="tiny muted">The first shift each day starts ${pm} min before opening (prep) and the last one ends ${cm} min after closing (cleaning). Auto-schedule and the forecast follow this. Clear both times for a day the store is closed.</div>
+    <button class="btn sm" data-act="ndHrs">Apply store hours to the shifts below</button></div>
+   ${[1,2,3,4,5,6,0].map(i=>`<div class="card stack"><div class="row"><b class="grow">${DOW[i]}${hrs[i][0]?`<div class="tiny muted" style="font-weight:400">Open ${fmtT(hrs[i][0])}–${fmtT(hrs[i][1])} · prep from ${fmtT(hhmmM(toMin(hrs[i][0])-pm))} · clean until ${fmtT(hhmmM(toMin(hrs[i][1])+cm))}</div>`:''}</b><button class="btn sm" data-act="ndAdd" data-i="${i}">${ic('plus')} Shift</button>${i!==1?`<button class="btn sm" data-act="ndCopy" data-i="${i}">Same as Monday</button>`:''}</div>
      ${ed[i].map((x,j)=>`<div class="row" style="gap:6px"><input class="in" type="time" id="nd_s_${i}_${j}" value="${esc(x.start)}" style="min-width:0" aria-label="Start"><span>–</span><input class="in" type="time" id="nd_e_${i}_${j}" value="${esc(x.end)}" style="min-width:0" aria-label="End"><span>×</span><input class="in" type="number" min="1" id="nd_n_${i}_${j}" value="${x.n||1}" style="width:64px" aria-label="People"><button class="x" data-act="ndDel" data-i="${i}" data-j="${j}" aria-label="Remove" style="color:var(--bad);flex:none">${ic('x')}</button></div>`).join('')||'<span class="small muted">Closed</span>'}</div>`).join('')}`,
    foot:()=>`<button class="btn pri big" data-act="ndSave">Save</button>`});
   Object.assign(ACT,{ndAdd:d=>{grab();const l=ed[+d.i];const last=l[l.length-1];l.push(last?{start:last.end,end:'22:30',n:1}:{start:'11:00',end:'17:00',n:1});drawSheet()},
    ndDel:d=>{grab();ed[+d.i].splice(+d.j,1);drawSheet()},ndCopy:d=>{grab();ed[+d.i]=ed[1].map(x=>({...x}));drawSheet()},
-   ndSave:async()=>{grab();const staffing={...(D.settings.staffing||{}),[loc]:Object.fromEntries(Object.entries(ed).map(([k,v])=>[k,v.filter(x=>x.start&&x.end)]))};const s2={...D.settings,staffing};
+   ndHrs:()=>{grab();[0,1,2,3,4,5,6].forEach(i=>{const h=hrs[i];if(!h[0]||!h[1])return;const a=toMin(h[0])-pm;let b=toMin(h[1])+cm;if(b<=a)b+=1440;ed[i]=fitSpan(ed[i].length?ed[i]:[{start:hhmmM(a),end:hhmmM(b),n:1}],[a,b])});drawSheet();toast('Shifts now start at prep time and end after cleaning')},
+   ndSave:async()=>{grab();const staffing={...(D.settings.staffing||{}),[loc]:Object.fromEntries(Object.entries(ed).map(([k,v])=>[k,v.filter(x=>x.start&&x.end)]))};const hours={...(D.settings.hours||HOURS_DEF),[loc]:Object.fromEntries(Object.entries(hrs).map(([k,v])=>[k,v[0]&&v[1]?v:null]))};const s2={...D.settings,staffing,hours,prepMin:pm,cleanMin:cm};
      if(await W(A.db.doc('config/settings').set(s2))){D.settings=s2;toast('Saved');SH=null;autoSheetReopen()}}})}
 /* change one day's people by hand: time blocks with how many people, prefilled from what the day uses now */
 function ndDaySheet(date){const loc=curLoc();const hm2=m=>`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;
