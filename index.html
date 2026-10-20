@@ -1496,7 +1496,8 @@ function typesSheet(){SH=null;const T={list:typeList().map(t=>({...t}))};
 function typesGrab(){document.querySelectorAll('[data-tn]').forEach(el=>{const t=SH.T.list[+el.dataset.tn];if(t)t.name=el.value})}
 function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEach(t=>{t.days=t.days?.length?t.days:[...ALLDAYS];t.items=t.items||[];
    if(t.byDay){const m=new Map();[1,2,3,4,5,6,0].forEach(d=>(t.dayItems?.[d]||[]).forEach(x=>{const k=x.id;if(m.has(k)){const y=m.get(k);if(y.rep==='weekly'&&!y.days.includes(d))y.days.push(d)}else m.set(k,{...x,rep:x.rep&&x.rep!=='daily'?x.rep:'weekly',days:x.rep&&x.rep!=='daily'?x.days:[d]})}));t.items=[...m.values()];delete t.byDay;delete t.dayItems}});
-  TK={E,cur:Math.max(0,E.findIndex(t=>t.id===type)),day:parseYmd(bizDate()).getDay(),del:null,loc:LOCS().length>1?curLoc():''};
+  const LS=LOCS().map(l=>l.id);if(LS.length>1)E.forEach(t=>{t.items=t.items.flatMap(x=>Array.isArray(x.locs)&&x.locs.length?(x.locs.length>1?x.locs.map(l=>({...JSON.parse(JSON.stringify(x)),locs:[l]})):[x]):LS.map(l=>({...JSON.parse(JSON.stringify(x)),locs:[l]})))});
+  TK={E,cur:Math.max(0,E.findIndex(t=>t.id===type)),day:parseYmd(bizDate()).getDay(),del:null,loc:LS.length>1?curLoc():''};
   openSheet({title:()=>'Tasks & checklists',body:()=>{const t=TK.E[TK.cur];if(!t)return `<button class="btn pri" data-act="tkNew">${ic('plus')} New task</button>`;const l=tkList();
    return `<div class="chips">${TK.E.map((x,i)=>`<button class="${i===TK.cur?'on':''}" data-act="tkPick" data-i="${i}"><span>${esc(fmtT(x.time||'22:00'))}${x.dayTimes&&Object.keys(x.dayTimes).length?' *':''}</span><b style="font-size:13px">${esc(x.name||'Task')}</b></button>`).join('')}<button data-act="tkNew"><span>New</span><b>${ic('plus')}</b></button></div>
    <div class="card stack">
@@ -1507,12 +1508,10 @@ function tasksSheet(type){const E=JSON.parse(JSON.stringify(taskList()));E.forEa
     ${t.dayTimes?`<div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px">${[1,2,3,4,5,6,0].filter(i=>t.days.includes(i)).map(i=>`<label class="f" style="min-width:0">${DOW[i]}<input class="in" style="min-width:0;width:100%" type="time" id="tkdt_${i}" value="${esc(t.dayTimes[i]||'')}" placeholder="${esc(t.time||'')}"></label>`).join('')}</div><p class="tiny muted" style="margin:0">Leave a day empty to use the usual time (${fmtT(t.time||'22:00')}).</p>`:''}
    </div>
    <p class="small muted">Set how often each item repeats, like an alarm: every day, some weekdays, once a month, or one date only. 📷 = staff must take a photo. ☑ = staff just tap to check it off. Add an example photo to show what "done right" looks like.</p>
-   ${LOCS().length>1?`<div class="row wrapr" style="gap:6px;align-items:center"><span class="tiny muted">Store</span>${[['','All stores'],...LOCS().map(l2=>[l2.id,l2.name])].map(([k,n])=>`<button class="btn sm ${(TK.loc||'')===k?'pri':''}" data-act="tkLoc" data-k="${k}">${esc(n)}</button>`).join('')}</div>
-    ${TK.loc?`<div class="tiny muted">Showing what staff at ${esc(locName(TK.loc))} see. New items you add here are for ${esc(locName(TK.loc))} only.</div>`:''}`:''}
+   ${TK.loc?`<div class="hint">${L(`Editing <b>${esc(locName(TK.loc))}</b>'s items. To change the other store, close this, switch store at the top, and open it again.`,`正在编辑 <b>${esc(locName(TK.loc))}</b> 的项目。要改另一家店，关掉这里，在最上面切换店铺后再打开。`)}</div>`:''}
    <div class="card flush list" data-sortable="tkitems">${l.length?l.map((x,i)=>TK.loc&&!itemAtLoc(x,TK.loc)?'':`<div class="li" style="gap:6px;padding-block:8px;padding-left:6px;flex-wrap:wrap" data-sid="${i}">
      <div class="row" style="flex:1 1 100%;gap:4px;min-width:0">${DRAG_H}<input class="in grow" id="ti_${i}" value="${esc(x.name)}" aria-label="Item ${i+1}" style="min-width:0"></div>
      <textarea class="in" id="tih_${i}" rows="${Math.min(8,String(x.how||'').split('\n').length)}" placeholder="How to do it (optional)" aria-label="How to do ${esc(x.name)}" style="flex:1 1 100%;min-height:34px;font-size:13px;resize:vertical">${esc(x.how||'')}</textarea>
-     ${LOCS().length>1?`<select class="in" data-tiloc="${i}" aria-label="Store" style="width:auto;min-height:34px;padding:4px 8px"><option value="">Both stores</option>${LOCS().map(l2=>`<option value="${esc(l2.id)}" ${x.locs?.length===1&&x.locs[0]===l2.id?'selected':''}>${esc(l2.name)} only</option>`).join('')}</select>`:''}
      <button class="btn sm" data-act="tiPhoto" data-i="${i}" title="Photo or check">${x.photo===false?'☑ Check':'📷 Photo'}</button>
      ${x.ref?`<img src="${BLOB}${esc(x.ref)}" alt="Example" data-act="viewPh" data-pid="${esc(x.ref)}" data-cap="Example: ${esc(x.name)}" style="width:36px;height:36px;object-fit:cover;border-radius:6px;cursor:zoom-in"><button class="btn sm" data-act="tiRefDel" data-i="${i}" aria-label="Remove example photo">✕</button>`
        :`<label class="btn sm" style="cursor:pointer">+ Example<input type="file" accept="image/*" data-up="tref" data-i="${i}" hidden></label>`}
@@ -1669,7 +1668,7 @@ const ACT={
  tkLoc:d=>{tkGrab();TK.loc=d.k||'';drawSheet()},
  tiPhoto:d=>{tkGrab();const x=tkList()[+d.i];if(x){x.photo=x.photo===false?true:false;drawSheet()}},
  tiRefDel:d=>{tkGrab();const x=tkList()[+d.i];if(x){delete x.ref;drawSheet()}},
- tiMv:d=>{tkGrab();const l=tkList(),i=+d.i,j=i+(+d.n);if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];drawSheet()},
+ tiMv:d=>{tkGrab();const l=tkList(),i=+d.i,st=+d.n;let j=i+st;while(j>=0&&j<l.length&&TK.loc&&!itemAtLoc(l[j],TK.loc))j+=st;if(j<0||j>=l.length)return;[l[i],l[j]]=[l[j],l[i]];drawSheet()},
  tiDel:d=>{tkGrab();tkList().splice(+d.i,1);drawSheet()},
  tkDel:()=>{tkGrab();const t=TK.E[TK.cur];if(!t)return;if(TK.del!==t.id){TK.del=t.id;drawSheet();return}TK.E.splice(TK.cur,1);TK.cur=Math.max(0,TK.cur-1);TK.del=null;drawSheet()},
  tkSave:async()=>{tkGrab();const clean=l=>(l||[]).map(x=>({id:x.id,name:String(x.name||'').trim(),photo:x.photo!==false,...(x.ref?{ref:x.ref}:{}),...(String(x.how||'').trim()?{how:String(x.how).trim()}:{}),...(Array.isArray(x.locs)&&x.locs.length?{locs:[...x.locs]}:{}),
@@ -1800,8 +1799,8 @@ document.addEventListener('change',async e=>{const t=e.target;
   if(t.matches('select[data-act=orderLoc]')){const id=t.dataset.id;if(await W(A.db.doc('orders/'+id).update({loc:t.value}))){toast('Moved to '+locName(t.value));closeSheet()}return}
   if((t.id==='as_from'||t.id==='as_to')&&AS){asGrab();const f=$('#as_from').value,to=$('#as_to').value;if(!f)return;let n=to?diffDays(f,to)+1:AS.n;if(t.id==='as_from'&&to&&to<f)n=AS.n;n=Math.max(1,Math.min(21,n));AS.ws=f;AS.n=n;asLoadDraft();drawSheet();return}
   if(/^as_[pm]_/.test(t.id)&&AS){asGrab();if(await W(A.db.doc('mgr/sched').set({...D.schedCfg})))toast(t.id.startsWith('as_m_')?'Max hours saved':'Priority saved');return}
-  if(t.dataset?.tkfrom&&TK){const src=TK.E[+t.value];if(!src)return;tkGrab();const have=new Set(tkList().map(x=>x.name.trim().toLowerCase()));let n=0;
-    (src.items||[]).forEach(x=>{if(have.has(String(x.name||'').trim().toLowerCase()))return;tkList().push({...JSON.parse(JSON.stringify(x)),id:slug(x.name||'item')+'-'+uidGen().slice(-3)});n++});
+  if(t.dataset?.tkfrom&&TK){const src=TK.E[+t.value];if(!src)return;tkGrab();const have=new Set(tkList().filter(x=>!TK.loc||itemAtLoc(x,TK.loc)).map(x=>x.name.trim().toLowerCase()));let n=0;
+    (src.items||[]).filter(x=>!TK.loc||itemAtLoc(x,TK.loc)).forEach(x=>{if(have.has(String(x.name||'').trim().toLowerCase()))return;tkList().push({...JSON.parse(JSON.stringify(x)),id:slug(x.name||'item')+'-'+uidGen().slice(-3),...(TK.loc?{locs:[TK.loc]}:{})});n++});
     toast(n?`Added ${n} item${n>1?'s':''} from ${src.name}`:'Those items are already here');drawSheet();return}
   if(t.dataset?.tirep!=null&&TK){tkGrab();const x=tkList()[+t.dataset.tirep];if(x){if(x.rep==='weekly'&&!(x.days||[]).length)x.days=[parseYmd(bizDate()).getDay()];if(x.rep==='monthly'&&!x.dom)x.dom=1;if(x.rep==='once'&&!x.date)x.date=bizDate()}drawSheet();return}
   if(t.dataset?.itcopy&&ITD){const src=itemById(t.value);if(!src)return;itGrab();ibGrab();ITD.unit=src.unit||ITD.unit;ITD.big=src.big?{...src.big}:ITD.big;
@@ -2838,7 +2837,7 @@ Object.assign(ACT,{
 Object.assign(SORT,{
   fixed:ids=>ACT.fixedOrder(ids),
   types:ids=>{if(!SH?.T)return;typesGrab();const L0=SH.T.list;SH.T.list=ids.map(i=>L0[+i]);drawSheet()},
-  tkitems:ids=>{if(!TK)return;tkGrab();const L0=tkList().slice();const t=TK.E[TK.cur];const nl=ids.map(i=>L0[+i]);if(t.byDay)t.dayItems[TK.day]=nl;else t.items=nl;drawSheet()}});
+  tkitems:ids=>{if(!TK)return;tkGrab();const L0=tkList().slice();const t=TK.E[TK.cur];const vis=ids.map(i=>L0[+i]);let k=0;const shown=new Set(vis);const nl=L0.map(x=>shown.has(x)?vis[k++]:x);if(t.byDay)t.dayItems[TK.day]=nl;else t.items=nl;drawSheet()}});
 boot();
 </script>
 
