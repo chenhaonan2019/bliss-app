@@ -350,7 +350,7 @@ export const htmlToText = (h: string) => String(h || "")
 
 // Google sign-in token from Apps Script (ScriptApp.getIdentityToken) → the verified email, or "".
 let JWKS: { at: number; keys: Json[] } | null = null; let WHY = "";
-export async function googleEmail(tok: string, fetchCerts = async () => (await (await fetch("https://www.googleapis.com/oauth2/v3/certs")).json()).keys) {
+export async function googleEmail(tok: string, fetchCerts = async () => { const r = await fetch("https://www.googleapis.com/oauth2/v3/certs"); const t = await r.text(); if (!r.ok || !t) throw new Error("certs " + r.status + " " + t.length); return JSON.parse(t).keys; }) {
   try {
     const [h, p, s] = tok.split("."); const dec = (x: string) => JSON.parse(new TextDecoder().decode(unb64u(x)));
     const hd = dec(h), pl = dec(p);
@@ -360,7 +360,17 @@ export async function googleEmail(tok: string, fetchCerts = async () => (await (
     const key = await crypto.subtle.importKey("jwk", { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
     const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, unb64u(s), te.encode(`${h}.${p}`)); if (!ok) WHY = "signature";
     return ok ? String(pl.email).toLowerCase() : "";
-  } catch (e) { WHY = "error " + String((e as Error).message || e).slice(0, 120); return ""; }
+  } catch (e) { WHY = "error " + String((e as Error).message || e).slice(0, 120); return await tokenInfo(tok); }
+}
+// fallback: ask Google to check the token
+async function tokenInfo(tok: string) {
+  try {
+    const r = await fetch("https://oauth2.googleapis.com/tokeninfo?id_token=" + encodeURIComponent(tok)); const t = await r.text();
+    if (!r.ok) { WHY += " / tokeninfo " + r.status; return ""; }
+    const pl = JSON.parse(t);
+    if (!["accounts.google.com", "https://accounts.google.com"].includes(pl.iss) || String(pl.email_verified) === "false" || !pl.email || !(+pl.exp * 1000 > Date.now())) { WHY += " / tokeninfo claims"; return ""; }
+    return String(pl.email).toLowerCase();
+  } catch (e) { WHY += " / tokeninfo " + String((e as Error).message || e).slice(0, 80); return ""; }
 }
 
 // What one email says. Claude first; simple rules if Claude is unavailable.
