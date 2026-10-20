@@ -540,7 +540,7 @@ async function cancelInsight(org: string, ctx: Json, id: string, o: Json, orders
   const key = env("ANTHROPIC_API_KEY"); const t = o.track || {}; if (!key || !(t.canceled || []).length) return null;
   const since = Date.now() - 21 * 864e5;
   const recent = orders.filter((x) => x.id !== id && Date.parse(x.data.createdAt || x.data.date || "") > since && (x.data.loc || "wh") === o.loc)
-    .map((x) => ({ store: x.data.store, ordered: x.data.date, due: x.data.expected, status: x.data.status, stage: x.data.track?.stage, canceled: x.data.track?.canceled || [], arrived: x.data.track?.names || (x.data.lines || []).map((l: Json) => l.name) }));
+    .map((x) => ({ store: x.data.store, ordered: x.data.date, due: x.data.expected, status: x.data.status, stage: x.data.track?.stage, canceled: x.data.track?.canceled || [], ...(x.data.track?.replacedBy ? { note: `owner canceled this order on purpose and replaced it with #${x.data.track.replacedBy} (not a store problem)` } : x.data.track?.selfCanceled?.length ? { ownerRemovedItems: x.data.track.selfCanceled } : {}), arrived: x.data.track?.names || (x.data.lines || []).map((l: Json) => l.name) }));
   const [items, counts] = await Promise.all([docOf(org, "config/items"), q(`docs?select=data&org_id=eq.${org}&coll=eq.counts&order=updated_at.desc&limit=6`) as Promise<Json[]>]);
   const cnt = counts.map((c) => c.data).filter((c) => (c.loc || "wh") === o.loc)[0];
   const stock = (items?.list || []).map((it: Json) => ({ name: it.name, unit: it.unit, min: it.min, par: it.par, lastCount: cnt?.counts?.[it.id] ?? null }));
