@@ -408,11 +408,12 @@ ${String(m.text || "").slice(0, 7000)}`;
   } catch (e) { console.warn("claude", e); return null; }
 }
 export async function parseMail(m: Json, ai = claudeParse) {
-  const base = ruleParse(m); const c = await ai(m); if (!c) return { ...base, by: "rules" };
+  const base: Json = ruleParse(m); base.self = /successfully canceled|cancellation request/i.test(String(m.subject || "") + String(m.text || "").slice(0, 300));
+  const c = await ai(m); if (!c) return { ...base, by: "rules" };
   const out: Json = { ...base, ...Object.fromEntries(Object.entries(c).filter(([, v]) => v !== null && v !== undefined && v !== "")) };
   if (base.stage !== "other" && base.stage !== out.stage && !["canceled", "items_canceled"].includes(out.stage) && ["delivered", "out_for_delivery", "picked_up"].includes(base.stage)) out.stage = base.stage; // subject lines are unambiguous
   if (base.orderNo && !out.orderNo) out.orderNo = base.orderNo;
-  out.orderNo = out.orderNo ? String(out.orderNo).replace(/^#/, "").trim() : null; out.by = "claude"; return out;
+  out.orderNo = out.orderNo ? String(out.orderNo).replace(/^#/, "").trim() : null; out.by = "claude"; out.self = base.self; return out;
 }
 
 const LOCKEY: Json = { wh: ["west hartford", "farmington ave", "06107", "06119", "06117", "06110"], nh: ["new haven", "olive st", "06511", "06510", "06513"] };
@@ -464,6 +465,15 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
   if (p.total != null && isFinite(+p.total)) t.total = +p.total;
   if (p.signature) t.signature = true;
   if (p.editUntil) t.editUntil = String(p.editUntil).slice(0, 40);
+  // the owner canceled items themselves (not out of stock): no alarm; if they placed a new order with the same store
+  // within 45 min, this one was replaced
+  if (p.self) {
+    t.selfCanceled = [...new Set([...(t.selfCanceled || []), ...((p.canceledItems || []) as string[]).map((x) => String(x).slice(0, 60))])].slice(0, 30);
+    const made = Date.parse(d.createdAt || at);
+    const repl = orders.find((o) => o.data.ref && o.data.ref !== d.ref && o.data.store === store && o.data.status !== "canceled" && Math.abs(Date.parse(o.data.createdAt || "") - made) < 45 * 6e4);
+    if (repl) { t.stage = "canceled"; t.replacedBy = repl.data.track?.no || repl.data.ref; if (d.status === "ordered") d.status = "canceled"; }
+    p = { ...p, canceledItems: [] };
+  }
   if ((p.canceledItems || []).length) t.canceled = [...new Set([...(t.canceled || []), ...(p.canceledItems as string[]).map((x) => String(x).slice(0, 60))])].slice(0, 20);
   if (t.wStart && !d.window) d.window = `${fmtHm(t.wStart)}–${fmtHm(t.wEnd || t.wStart)}`;
   if (p.orderNo) t.no = p.orderNo;
@@ -472,7 +482,7 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
   t.at = now.toISOString(); d.track = t;
   // first run: an order that was already delivered hours ago isn't waiting for anyone any more
   if (p.stage === "delivered" && d.status === "ordered" && now.getTime() - Date.parse(at) > 3600e3) Object.assign(d, { status: "received", receivedAt: at, receivedDate: etParts(new Date(at)).ymd, receivedBy: "email", recvNote: "Delivered before tracking started (from the store email)", issueSeen: true });
-  const advanced = rank(t.stage) > rank(prev) || p.stage === "items_canceled" || p.stage === "canceled" || isNew;
+  const advanced = !p.self && (rank(t.stage) > rank(prev) || p.stage === "items_canceled" || p.stage === "canceled" || isNew);
   return { id: row?.id || (ref ? "em_" + ref.replace(/[^A-Za-z0-9]+/g, "_") : `em${Date.parse(at).toString(36)}${Math.random().toString(36).slice(2, 6)}`), data: d, isNew, event: advanced ? p.stage : null, prevStage: prev };
 }
 
