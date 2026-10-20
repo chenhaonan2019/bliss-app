@@ -441,7 +441,7 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
   const loc = locFromAddr(p.address, locs);
   const wDate = p.windowDate || (p.eta ? day : null);
   if (!row && ref) { // an order someone typed in by hand for the same store and day → attach to it
-    row = orders.filter((o) => open(o) && o.data.kind !== "stockin" && !o.data.ref && (!loc || o.data.loc === loc) && wDate && o.data.expected === wDate)
+    row = orders.filter((o) => open(o) && o.data.kind !== "stockin" && !o.data.ref && (!loc || o.data.loc === loc) && (o.data.src === "draft" ? Math.abs(Date.parse(o.data.createdAt || "") - Date.parse(at)) < 12 * 3600e3 : !!wDate && o.data.expected === wDate))
       .sort((a, b) => String(b.data.createdAt).localeCompare(String(a.data.createdAt)))[0];
   }
   if (!row && ["reminder", "items_canceled"].includes(p.stage) && !ref) return null;
