@@ -435,14 +435,23 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
   if (["otp", "other"].includes(p.stage) || p.vendor === "Other") return null;
   const store = p.vendor; const ref = p.orderNo ? `${store === "BJ's" ? "BJ" : "WM"}:${p.orderNo}` : null;
   const at = m.date ? new Date(m.date).toISOString() : now.toISOString(); const day = etParts(new Date(at)).ymd;
-  let row = ref ? orders.find((o) => o.data.ref === ref) : undefined;
+  let row = ref ? (orders.find((o) => o.data.ref === ref && o.data.status !== "merged") || orders.find((o) => o.data.ref === ref)) : undefined;
+  // a manager's screenshot order with the same order number
+  const nn = (x: unknown) => String(x || "").replace(/[^0-9]/g, "");
+  if (!row && p.orderNo) row = orders.find((o) => !o.data.ref && o.data.store === store && o.data.status !== "merged" && nn(o.data.orderNo) === nn(p.orderNo));
   const open = (o: { data: Json }) => o.data.store === store && o.data.status === "ordered";
   if (!row && !ref) row = orders.filter((o) => open(o) && o.data.ref).sort((a, b) => String(b.data.createdAt).localeCompare(String(a.data.createdAt)))[0]; // email without a number → newest tracked order
   const loc = locFromAddr(p.address, locs);
   const wDate = p.windowDate || (p.eta ? day : null);
   if (!row && ref) { // an order someone typed in by hand for the same store and day → attach to it
-    row = orders.filter((o) => open(o) && o.data.kind !== "stockin" && !o.data.ref && (!loc || o.data.loc === loc) && (o.data.src === "draft" ? Math.abs(Date.parse(o.data.createdAt || "") - Date.parse(at)) < 12 * 3600e3 : !!wDate && o.data.expected === wDate))
-      .sort((a, b) => String(b.data.createdAt).localeCompare(String(a.data.createdAt)))[0];
+    const recvRecent = (o: { data: Json }) => ["received", "issue"].includes(o.data.status) && o.data.store === store && Math.abs(Date.parse(o.data.receivedAt || "") - Date.parse(at)) < 24 * 3600e3;
+    const cands = orders.filter((o) => (open(o) || recvRecent(o)) && o.data.kind !== "stockin" && !o.data.ref && !o.data.orderNo && o.data.status !== "merged" && (!loc || o.data.loc === loc)
+      && (o.data.src === "draft" ? Math.abs(Date.parse(o.data.createdAt || "") - Date.parse(at)) < 12 * 3600e3 : (!!wDate && (o.data.expected === wDate || Math.abs(Date.parse(o.data.expected || "") - Date.parse(wDate)) <= 864e5 && Math.abs(Date.parse(o.data.createdAt || "") - Date.parse(at)) < 36 * 3600e3))));
+    // several on the same day (e.g. two Walmart orders): pick the one whose total / item count is closest
+    const tot = (o: Json) => +o.total || (o.lines || []).reduce((a: number, l: Json) => a + (+l.price || 0), 0);
+    const sc = (o: { data: Json }) => (p.total && tot(o.data) ? Math.abs(tot(o.data) - p.total) / p.total : 0.5) + (p.itemCount && (o.data.lines || []).length ? Math.abs(p.itemCount - o.data.lines.length) / p.itemCount : 0.5) + (o.data.expected === wDate ? 0 : 0.3);
+    const ranked = cands.map((o) => ({ o, v: sc(o) })).sort((a, b) => a.v - b.v);
+    row = ranked.length === 1 || (ranked.length > 1 && ranked[0].v + 0.15 < ranked[1].v) ? ranked[0].o : undefined;
   }
   if (!row && ["reminder", "items_canceled"].includes(p.stage) && !ref) return null;
   const isNew = !row;

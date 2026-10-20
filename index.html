@@ -299,7 +299,7 @@ const locName=l=>LOCS().find(x=>x.id===l)?.name||l;
 function curLoc(){if(LOC_OVR)return LOC_OVR;let l;try{const m=mode();if(m==='emp'&&!isMgr){const st=empStores(actor());l=st.includes(UI.loc)?UI.loc:st[0]}else if(isMgr&&!isOwner&&D.links[uid]?.empId){const st=empStores(D.links[uid].empId);l=st.includes(UI.loc)?UI.loc:st[0]}else l=UI.loc}catch(e){l=UI.loc}return LOCS().some(x=>x.id===l)?l:LOCS()[0].id}
 const emps=()=>Object.values(D.employees).filter(e=>e.active!==false&&worksAt(e.id,curLoc()));
 const C=()=>{const L=curLoc(),o={};Object.values(D.counts).forEach(c=>{if((c.loc||'wh')===L)o[c.date]=c});return o};
-const ORD=()=>Object.values(D.orders).filter(o=>(o.loc||'wh')===curLoc());
+const ORD=()=>Object.values(D.orders).filter(o=>(o.loc||'wh')===curLoc()&&o.status!=='merged');
 const TAXDEF={fica:7.65,futa:0.6,suta:2.2};
 const taxRates=()=>({...TAXDEF,...(D.mgrSet.taxes||{})});
 // Pay rates and pay totals are for owners only (managers see hours, not money).
@@ -912,7 +912,7 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
       <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
       <div class="small muted">${t.low==null?'No count yet':`${t.low} low / out`} · ${t.arriving} deliveries due</div></div>`}).join('')}</div>
       <p class="tiny muted">Tap a store to open it.</p>
-      ${(()=>{const d=bizDate();const l=Object.values(D.orders).filter(o=>o.track&&(o.track.ask&&!o.track.ask.answer||o.status==='ordered'?(!o.expected||o.expected<=addDays(d,1)):(o.receivedDate===d||String(o.track.deliveredAt||'').slice(0,10)===d)&&o.status!=='canceled')).sort(trkSort);return l.length?LOCS().map(lc=>{const m=l.filter(o=>(o.loc||'wh')===lc.id);return m.length?`<h3>${L('Deliveries','配送')} · ${esc(lc.name)}</h3>${m.map(o=>trkCard(o,'orderView')).join('')}`:''}).join(''):''})()}
+      ${(()=>{const d=bizDate();const l=Object.values(D.orders).filter(o=>o.track&&o.status!=='merged'&&(o.track.ask&&!o.track.ask.answer||o.status==='ordered'?(!o.expected||o.expected<=addDays(d,1)):(o.receivedDate===d||String(o.track.deliveredAt||'').slice(0,10)===d)&&o.status!=='canceled')).sort(trkSort);return l.length?LOCS().map(lc=>{const m=l.filter(o=>(o.loc||'wh')===lc.id);return m.length?`<h3>${L('Deliveries','配送')} · ${esc(lc.name)}</h3>${m.map(o=>trkCard(o,'orderView')).join('')}`:''}).join(''):''})()}
       <h3>Photo reviews · last 7 days</h3>
       <div class="g2">${L2.map(l=>{const r=reviewStats(l.id);return `<div class="card stack" style="min-width:0;gap:8px"><div class="row"><b class="grow">${esc(l.name)}</b>${r.waiting?chip('warn',`${r.waiting} waiting`):r.done?chip('ok','All reviewed'):''}</div>
         <div class="small"><b>${r.reviewed}</b> of <b>${r.done}</b> finished tasks reviewed${r.issues?` · <span style="color:var(--bad)">${r.issues} with issues</span>`:''}${r.missed?` · ${r.missed} not done`:''}</div>
@@ -1243,24 +1243,42 @@ function grabOrderLines(){const st=SH_ORDER;if($('#o_fee')){st.feeUnit=$('#o_fee
     return {name:$('#ol_n'+i)?.value??l.name,qty:num($('#ol_q'+i)?.value)??l.qty,itemId,...(it?{buyId}:{}),price:$('#ol_p'+i)?num($('#ol_p'+i).value):(l.price??null)}})}
 async function orderRead(){const st=SH_ORDER;if(!st.shots.length||!A.sample)return;st.msg2='';grabOrderLines();st.busy=true;st.msg='';drawSheet();
   const prompt=`You are reading one or more screenshots of the SAME online grocery or wholesale order (pages of one order; if items repeat across overlapping screenshots, list each product once) (usually BJ's Wholesale Club or Walmart) for a matcha and bubble tea shop.
-Return JSON only, shaped exactly: {"store":"BJ's"|"Walmart"|"Glacier Point"|"Other","orderDate":"YYYY-MM-DD" or null,"deliveryDate":"YYYY-MM-DD" or null,"deliveryWindow":string or null,"deliveryAddress":string or null,"lines":[{"name":string,"qty":number,"price":number or null,"itemId":string or null}]}
-deliveryDate is the scheduled or estimated delivery/pickup date shown (e.g. "Arrives Thu, Oct 16", "Delivery scheduled"); use the year of the order date if no year is shown; today is ${today()}. deliveryWindow is the time window shown, short form like "2pm-4pm", else null. deliveryAddress is the delivery or shipping address shown (or the billing address if no delivery address is shown), else null.
+Return JSON only, shaped exactly: {"store":"BJ's"|"Walmart"|"Glacier Point"|"Other","orderDate":"YYYY-MM-DD" or null,"deliveryDate":"YYYY-MM-DD" or null,"deliveryWindow":string or null,"deliveryAddress":string or null,"orderNo":string or null,"total":number or null,"lines":[{"name":string,"qty":number,"price":number or null,"itemId":string or null}]}
+deliveryDate is the scheduled or estimated delivery/pickup date shown (e.g. "Arrives Thu, Oct 16", "Delivery scheduled"); use the year of the order date if no year is shown; today is ${today()}. deliveryWindow is the time window shown, short form like "2pm-4pm", else null. deliveryAddress is the delivery or shipping address shown (or the billing address if no delivery address is shown), else null. orderNo is the order number shown (digits and dashes only, e.g. 6700501480 or 2000154-47332041), else null. total is the order total paid in dollars, else null.
 Rules: include only purchased products (no fees, tax, totals, savings). qty is the number of units/packs ordered as shown. price is the total paid for that line (qty times unit price) in dollars. Keep names short.
 Set itemId to the id of the matching shop inventory item below when the product is clearly the same thing, otherwise null.
 When the item has buy sizes, set buyId to the size that matches what was bought (by package size/weight), else null; qty is then the number of that size.
 Inventory items: ${JSON.stringify(D.items.map(i=>({id:i.id,name:i.name,countUnit:i.unit||'',buy:buyOpts(i).map(o=>({id:o.id,size:o.label,holds:o.per}))})))}`;
   try{const lim=(await A.sample.limits().catch(()=>null))?.images?.maxCount||st.shots.length;const r=await A.sample.json(prompt,{images:st.shots.slice(0,lim).map(x=>x.blob),modelTier:'default'});if(st.shots.length>lim)st.msg2=`Only the first ${lim} screenshots could be read at once.`;
-    if(r&&Array.isArray(r.lines)){if(r.store&&STORES.includes(r.store))st.store=r.store;{const ml=matchLoc(r.deliveryAddress);if(ml){st.loc=ml;st.locFound=true}}if(r.orderDate&&/^\d{4}-\d{2}-\d{2}$/.test(r.orderDate)){st.date=r.orderDate;st.expected=addDays(r.orderDate,1)}st.gotDel=false;if(r.deliveryDate&&/^\d{4}-\d{2}-\d{2}$/.test(r.deliveryDate)){st.expected=r.deliveryDate;st.gotDel=true}if(r.deliveryWindow)st.window=String(r.deliveryWindow).slice(0,40);
+    if(r&&Array.isArray(r.lines)){if(r.store&&STORES.includes(r.store))st.store=r.store;{const ml=matchLoc(r.deliveryAddress);if(ml){st.loc=ml;st.locFound=true}}if(r.orderDate&&/^\d{4}-\d{2}-\d{2}$/.test(r.orderDate)){st.date=r.orderDate;st.expected=addDays(r.orderDate,1)}st.gotDel=false;if(r.deliveryDate&&/^\d{4}-\d{2}-\d{2}$/.test(r.deliveryDate)){st.expected=r.deliveryDate;st.gotDel=true}if(r.deliveryWindow)st.window=String(r.deliveryWindow).slice(0,40);if(r.orderNo)st.orderNo=String(r.orderNo).replace(/[^0-9-]/g,'').slice(0,30);if(num(r.total)>0)st.total=num(r.total);
       st.lines=r.lines.filter(l=>l&&l.name).map(l=>{const it=itemById(l.itemId);return {name:String(l.name).slice(0,120),qty:num(l.qty)??1,price:num(l.price),itemId:it?l.itemId:'',...(it?{buyId:buyOpts(it).some(o=>o.id===l.buyId)?l.buyId:(buyOpts(it)[0]||unitOpt(it)).id}:{})}});
       st.msg=`Found ${st.lines.length} items for ${esc(locName(st.loc))}${st.gotDel?` · delivery ${fmtD(st.expected)}${st.window?' '+st.window:''}`:' · no delivery date found, please set it'}. Please check before saving.`}else st.msg=L('Could not read items. Enter them below.','没能识别出商品，请手动填写。')}
   catch(e){console.warn(e);st.msg=e?.code==='not_granted'?L('Allow Claude access when asked to use automatic reading.','需要允许 Claude 访问才能自动识别。'):e?.code==='rate_limited'?L('Too many requests. Try again in a minute.','请求太频繁，请稍后再试。'):L('Could not read this screenshot. Enter items below.','无法识别这张截图，请手动填写。')}
   st.busy=false;drawSheet()}
 async function orderSave(){grabOrderLines();const st=SH_ORDER;const lines=st.lines.filter(l=>l.name&&l.name.trim());if(!lines.length){toast(L('Add at least one item','至少添加一项'));return}
   const shotIds=[];for(const x of st.shots){const id=await uploadImg(x.blob);if(!id)return;shotIds.push(id)}const shotId=shotIds[0]||null;
-  const id=uidGen();let body={...(st.fee!=null?{fee:st.fee}:{}),...(st.feePct!=null?{feePct:st.feePct}:{}),loc:st.loc||curLoc(),store:st.store,date:st.date,expected:st.expected,window:(st.window||'').trim(),lines,screenshot:shotId,screenshots:shotIds,status:'ordered',createdAt:new Date().toISOString(),createdBy:actor()||'manager'};
+  const id=uidGen();let body={...(st.fee!=null?{fee:st.fee}:{}),...(st.feePct!=null?{feePct:st.feePct}:{}),loc:st.loc||curLoc(),store:st.store,date:st.date,expected:st.expected,window:(st.window||'').trim(),lines,screenshot:shotId,screenshots:shotIds,status:'ordered',createdAt:new Date().toISOString(),createdBy:actor()||'manager',...(st.orderNo?{orderNo:st.orderNo}:{}),...(st.total?{total:st.total}:{})};
   if(st.mode==='instock'){if(!lines.some(l=>l.itemId)){toast('Pick the inventory item on at least one line');return}if(lines.some(l=>num(l.qty)==null)){toast('Enter a quantity on every line');return}
     const rd=st.recv||today();body={...body,kind:'stockin',date:st.date&&st.date<=rd?st.date:rd,expected:null,window:'',status:'received',receivedDate:rd,receivedAt:new Date().toISOString(),receivedBy:actor()||'manager',lines:lines.map(l=>({...l,recvQty:num(l.qty)})),diffs:0,issueSeen:true}}
-  if(await W(A.db.doc('orders/'+id).set(body))){toast(st.mode==='instock'?'Added to stock':L('Order saved','订单已保存'));closeSheet()}}
+  const em=st.mode==='instock'?null:emailTwin({id,...body});if(em)body=mergeEmail(body,em);
+  if(await W(A.db.doc('orders/'+id).set(body))){if(em)await W(A.db.doc('orders/'+em.id).update({status:'merged',mergedInto:id}));
+    toast(st.mode==='instock'?'Added to stock':em?L(`Saved and linked with ${em.store} #${em.track?.no||''} from the email`,`已保存，并和邮件里的 ${em.store} #${em.track?.no||''} 合并`):L('Order saved','订单已保存'));closeSheet()}}
+/* a screenshot order and the store's email are the same order: keep the screenshot one (items, prices, photos) and give it the email's tracking */
+const normNo=x=>String(x||'').replace(/[^0-9]/g,'');
+function emailTwin(o,pool){const lc=o.loc||'wh';const cand=(pool||Object.values(D.orders)).filter(e=>e.id!==o.id&&e.track&&e.src==='email'&&!(e.lines||[]).length&&e.status!=='merged'&&e.status!=='canceled'&&e.store===o.store&&(e.loc||'wh')===lc);
+  if(o.orderNo){const hit=cand.find(e=>normNo(e.track.no)===normNo(o.orderNo));if(hit)return hit;if(normNo(o.orderNo).length>=6&&cand.some(e=>e.track.no))return null}
+  const near=cand.filter(e=>!e.track.no||!o.orderNo).filter(e=>Math.abs(Date.parse(e.createdAt||e.date)-Date.parse(o.createdAt||o.date))<36*3600e3&&(!o.expected||!e.expected||Math.abs(Date.parse(e.expected)-Date.parse(o.expected))<=864e5));
+  if(near.length<=1)return near[0]||null;
+  const tot=num(o.total)||(o.lines||[]).reduce((a,l)=>a+(num(l.price)||0),0);
+  const sc=e=>(tot&&num(e.track.total)?Math.abs(num(e.track.total)-tot)/tot:0.5)+(e.track.items&&(o.lines||[]).length?Math.abs(e.track.items-(o.lines||[]).length)/e.track.items:0.5);
+  const s2=near.map(e=>({e,v:sc(e)})).sort((a,b)=>a.v-b.v);return s2[0].v+0.15<s2[1].v?s2[0].e:null}
+function mergeEmail(o,e){const out={...o,ref:e.ref,track:e.track,src:'screenshot+email',orderNo:o.orderNo||e.track?.no||null,expected:e.expected||o.expected,window:o.window||e.window||'',date:o.date||e.date};
+  if(o.status==='ordered'&&e.status==='canceled')out.status='canceled';return out}
+// existing pairs (made before linking existed): link them once, quietly
+async function relinkEmailOrders(){if(!isMgr||UI.relinked||!D.ready)return;UI.relinked=true;const all=Object.values(D.orders);
+  for(const o of all){if(o.track||o.src==='email'||o.kind==='stockin'||!(o.lines||[]).length||o.status==='merged'||Date.now()-Date.parse(o.createdAt||o.date)>4*864e5)continue;
+    const e=emailTwin(o,all);if(!e)continue;const m=mergeEmail(o,e);delete m.id;
+    if(await W(A.db.doc('orders/'+o.id).set(m)))await W(A.db.doc('orders/'+e.id).update({status:'merged',mergedInto:o.id}));e.status='merged'}}
 /* live delivery tracking from the BJ's / Walmart emails (filled in by the server, see cover function) */
 const TRK=[['ordered','Ordered','已下单'],['picked_up','Picked up','已取货'],['out_for_delivery','On the way','配送中'],['delivered','Delivered','已送达'],['received','Received','已收货']];
 function trkStep(o){const t=o.track||{};if(o.status!=='ordered'&&o.status!=='canceled')return 4;const i=TRK.findIndex(x=>x[0]===t.stage);return i<0?0:i}
@@ -2537,7 +2555,7 @@ Object.assign(ACT,{
  pushLater:()=>{ls.set('pushNo',today());render()},
 });
 function orderOpen(id){let n=0;const t=setInterval(()=>{const o=D.orders[id];if(o){clearInterval(t);if(o.loc&&o.loc!==curLoc()&&LOCS().some(l=>l.id===o.loc)){UI.loc=o.loc;render()}o.status==='ordered'&&trkStep(o)===3?receiveSheet(id):orderViewSheet(id)}else if(++n>40)clearInterval(t)},250)}
-function coverBoot(){const c=CV();if(c?.pushState)c.pushState().then(s=>{UI.push=s;rerender()}).catch(()=>{UI.push='unsupported'});
+function coverBoot(){setTimeout(()=>relinkEmailOrders().catch(e=>console.warn(e)),6000);const c=CV();if(c?.pushState)c.pushState().then(s=>{UI.push=s;rerender()}).catch(()=>{UI.push='unsupported'});
   navigator.serviceWorker?.addEventListener?.('message',e=>{try{const u=new URL(e.data?.open,location.href).searchParams;const id=u.get('cover');if(id)coverSheet(id);const oid=u.get('order');if(oid)orderOpen(oid)}catch{}});
   let oid=null;try{oid=new URLSearchParams(location.search).get('order')}catch{}if(oid){try{history.replaceState(null,'',location.pathname)}catch{}orderOpen(oid)}
   let id=null;try{id=new URLSearchParams(location.search).get('cover')}catch{}
