@@ -711,8 +711,11 @@ async function handle(req: Request): Promise<Response> {
       if (mem.role === "staff") return json({ error: "forbidden" }, 403);
       const oid = String(body.order || ""); const orders = (await docsOf(org, "orders")).map((r) => ({ id: r.doc_id, data: r.data }));
       const o = orders.find((x) => x.id === oid); if (!o) return json({ error: "not_found" }, 404);
-      const ask = await cancelInsight(org, await deliveryCtx(org), oid, o.data, orders);
+      const trial = Array.isArray(body.items) && body.items.length; // "what if these were canceled" — look only, don't save
+      const od = trial ? { ...o.data, track: { ...(o.data.track || {}), canceled: body.items.slice(0, 5).map((x: unknown) => String(x).slice(0, 80)) } } : o.data;
+      const ask = await cancelInsight(org, await deliveryCtx(org), oid, od, orders);
       if (!ask) return json({ error: "failed" }, 500);
+      if (trial) return json({ ok: true, trial: true, ask });
       await merge(org, `orders/${oid}`, { track: { ask } }); return json({ ok: true, ask });
     }
     if (body.action === "test") {
