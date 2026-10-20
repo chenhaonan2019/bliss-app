@@ -534,28 +534,43 @@ async function cancelInsight(org: string, ctx: Json, id: string, o: Json, orders
   const [items, counts] = await Promise.all([docOf(org, "config/items"), q(`docs?select=data&org_id=eq.${org}&coll=eq.counts&order=updated_at.desc&limit=6`) as Promise<Json[]>]);
   const cnt = counts.map((c) => c.data).filter((c) => (c.loc || "wh") === o.loc)[0];
   const stock = (items?.list || []).map((it: Json) => ({ name: it.name, unit: it.unit, min: it.min, par: it.par, lastCount: cnt?.counts?.[it.id] ?? null }));
+  const zip = o.loc === "nh" ? "98 Olive St, New Haven, CT 06511" : o.loc === "wh" ? "981 Farmington Ave, West Hartford, CT 06107" : ctx.locName(o.loc) + ", Connecticut";
   const now = etParts(); const hrs = ctx.settings.hours?.[o.loc] || {}; const prep = ctx.settings.prepMin ?? 90;
   const nextDays = [0, 1, 2].map((i) => { const d = addDays(now.ymd, i); const h = hrs[dow(d)]; return h ? { date: d, weekday: DAYS[dow(d)], opens: h[0], closes: h[1], staffArrive: `${String(Math.floor((toMin(h[0]) - prep) / 60)).padStart(2, "0")}:${String((toMin(h[0]) - prep) % 60).padStart(2, "0")}` } : { date: d, closed: true }; });
   const prompt = `You help the owner of a bubble tea / matcha cafe (${ctx.locName(o.loc)}) run supplies. ${o.store} just canceled items from an order because they were out of stock.
 Now (New York): ${now.ymd} ${now.hm}. Think like a sharp store manager: has the same item been canceled in other recent orders? Did another order bring it? How much was left at the last count? Will the store run out before it can be restocked (staff arrive for prep at staffArrive, store opens at opens)? Is ordering the same item from ${o.store} again likely to fail?
-Reply with JSON only:
+CHECK ALTERNATIVES with web search, near the store (${zip}), in this order:
+ 1) Walmart and BJ's first (the owner already has delivery accounts at both): the same item at Walmart (delivery or pickup), and at BJ's — the same item in another size/pack, or the same item for pickup at a nearby club. 
+ 2) ONLY if neither Walmart nor BJ's has it (or close enough), look further: Target, Stop & Shop, Costco, Whole Foods / Amazon, Instacart.
+For each place say whether it shows as in stock, the price, and how fast it could arrive (before staff arrive for prep if possible). Prefer the store's own product page. Never place an order. If a page doesn't say, use "unknown" rather than guessing. List Walmart/BJ's results first.
+Reply with JSON only (after any searching):
 {"urgent":true|false,
  "zh":{"title":"short push title in Chinese, under 30 chars","body":"2-4 short sentences in Chinese: what was canceled, the pattern (e.g. second time in a row, ordered 4 got 0), the impact on the next opening, and what you suggest. Plain, specific, no fluff."},
  "en":{"title":"same in English, under 45 chars","body":"same in English"},
- "options":[{"zh":"...","en":"..."}  (2-3 short choices for the owner, e.g. buy it elsewhere today, use a substitute, already handled; include quantities when it makes sense)]}
+ "alternatives":[{"store":"Walmart","product":"exact product name and size","price":"$x.xx" or null,"stock":"in stock"|"limited"|"out of stock"|"unknown","when":"e.g. delivery today 6–8pm / pickup 8am" or null,"url":"product page"}]  (best 2-4 places, best first),
+ "options":[{"zh":"...","en":"..."}  (2-3 short choices for the owner, based on what you found, e.g. "Order 3 from Walmart, $8.98 each, delivery tonight", use a substitute, already handled)]}
 Data:
 ${JSON.stringify({ order: { store: o.store, number: t.no, due: o.expected, window: t.wStart ? `${t.wStart}-${t.wEnd}` : null, eta: t.eta, stage: t.stage, items: t.items, canceled: t.canceled, arrivedItems: t.names || [] }, recentOrdersThisStore: recent.slice(0, 15), inventory: stock.slice(0, 80), nextDays })}`;
+  const call = (tools: boolean) => fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model: env("MODEL_DEFAULT") || "claude-sonnet-5-5", max_tokens: 2500, messages: [{ role: "user", content: prompt }],
+      ...(tools ? { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 6, user_location: { type: "approximate", city: o.loc === "nh" ? "New Haven" : "West Hartford", region: "Connecticut", country: "US", timezone: TZ } }] } : {}) }) });
   try {
-    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: env("MODEL_DEFAULT") || "claude-sonnet-5-5", max_tokens: 900, messages: [{ role: "user", content: prompt }] }) });
+    let r = await call(true); let searched = true;
+    if (!r.ok) { console.warn("insight+search", r.status, (await r.text()).slice(0, 300)); r = await call(false); searched = false; }
     if (!r.ok) { console.warn("insight", r.status, (await r.text()).slice(0, 200)); return null; }
-    const j = await r.json(); const txt = (j.content || []).map((c: Json) => c.text || "").join("");
+    const j = await r.json(); const blocks = (j.content || []).filter((c: Json) => c.type === "text").map((c: Json) => c.text || "");
+    const txt = blocks.filter((b: string) => b.includes("{")).pop() || blocks.join("");
     const a = JSON.parse(txt.slice(txt.indexOf("{"), txt.lastIndexOf("}") + 1));
+    const alts = (Array.isArray(a.alternatives) ? a.alternatives : []).slice(0, 4).map((x: Json) => ({ store: String(x.store || "").slice(0, 40), product: String(x.product || "").slice(0, 120), price: x.price ? String(x.price).slice(0, 20) : null,
+      stock: ["in stock", "limited", "out of stock"].includes(String(x.stock)) ? String(x.stock) : "unknown", when: x.when ? String(x.when).slice(0, 60) : null, url: /^https:\/\//.test(String(x.url || "")) ? String(x.url).slice(0, 400) : null })).filter((x: Json) => x.store);
     if (!a?.zh?.body || !a?.en?.body) return null;
     return { at: new Date().toISOString(), urgent: !!a.urgent, zh: { title: String(a.zh.title || "").slice(0, 60), body: String(a.zh.body).slice(0, 600) }, en: { title: String(a.en.title || "").slice(0, 80), body: String(a.en.body).slice(0, 800) },
-      options: (Array.isArray(a.options) ? a.options : []).slice(0, 3).map((x: Json) => ({ zh: String(x.zh || x.en || "").slice(0, 60), en: String(x.en || x.zh || "").slice(0, 80) })), items: t.canceled, answer: null };
+      options: (Array.isArray(a.options) ? a.options : []).slice(0, 3).map((x: Json) => ({ zh: String(x.zh || x.en || "").slice(0, 80), en: String(x.en || x.zh || "").slice(0, 100) })), alts, searched, items: t.canceled, answer: null };
   } catch (e) { console.warn("insight", e); return null; }
 }
+
+// keep working after the reply is sent (Supabase Edge Runtime); elsewhere just let it run
+const later = (p: Promise<unknown>) => { const er = (globalThis as any).EdgeRuntime; p.catch((e) => console.warn("later", e)); if (er?.waitUntil) er.waitUntil(p); };
 
 export async function onMail(org: string, msgs: Json[]) {
   const seenDoc = (await docOf(org, "owner/mail_seen")) || {}; const seen = new Set<string>(seenDoc.ids || []);
@@ -574,12 +589,15 @@ export async function onMail(org: string, msgs: Json[]) {
     // Don't alert for old emails (first run, or the script was off for a while)
     const recent = Date.now() - Date.parse(m.date || "") < 3 * 3600e3;
     if (r.event === "items_canceled" && recent) {
-      const ask = await cancelInsight(org, ctx, r.id, r.data, orders);
-      if (ask) {
-        r.data.track.ask = ask; await merge(org, `orders/${r.id}`, { track: { ask } });
-        if (ctx.push) { const url = orderUrl(r.id); await sendPush(ctx.owners, ask.zh.title, ask.zh.body, url); await sendPush(ctx.recipients(r.data.loc, "plan").filter((u: string) => !ctx.owners.includes(u)), ask.en.title, ask.en.body, url); }
-        continue;
-      }
+      // researching alternatives takes a minute: send the plain alert now, the full picture when it's ready
+      await alertOrder(org, ctx, r.id, r.data, "items_canceled");
+      const id = r.id, snap = JSON.parse(JSON.stringify(r.data)), all = orders.slice();
+      later((async () => {
+        const ask = await cancelInsight(org, ctx, id, snap, all); if (!ask) return;
+        await merge(org, `orders/${id}`, { track: { ask } });
+        if (ctx.push) { const url = orderUrl(id); await sendPush(ctx.owners, ask.zh.title, ask.zh.body, url); await sendPush(ctx.recipients(snap.loc, "plan").filter((u: string) => !ctx.owners.includes(u)), ask.en.title, ask.en.body, url); }
+      })());
+      continue;
     }
     if (r.event && recent && (r.data.status === "ordered" || r.event === "canceled")) await alertOrder(org, ctx, r.id, r.data, r.event!);
   }
@@ -679,6 +697,14 @@ async function handle(req: Request): Promise<Response> {
     if (body.action === "open") return json(await notifyOpen(org, String(body.cid)));
     if (body.action === "responded" || body.action === "assigned") return json(await notifyChange(org, String(body.cid)));
     if (body.action === "sched") return json(await notifySched(org, mem.role, body));
+    if (body.action === "alts") { // manager/owner: look for canceled items at other stores now
+      if (mem.role === "staff") return json({ error: "forbidden" }, 403);
+      const oid = String(body.order || ""); const orders = (await docsOf(org, "orders")).map((r) => ({ id: r.doc_id, data: r.data }));
+      const o = orders.find((x) => x.id === oid); if (!o) return json({ error: "not_found" }, 404);
+      const ask = await cancelInsight(org, await deliveryCtx(org), oid, o.data, orders);
+      if (!ask) return json({ error: "failed" }, 500);
+      await merge(org, `orders/${oid}`, { track: { ask } }); return json({ ok: true, ask });
+    }
     if (body.action === "test") {
       if (mem.role === "staff") return json({ error: "forbidden" }, 403);
       const to = String(body.to || ""), ch = body.channel;

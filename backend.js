@@ -189,6 +189,7 @@
       assign: (cid, emp, by_name) => crpc("cover_assign", { cid, emp, by_name }),
       cancel: (cid, by_name) => crpc("cover_cancel", { cid, by_name }),
       notify: (action, cid) => coverFn({ action, cid }),
+      alts: (order) => coverFn({ action: "alts", order }),
       test: (channel, to) => coverFn({ action: "test", channel, to }),
       notifySched: (event, loc, ws, note) => coverFn({ action: "sched", event, loc, ws, note }),
       // Phone notifications ("web push"). On iPhone this needs the app added to the Home Screen first.
