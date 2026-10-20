@@ -1619,7 +1619,49 @@ const PICK_ATTR=/^(data-.+|accept|capture|multiple)$/;
 document.addEventListener('click',e=>{const t=e.target;if(!(t instanceof HTMLInputElement)||t.type!=='file'||t===PICK)return;
   e.preventDefault();[...PICK.attributes].forEach(a=>{if(PICK_ATTR.test(a.name))PICK.removeAttribute(a.name)});
   [...t.attributes].forEach(a=>{if(PICK_ATTR.test(a.name))PICK.setAttribute(a.name,a.value)});
-  PICK.value='';PICKING=Date.now()+10*60e3;try{PICK.click()}catch(err){PICKING=0}},true);
+  PICK.value='';PICKING=Date.now()+10*60e3;
+  if(t.hasAttribute('capture')&&useInAppCam()){camOpen(t.getAttribute('capture')==='user'?'user':'environment');return}
+  try{PICK.click()}catch(err){PICKING=0}},true);
+/* In-app camera. On Android, Chrome hands the photo to the system camera app, and the phone often closes the web page
+   in the background to free memory; coming back reloads the app and the photo is lost. Taking the photo inside the page
+   avoids that. The photo is handed to the same upload code through the picker above. */
+const useInAppCam=()=>/Android/i.test(navigator.userAgent)&&!!navigator.mediaDevices?.getUserMedia&&typeof DataTransfer==='function'&&localStorage.getItem('bliss.nativecam')!=='1';
+let CAM=null;
+function camHand(file){try{const dt=new DataTransfer();dt.items.add(file);PICK.files=dt.files;PICKING=Date.now()+20e3;PICK.dispatchEvent(new Event('change',{bubbles:true}))}catch(e){console.warn(e);toast('Could not use this photo')}}
+function camClose(){if(!CAM)return;CAM.stream?.getTracks().forEach(t=>t.stop());CAM.el.remove();if(CAM.url)URL.revokeObjectURL(CAM.url);CAM=null}
+async function camStart(){const v=CAM.el.querySelector('video');CAM.stream?.getTracks().forEach(t=>t.stop());CAM.stream=null;camMsg('');
+  try{CAM.stream=await navigator.mediaDevices.getUserMedia({audio:false,video:{facingMode:{ideal:CAM.facing},width:{ideal:1920},height:{ideal:1440}}});
+    if(!CAM)return;v.srcObject=CAM.stream;v.style.transform=CAM.facing==='user'?'scaleX(-1)':'';await v.play().catch(()=>{})}
+  catch(e){console.warn(e);camMsg(/NotAllowed|Permission/i.test(e?.name||'')?'Camera access is off for this site. Allow the camera in Chrome (lock icon → Permissions), or use the buttons below.':'The camera could not start. Use the buttons below.')}}
+function camMsg(t){const m=CAM?.el.querySelector('.cam-msg');if(m){m.textContent=t;m.hidden=!t}}
+function camOpen(facing){camClose();const el=document.createElement('div');el.id='cam';el.setAttribute('role','dialog');el.setAttribute('aria-label','Camera');
+  el.style.cssText='position:fixed;inset:0;z-index:200;background:#000;display:flex;flex-direction:column;color:#fff';
+  el.innerHTML=`<div style="position:relative;flex:1;min-height:0;display:grid;place-items:center;overflow:hidden">
+     <video playsinline muted autoplay style="width:100%;height:100%;object-fit:contain;background:#000"></video>
+     <img alt="Photo preview" hidden style="position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000">
+     <div class="cam-msg" hidden style="position:absolute;left:16px;right:16px;top:40%;text-align:center;font-size:15px;line-height:1.4"></div></div>
+   <div class="cam-shoot" style="display:flex;align-items:center;justify-content:space-around;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px))">
+     <button type="button" data-cam="cancel" style="background:none;border:0;color:#fff;font-size:16px;padding:10px;min-width:72px">Cancel</button>
+     <button type="button" data-cam="snap" aria-label="Take photo" style="width:74px;height:74px;border-radius:50%;border:5px solid #fff;background:rgba(255,255,255,.25)"></button>
+     <button type="button" data-cam="flip" style="background:none;border:0;color:#fff;font-size:16px;padding:10px;min-width:72px">Flip</button></div>
+   <div class="cam-check" hidden style="display:flex;align-items:center;justify-content:space-around;padding:18px 16px calc(18px + env(safe-area-inset-bottom,0px))">
+     <button type="button" data-cam="retake" style="background:none;border:1px solid #fff;color:#fff;font-size:16px;padding:12px 22px;border-radius:12px">Retake</button>
+     <button type="button" data-cam="use" style="background:#fff;border:0;color:#111;font-weight:700;font-size:16px;padding:12px 26px;border-radius:12px">Use photo</button></div>
+   <div style="display:flex;gap:18px;justify-content:center;padding:0 16px 14px;font-size:13px">
+     <button type="button" data-cam="native" style="background:none;border:0;color:#bbb;text-decoration:underline;padding:6px">Use phone camera</button>
+     <button type="button" data-cam="gallery" style="background:none;border:0;color:#bbb;text-decoration:underline;padding:6px">Choose from gallery</button></div>`;
+  document.body.appendChild(el);CAM={el,facing,stream:null,blob:null,url:null};
+  el.addEventListener('click',async e=>{const b=e.target.closest('[data-cam]');if(!b||!CAM)return;const k=b.dataset.cam,v=el.querySelector('video'),img=el.querySelector('img');
+    if(k==='cancel'){PICKING=0;camClose()}
+    else if(k==='flip'){CAM.facing=CAM.facing==='user'?'environment':'user';camStart()}
+    else if(k==='snap'){if(!v.videoWidth){camMsg('The camera is not ready yet.');return}const sc=Math.min(1,1600/Math.max(v.videoWidth,v.videoHeight));const c=document.createElement('canvas');c.width=Math.round(v.videoWidth*sc);c.height=Math.round(v.videoHeight*sc);
+      c.getContext('2d').drawImage(v,0,0,c.width,c.height);CAM.blob=await new Promise(r=>c.toBlob(r,'image/jpeg',.85));if(!CAM.blob){camMsg('Could not take the photo.');return}
+      CAM.url=URL.createObjectURL(CAM.blob);img.src=CAM.url;img.hidden=false;el.querySelector('.cam-shoot').hidden=true;el.querySelector('.cam-check').hidden=false;v.pause()}
+    else if(k==='retake'){img.hidden=true;el.querySelector('.cam-shoot').hidden=false;el.querySelector('.cam-check').hidden=true;v.play().catch(()=>{})}
+    else if(k==='use'){const f=new File([CAM.blob],`photo-${Date.now()}.jpg`,{type:'image/jpeg'});camClose();camHand(f)}
+    else if(k==='native'||k==='gallery'){camClose();if(k==='gallery')PICK.removeAttribute('capture');PICKING=Date.now()+10*60e3;try{PICK.click()}catch(err){}}});
+  camStart()}
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&CAM){e.stopPropagation();PICKING=0;camClose()}},true);
 PICK.addEventListener('change',()=>{PICKING=Date.now()+20e3},true);
 window.addEventListener('focus',()=>{if(PICKING&&!PICK.files?.length)PICKING=Date.now()+5e3});
 document.addEventListener('change',async e=>{const t=e.target;
