@@ -1739,7 +1739,7 @@ const DEF_NEEDS=[{start:'11:00',end:'17:00',n:2},{start:'17:00',end:'22:30',n:2}
    so busy, unpredictable hours (weekends) get a bit more cover automatically. */
 /* store hours (from Google) → someone starts prep 1½ h before opening and stays 30 min after closing to clean */
 const HOURS_DEF={wh:{0:['11:00','21:00'],1:['11:30','21:00'],2:['11:30','21:00'],3:['11:30','21:00'],4:['11:30','21:00'],5:['11:00','22:00'],6:['11:00','22:00']},
-  nh:{0:['11:30','21:00'],1:['11:30','21:00'],2:['11:30','21:00'],3:['11:30','21:00'],4:['11:30','21:00'],5:['11:30','21:00'],6:['11:00','21:00']}};
+  nh:{0:['11:30','21:00'],1:['11:30','21:00'],2:['11:30','21:00'],3:['11:30','21:00'],4:['11:30','21:00'],5:['11:30','21:00'],6:['11:30','21:00']}};
 const prepMin=()=>D.settings.prepMin??90,cleanMin=()=>D.settings.cleanMin??30;
 function storeHrs(loc,dow){const all=D.settings.hours||{};const h=(all[loc]||HOURS_DEF[loc]||{})[dow];return Array.isArray(h)&&h[0]&&h[1]?h:null}
 function storeSpan(loc,dow){const h=storeHrs(loc,dow);if(!h)return null;const a=toMin(h[0])-prepMin();let b=toMin(h[1])+cleanMin();if(b<=a)b+=1440;return[a,b]}
