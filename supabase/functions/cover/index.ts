@@ -349,17 +349,18 @@ export const htmlToText = (h: string) => String(h || "")
   .replace(/[ \t ​-‍͏­]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
 
 // Google sign-in token from Apps Script (ScriptApp.getIdentityToken) → the verified email, or "".
-let JWKS: { at: number; keys: Json[] } | null = null;
+let JWKS: { at: number; keys: Json[] } | null = null; let WHY = "";
 export async function googleEmail(tok: string, fetchCerts = async () => (await (await fetch("https://www.googleapis.com/oauth2/v3/certs")).json()).keys) {
   try {
     const [h, p, s] = tok.split("."); const dec = (x: string) => JSON.parse(new TextDecoder().decode(unb64u(x)));
     const hd = dec(h), pl = dec(p);
-    if (!["accounts.google.com", "https://accounts.google.com"].includes(pl.iss) || !(pl.exp * 1000 > Date.now()) || pl.email_verified === false || !pl.email) return "";
+    if (!["accounts.google.com", "https://accounts.google.com"].includes(pl.iss) || !(pl.exp * 1000 > Date.now()) || pl.email_verified === false || !pl.email) { WHY = "claims"; return ""; }
     if (!JWKS || Date.now() - JWKS.at > 3600e3 || !JWKS.keys.some((k) => k.kid === hd.kid)) JWKS = { at: Date.now(), keys: await fetchCerts() };
-    const jwk = JWKS.keys.find((k) => k.kid === hd.kid); if (!jwk) return "";
+    const jwk = JWKS.keys.find((k) => k.kid === hd.kid); if (!jwk) { WHY = "no key " + JWKS.keys.length; return ""; }
     const key = await crypto.subtle.importKey("jwk", { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
-    return (await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, unb64u(s), te.encode(`${h}.${p}`))) ? String(pl.email).toLowerCase() : "";
-  } catch { return ""; }
+    const ok = await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, unb64u(s), te.encode(`${h}.${p}`)); if (!ok) WHY = "signature";
+    return ok ? String(pl.email).toLowerCase() : "";
+  } catch (e) { WHY = "error " + String((e as Error).message || e).slice(0, 120); return ""; }
 }
 
 // What one email says. Claude first; simple rules if Claude is unavailable.
@@ -605,7 +606,7 @@ async function handle(req: Request): Promise<Response> {
   // Store emails from the owner's Gmail (Apps Script, signed with the owner's Google token)
   if (body.action === "mail") {
     const email = await googleEmail(String(req.headers.get("x-google-token") || ""));
-    if (!email) return json({ error: "unauthorized" }, 401);
+    if (!email) return json({ error: "unauthorized", why: WHY || (req.headers.get("x-google-token") ? "?" : "no token header") }, 401);
     const own = (await q(`members?select=org_id&role=eq.owner&email=eq.${encodeURIComponent(email)}`)) as Json[];
     if (!own.length) return json({ error: "forbidden", email }, 403);
     try { const res: Json[] = []; for (const o of own) res.push(...await onMail(o.org_id, Array.isArray(body.msgs) ? body.msgs : [])); return json({ ok: true, res }); }
