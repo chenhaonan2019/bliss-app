@@ -1,5 +1,6 @@
-// BLISS Manager · "cover" Edge Function — finding someone to cover a shift.
+// BLISS Manager · "cover" Edge Function — phone alerts: finding someone to cover a shift, and live delivery tracking.
 //
+//   POST {action:"mail", msgs} + header x-google-token   Apps Script in the owner's Gmail (sync/gmail-deliveries.gs): BJ's / Walmart emails
 //   POST {action:"open", org_id, cid}        app: a cover request was created → work out who can cover, notify them + managers
 //   POST {action:"responded"|"assigned", org_id, cid}  app: someone offered / a manager picked someone → notify
 //   POST {action:"vapid"}                    app: public key for phone push notifications
@@ -324,6 +325,234 @@ async function notifySched(org: string, role: string, b: Json) {
   return { ok: true, to: users.length };
 }
 
+/* ───────────────────────── deliveries: BJ's / Walmart emails → live order tracking ─────────────────────────
+   A small Google Apps Script in the owner's Gmail (see sync/gmail-deliveries.gs) posts new store emails here
+   every minute, signed with the owner's Google sign-in token (no passwords stored anywhere).
+   Claude reads each email → order number, stage, time window / ETA, store address → we create or update the
+   app's order and send phone alerts (managers of that store, staff working there today, owners).            */
+const TZ = "America/New_York";
+export function etParts(d = new Date()) {
+  const p: Json = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone: TZ, year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(d).map((x) => [x.type, x.value]));
+  return { ymd: `${p.year}-${p.month}-${p.day}`, hm: `${p.hour}:${p.minute}` };
+}
+// New York wall-clock time → exact moment (ISO)
+export function etIso(day: string, hm: string) {
+  const guess = Date.parse(`${day}T${hm}:00Z`); const p = etParts(new Date(guess));
+  const off = Date.parse(`${p.ymd}T${p.hm}:00Z`) - guess; return new Date(guess - off).toISOString();
+}
+export const STAGES = ["ordered", "picked_up", "out_for_delivery", "delivered"];
+const rank = (s: string) => STAGES.indexOf(s);
+export const htmlToText = (h: string) => String(h || "")
+  .replace(/<(style|script)[^>]*>[\s\S]*?<\/\1>/gi, " ").replace(/<!--[\s\S]*?-->/g, " ")
+  .replace(/<br\s*\/?>|<\/(p|div|tr|td|th|h\d|li|table)>/gi, "\n").replace(/<[^>]+>/g, " ")
+  .replace(/&nbsp;|&#160;/g, " ").replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'").replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&#(\d+);/g, (_, n) => String.fromCharCode(+n))
+  .replace(/[ \t ​-‍͏­]+/g, " ").replace(/\n\s*\n+/g, "\n").trim();
+
+// Google sign-in token from Apps Script (ScriptApp.getIdentityToken) → the verified email, or "".
+let JWKS: { at: number; keys: Json[] } | null = null;
+export async function googleEmail(tok: string, fetchCerts = async () => (await (await fetch("https://www.googleapis.com/oauth2/v3/certs")).json()).keys) {
+  try {
+    const [h, p, s] = tok.split("."); const dec = (x: string) => JSON.parse(new TextDecoder().decode(unb64u(x)));
+    const hd = dec(h), pl = dec(p);
+    if (!["accounts.google.com", "https://accounts.google.com"].includes(pl.iss) || !(pl.exp * 1000 > Date.now()) || pl.email_verified === false || !pl.email) return "";
+    if (!JWKS || Date.now() - JWKS.at > 3600e3 || !JWKS.keys.some((k) => k.kid === hd.kid)) JWKS = { at: Date.now(), keys: await fetchCerts() };
+    const jwk = JWKS.keys.find((k) => k.kid === hd.kid); if (!jwk) return "";
+    const key = await crypto.subtle.importKey("jwk", { kty: jwk.kty, n: jwk.n, e: jwk.e, alg: "RS256", ext: true }, { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, false, ["verify"]);
+    return (await crypto.subtle.verify("RSASSA-PKCS1-v1_5", key, unb64u(s), te.encode(`${h}.${p}`))) ? String(pl.email).toLowerCase() : "";
+  } catch { return ""; }
+}
+
+// What one email says. Claude first; simple rules if Claude is unavailable.
+export function ruleParse(m: Json) {
+  const s = String(m.subject || ""), t = String(m.text || ""), all = s + "\n" + t;
+  const vendor = /bjs|bj's/i.test(m.from + s) ? "BJ's" : /walmart/i.test(m.from + s) ? "Walmart" : "Other";
+  const no = (all.match(/order\s*(?:number)?\s*:?\s*#?\s*(\d{4,}(?:-\d+)?)/i) || [])[1] || null;
+  // the subject line says the stage unambiguously (bodies mention later steps, e.g. "we'll tell you when it's out for delivery")
+  const stage = /has been delivered|^delivered\b/i.test(s) ? "delivered" : /should arrive by|out for delivery/i.test(s) ? "out_for_delivery"
+    : /is on the way\b(?! soon)/i.test(s) ? "picked_up" : /canceled/i.test(s) && /order\s*#/i.test(s) && !/item/i.test(s) ? "canceled" : /canceled/i.test(s) ? "items_canceled"
+    : /order confirmation|thanks for your (delivery )?order/i.test(s) ? "ordered" : /reminder for your upcoming order/i.test(s) ? "reminder"
+    : /on the way soon|passcode/i.test(s) ? "otp" : "other";
+  const eta = (s.match(/arrive by (\d{1,2}):(\d\d)\s*([ap])m/i) || []);
+  const etaHm = eta.length ? `${String((+eta[1] % 12) + (/p/i.test(eta[3]) ? 12 : 0)).padStart(2, "0")}:${eta[2]}` : null;
+  return { vendor, orderNo: no, stage, eta: etaHm, address: null, windowDate: null, windowStart: null, windowEnd: null, itemCount: null, items: [], canceledItems: [], total: null, driver: null, note: "" };
+}
+async function claudeParse(m: Json) {
+  const key = env("ANTHROPIC_API_KEY"); if (!key) return null;
+  const prompt = `This is a grocery delivery email sent to a cafe owner (sent ${m.date}, New York time zone). Read it and reply with JSON only:
+{"vendor":"BJ's"|"Walmart"|"Other","orderNo":string|null,"stage":"ordered"|"reminder"|"items_canceled"|"picked_up"|"out_for_delivery"|"delivered"|"canceled"|"otp"|"other",
+"windowDate":"YYYY-MM-DD"|null,"windowStart":"HH:MM"|null,"windowEnd":"HH:MM"|null,"eta":"HH:MM"|null,"driver":string|null,"address":string|null,
+"itemCount":number|null,"items":[up to 8 item names],"canceledItems":[names of canceled / out-of-stock items],"total":number|null,"signature":boolean,"editUntil":string|null,"note":"one short plain sentence for the store staff"}
+Rules: stage "ordered" = order confirmation; "picked_up" = driver picked it up / on the way with no time; "out_for_delivery" = has an arrival time; "canceled" only if the whole order is canceled; "otp" = passcode email.
+Times are 24h New York time. orderNo without "#". address = delivery address. Use null when the email doesn't say.
+
+Subject: ${m.subject}
+From: ${m.from}
+${String(m.text || "").slice(0, 7000)}`;
+  try {
+    const r = await fetch("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "x-api-key": key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+      body: JSON.stringify({ model: env("MODEL_QUICK") || "claude-haiku-5-5", max_tokens: 700, messages: [{ role: "user", content: prompt }] }) });
+    if (!r.ok) { console.warn("claude", r.status, (await r.text()).slice(0, 200)); return null; }
+    const j = await r.json(); const txt = (j.content || []).map((c: Json) => c.text || "").join("");
+    const o = JSON.parse(txt.slice(txt.indexOf("{"), txt.lastIndexOf("}") + 1)); return o && typeof o === "object" ? o : null;
+  } catch (e) { console.warn("claude", e); return null; }
+}
+export async function parseMail(m: Json, ai = claudeParse) {
+  const base = ruleParse(m); const c = await ai(m); if (!c) return { ...base, by: "rules" };
+  const out: Json = { ...base, ...Object.fromEntries(Object.entries(c).filter(([, v]) => v !== null && v !== undefined && v !== "")) };
+  if (base.stage !== "other" && base.stage !== out.stage && !["canceled", "items_canceled"].includes(out.stage) && ["delivered", "out_for_delivery", "picked_up"].includes(base.stage)) out.stage = base.stage; // subject lines are unambiguous
+  if (base.orderNo && !out.orderNo) out.orderNo = base.orderNo;
+  out.orderNo = out.orderNo ? String(out.orderNo).replace(/^#/, "").trim() : null; out.by = "claude"; return out;
+}
+
+const LOCKEY: Json = { wh: ["west hartford", "farmington ave", "06107", "06119", "06117", "06110"], nh: ["new haven", "olive st", "06511", "06510", "06513"] };
+export function locFromAddr(addr: string, locs: Json[]) {
+  const t = String(addr || "").toLowerCase(); if (!t) return null;
+  for (const l of locs) if ([...(LOCKEY[l.id] || []), String(l.name || "").toLowerCase()].filter(Boolean).some((k) => t.includes(k))) return l.id;
+  return null;
+}
+const fmtHm = (hm: string) => fmtT(hm);
+export function etaText(o: Json) {
+  const t = o.track || {};
+  if (t.eta) return `by ${fmtHm(t.eta)}`;
+  if (t.wStart) return `${fmtHm(t.wStart)}–${fmtHm(t.wEnd || t.wStart)}`;
+  return "";
+}
+
+// Apply one parsed email to the orders list. Returns {id, data, isNew, event} or null. Pure (no I/O) so it can be tested.
+export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json, locs: Json[], now = new Date()) {
+  if (["otp", "other"].includes(p.stage) || p.vendor === "Other") return null;
+  const store = p.vendor; const ref = p.orderNo ? `${store === "BJ's" ? "BJ" : "WM"}:${p.orderNo}` : null;
+  const at = m.date ? new Date(m.date).toISOString() : now.toISOString(); const day = etParts(new Date(at)).ymd;
+  let row = ref ? orders.find((o) => o.data.ref === ref) : undefined;
+  const open = (o: { data: Json }) => o.data.store === store && o.data.status === "ordered";
+  if (!row && !ref) row = orders.filter((o) => open(o) && o.data.ref).sort((a, b) => String(b.data.createdAt).localeCompare(String(a.data.createdAt)))[0]; // email without a number → newest tracked order
+  const loc = locFromAddr(p.address, locs);
+  const wDate = p.windowDate || (p.eta ? day : null);
+  if (!row && ref) { // an order someone typed in by hand for the same store and day → attach to it
+    row = orders.filter((o) => o.data.store === store && o.data.status !== "canceled" && o.data.kind !== "stockin" && !o.data.ref && (!loc || o.data.loc === loc) && (!wDate || !o.data.expected || Math.abs(Date.parse(o.data.expected) - Date.parse(wDate)) <= 864e5))
+      .sort((a, b) => String(b.data.createdAt).localeCompare(String(a.data.createdAt)))[0];
+  }
+  if (!row && ["reminder", "items_canceled"].includes(p.stage) && !ref) return null;
+  const isNew = !row;
+  const d: Json = row ? JSON.parse(JSON.stringify(row.data)) : { store, loc: loc || locs[0]?.id || "wh", date: day, expected: wDate || day, window: "", lines: [], status: "ordered", createdAt: at, createdBy: "email", src: "email", screenshots: [] };
+  if (ref) d.ref = ref; if (loc && (isNew || d.status === "ordered")) d.loc = loc;
+  const t: Json = d.track || { stage: "ordered", events: [] };
+  if ((t.events || []).some((e: Json) => e.mid === m.id)) return null; // already applied
+  const prev = t.stage || "ordered";
+  if (rank(p.stage) > rank(prev)) t.stage = p.stage;
+  if (p.stage === "canceled") { t.stage = "canceled"; if (d.status === "ordered") d.status = "canceled"; }
+  if (p.windowDate) { d.expected = p.windowDate; t.wDate = p.windowDate; }
+  if (p.windowStart) { t.wStart = p.windowStart; t.wEnd = p.windowEnd || null; }
+  if (p.eta) { t.eta = p.eta; t.etaAt = etIso(p.windowDate || day, p.eta); if (!p.windowDate) d.expected = day; }
+  if (p.stage === "picked_up") t.pickedAt = at;
+  if (p.stage === "out_for_delivery") t.outAt = t.outAt || at;
+  if (p.stage === "delivered") t.deliveredAt = at;
+  if (p.driver) t.driver = String(p.driver).slice(0, 40);
+  if (p.itemCount) t.items = +p.itemCount || t.items;
+  if ((p.items || []).length) t.names = (p.items as string[]).slice(0, 8).map((x) => String(x).slice(0, 60));
+  if (p.total != null && isFinite(+p.total)) t.total = +p.total;
+  if (p.signature) t.signature = true;
+  if (p.editUntil) t.editUntil = String(p.editUntil).slice(0, 40);
+  if ((p.canceledItems || []).length) t.canceled = [...new Set([...(t.canceled || []), ...(p.canceledItems as string[]).map((x) => String(x).slice(0, 60))])].slice(0, 20);
+  if (t.wStart && !d.window) d.window = `${fmtHm(t.wStart)}–${fmtHm(t.wEnd || t.wStart)}`;
+  if (p.orderNo) t.no = p.orderNo;
+  const ev = { at, stage: p.stage, mid: m.id, text: String(p.note || m.subject || "").slice(0, 160) };
+  t.events = [...(t.events || []), ev].sort((a: Json, b: Json) => String(a.at).localeCompare(String(b.at))).slice(-25);
+  t.at = now.toISOString(); d.track = t;
+  // first run: an order that was already delivered hours ago isn't waiting for anyone any more
+  if (isNew && p.stage === "delivered" && now.getTime() - Date.parse(at) > 3600e3) Object.assign(d, { status: "received", receivedAt: at, receivedDate: etParts(new Date(at)).ymd, receivedBy: "email", recvNote: "Delivered before tracking started (from the store email)", issueSeen: true });
+  const advanced = rank(t.stage) > rank(prev) || p.stage === "items_canceled" || p.stage === "canceled" || isNew;
+  return { id: row?.id || `em${Date.parse(at).toString(36)}${Math.random().toString(36).slice(2, 6)}`, data: d, isNew, event: advanced ? p.stage : null, prevStage: prev };
+}
+
+// Alert text for a stage change.
+export function deliveryAlert(o: Json, stage: string, where: string, multi: boolean) {
+  const t = o.track || {}; const st = o.store; const at = multi ? ` · ${where}` : ""; const n = t.items ? ` · ${t.items} items` : "";
+  if (stage === "ordered") return { title: `🧾 ${st} order placed${at}`, body: `Arrives ${o.expected ? fmtDay(o.expected).replace(/^\w+ /, (w: string) => w.slice(0, 3) + " ") : "soon"}${etaText(o) ? ", " + etaText(o) : ""}${n}.`, who: "plan" };
+  if (stage === "items_canceled") return { title: `⚠️ ${st} canceled ${t.canceled?.length || "some"} item${(t.canceled?.length || 2) === 1 ? "" : "s"}${at}`, body: `${(t.canceled || []).slice(0, 4).join(", ") || "Out of stock"}. You may need to buy ${t.canceled?.length === 1 ? "it" : "them"} somewhere else.`, who: "plan" };
+  if (stage === "canceled") return { title: `❌ ${st} order canceled${at}`, body: `Order #${t.no || ""} was canceled.`, who: "plan" };
+  if (stage === "picked_up") return { title: `🚗 ${st} driver picked up your order${at}`, body: `On the way now${t.eta ? `, arriving by ${fmtHm(t.eta)}` : " — usually 20–40 min"}${n}. Get ready to receive it.`, who: "all" };
+  if (stage === "out_for_delivery") return { title: `🚗 ${st} arriving by ${t.eta ? fmtHm(t.eta) : "soon"}${at}`, body: `${t.driver ? t.driver + " is on the way" : "Out for delivery"}${n}.${t.signature ? " Someone must sign for it." : ""} Get ready to receive it.`, who: "all" };
+  if (stage === "delivered") return { title: `✅ ${st} delivered${at}`, body: `It's at the door now${n}. Bring it in (cold items first) and tap Receive delivery in the app.`, who: "all" };
+  if (stage === "late1") return { title: `⏰ ${st} delivery still not received${at}`, body: `Delivered ${Math.round((Date.now() - Date.parse(t.deliveredAt)) / 6e4)} min ago. Please bring it in and count it in the app.`, who: "all" };
+  if (stage === "late2") return { title: `⏰ ${st} delivery not received after 2 hours${at}`, body: `Nobody has received it in the app yet. Please check it's not left outside.`, who: "plan" };
+  if (stage === "late_eta") return { title: `⌛ ${st} is running late${at}`, body: `It was due ${etaText(o)} and hasn't been delivered yet.`, who: "plan" };
+  return null;
+}
+
+async function deliveryCtx(org: string) {
+  const [settings, cfg, links, members, emps, shifts, punches] = await Promise.all([
+    docOf(org, "config/settings"), docOf(org, "mgr/cover"), docsOf(org, "links"),
+    q(`members?select=user_id,email,role&org_id=eq.${org}`) as Promise<Json[]>, docsOf(org, "employees"),
+    q(`docs?select=doc_id,data&org_id=eq.${org}&coll=eq.shifts&data->>date=eq.${etParts().ymd}`) as Promise<{ doc_id: string; data: Json }[]>,
+    q(`docs?select=doc_id,data&org_id=eq.${org}&coll=eq.punches&data->>date=eq.${etParts().ymd}`) as Promise<{ doc_id: string; data: Json }[]>,
+  ]);
+  const locs: Json[] = settings?.locations || [{ id: "wh", name: "West Hartford" }];
+  const byId: Json = Object.fromEntries(emps.map((e) => [e.doc_id, e.data]));
+  const userOfEmp: Json = {}; links.forEach((l) => { if (l.data?.empId) userOfEmp[l.data.empId] = l.doc_id; });
+  const empLoc = (id: string) => byId[id]?.loc || locs[0]?.id;
+  const dv = { mgr: true, staff: true, owner: "all", ...((cfg || {}).deliv || {}) };
+  const push = (cfg || {}).push !== false;
+  function recipients(loc: string, who: string) {
+    const nowHm = etParts().hm; const ids = new Set<string>();
+    if (dv.mgr) emps.filter((e) => e.data.active !== false && e.data.role === "Manager" && (empLoc(e.doc_id) === loc || (e.data.locs || []).includes(loc))).forEach((e) => userOfEmp[e.doc_id] && ids.add(userOfEmp[e.doc_id]));
+    if (dv.staff && who === "all") {
+      shifts.filter((s) => (s.data.loc || empLoc(s.data.empId)) === loc && toMin(s.data.end || "23:59") + (toMin(s.data.end) < toMin(s.data.start) ? 1440 : 0) > toMin(nowHm) && toMin(s.data.start) - 90 <= toMin(nowHm)).forEach((s) => userOfEmp[s.data.empId] && ids.add(userOfEmp[s.data.empId]));
+      punches.filter((p) => !p.data.out && (p.data.loc || empLoc(p.data.empId)) === loc).forEach((p) => userOfEmp[p.data.empId] && ids.add(userOfEmp[p.data.empId]));
+    }
+    if (dv.owner === "all" || (dv.owner === "key" && who === "plan")) members.filter((m) => m.role === "owner").forEach((m) => ids.add(m.user_id));
+    return [...ids];
+  }
+  return { locs, recipients, push, locName: (id: string) => locs.find((l) => l.id === id)?.name || id };
+}
+const orderUrl = (id: string) => `${(env("APP_URL") || "").replace(/\/$/, "")}/?order=${id}`;
+async function alertOrder(org: string, ctx: Json, id: string, o: Json, stage: string) {
+  const a = deliveryAlert(o, stage, ctx.locName(o.loc), ctx.locs.length > 1); if (!a || !ctx.push) return 0;
+  return await sendPush(ctx.recipients(o.loc, a.who), a.title, a.body, orderUrl(id));
+}
+
+export async function onMail(org: string, msgs: Json[]) {
+  const seenDoc = (await docOf(org, "owner/mail_seen")) || {}; const seen = new Set<string>(seenDoc.ids || []);
+  const fresh = msgs.filter((m) => m && m.id && !seen.has(String(m.id))).slice(0, 25);
+  const ctx = await deliveryCtx(org); const out: Json[] = [];
+  const orders = (await docsOf(org, "orders")).map((r) => ({ id: r.doc_id, data: r.data }));
+  fresh.sort((a, b) => String(a.date).localeCompare(String(b.date)));
+  for (const m of fresh) {
+    m.text = m.text || htmlToText(m.html || ""); const p = await parseMail(m);
+    const r = applyMail(orders, p, m, ctx.locs);
+    out.push({ id: m.id, subject: String(m.subject || "").slice(0, 80), stage: p.stage, no: p.orderNo, by: p.by, order: r?.id || null });
+    seen.add(String(m.id));
+    if (!r) continue;
+    if (r.isNew) { await q("docs", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ org_id: org, path: `orders/${r.id}`, coll: "orders", doc_id: r.id, data: r.data }) }); orders.push({ id: r.id, data: r.data }); }
+    else { await q(`docs?org_id=eq.${org}&path=eq.${encodeURIComponent("orders/" + r.id)}`, { method: "PATCH", body: JSON.stringify({ data: r.data, updated_at: new Date().toISOString() }) }); const i = orders.findIndex((o) => o.id === r.id); orders[i] = { id: r.id, data: r.data }; }
+    // Don't alert for old emails (first run, or the script was off for a while)
+    const recent = Date.now() - Date.parse(m.date || "") < 3 * 3600e3;
+    if (r.event && recent && (r.data.status === "ordered" || r.event === "canceled")) await alertOrder(org, ctx, r.id, r.data, r.event!);
+  }
+  const ids = [...seen].slice(-600);
+  await q("docs", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ org_id: org, path: "owner/mail_seen", coll: "owner", doc_id: "mail_seen", data: { ids, at: new Date().toISOString(), last: [...out, ...(seenDoc.last || [])].slice(0, 40) } }) });
+  out.push(...await deliveryReminders(org, ctx, orders));
+  return out;
+}
+
+// Delivered but nobody tapped "Receive" → remind (30 min, then 2 h). Past the ETA and not delivered → tell managers once.
+export function remindersDue(o: Json, now = Date.now()) {
+  const t = o.track; if (!t || o.status !== "ordered") return null;
+  const r = t.rem || {};
+  if (t.deliveredAt) { const m = (now - Date.parse(t.deliveredAt)) / 6e4; if (m > 600) return null; if (m >= 120 && !r.late2) return "late2"; if (m >= 30 && !r.late1) return "late1"; return null; }
+  if (t.etaAt && !r.late_eta && rank(t.stage) < 3) { const m = (now - Date.parse(t.etaAt)) / 6e4; if (m >= 30 && m < 240) return "late_eta"; }
+  return null;
+}
+async function deliveryReminders(org: string, ctx: Json, orders: { id: string; data: Json }[]) {
+  const out: Json[] = [];
+  for (const o of orders) {
+    const k = remindersDue(o.data); if (!k) continue;
+    const rem = { ...(o.data.track.rem || {}), [k]: new Date().toISOString() }; o.data.track.rem = rem;
+    await merge(org, `orders/${o.id}`, { track: { rem } }); await alertOrder(org, ctx, o.id, o.data, k); out.push({ order: o.id, reminder: k });
+  }
+  return out;
+}
+
 /* ───────────────────────── HTTP ───────────────────────── */
 const CORS = { "Access-Control-Allow-Origin": "*", "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret", "Access-Control-Allow-Methods": "POST, GET, OPTIONS" };
 const json = (b: unknown, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { ...CORS, "Content-Type": "application/json" } });
@@ -372,6 +601,16 @@ async function handle(req: Request): Promise<Response> {
     return json(await tick());
   }
   if (body.action === "vapid") return json({ publicKey: (await vapidKeys()).publicKey });
+
+  // Store emails from the owner's Gmail (Apps Script, signed with the owner's Google token)
+  if (body.action === "mail") {
+    const email = await googleEmail(String(req.headers.get("x-google-token") || ""));
+    if (!email) return json({ error: "unauthorized" }, 401);
+    const own = (await q(`members?select=org_id&role=eq.owner&email=eq.${encodeURIComponent(email)}`)) as Json[];
+    if (!own.length) return json({ error: "forbidden", email }, 403);
+    try { const res: Json[] = []; for (const o of own) res.push(...await onMail(o.org_id, Array.isArray(body.msgs) ? body.msgs : [])); return json({ ok: true, res }); }
+    catch (e) { console.warn(e); return json({ error: "failed", message: String((e as Error).message || e) }, 500); }
+  }
 
   // Everything else: a signed-in member of that business.
   const auth = req.headers.get("Authorization") || "";
