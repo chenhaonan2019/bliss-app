@@ -1267,7 +1267,8 @@ async function orderSave(){grabOrderLines();const st=SH_ORDER;const lines=st.lin
 const normNo=x=>String(x||'').replace(/[^0-9]/g,'');
 function emailTwin(o,pool){const lc=o.loc||'wh';const cand=(pool||Object.values(D.orders)).filter(e=>e.id!==o.id&&e.track&&e.src==='email'&&!(e.lines||[]).length&&e.status!=='merged'&&e.status!=='canceled'&&e.store===o.store&&(e.loc||'wh')===lc);
   if(o.orderNo){const hit=cand.find(e=>normNo(e.track.no)===normNo(o.orderNo));if(hit)return hit;if(normNo(o.orderNo).length>=6&&cand.some(e=>e.track.no))return null}
-  const near=cand.filter(e=>!e.track.no||!o.orderNo).filter(e=>Math.abs(Date.parse(e.createdAt||e.date)-Date.parse(o.createdAt||o.date))<36*3600e3&&(!o.expected||!e.expected||Math.abs(Date.parse(e.expected)-Date.parse(o.expected))<=864e5));
+  const n=(o.lines||[]).length;const close=e=>!e.track.items||!n||Math.abs(e.track.items-n)<=Math.max(2,0.4*e.track.items);
+  const near=cand.filter(e=>!e.track.no||!o.orderNo).filter(e=>Math.abs(Date.parse(e.createdAt||e.date)-Date.parse(o.createdAt||o.date))<36*3600e3&&(o.expected&&e.expected&&o.expected===e.expected?true:(!o.expected||!e.expected||Math.abs(Date.parse(e.expected)-Date.parse(o.expected))<=864e5)&&close(e)));
   if(near.length<=1)return near[0]||null;
   const tot=num(o.total)||(o.lines||[]).reduce((a,l)=>a+(num(l.price)||0),0);
   const sc=e=>(tot&&num(e.track.total)?Math.abs(num(e.track.total)-tot)/tot:0.5)+(e.track.items&&(o.lines||[]).length?Math.abs(e.track.items-(o.lines||[]).length)/e.track.items:0.5);

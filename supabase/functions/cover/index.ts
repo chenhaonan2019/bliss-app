@@ -446,7 +446,8 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
   if (!row && ref) { // an order someone typed in by hand for the same store and day → attach to it
     const recvRecent = (o: { data: Json }) => ["received", "issue"].includes(o.data.status) && o.data.store === store && Math.abs(Date.parse(o.data.receivedAt || "") - Date.parse(at)) < 24 * 3600e3;
     const cands = orders.filter((o) => (open(o) || recvRecent(o)) && o.data.kind !== "stockin" && !o.data.ref && !o.data.orderNo && o.data.status !== "merged" && (!loc || o.data.loc === loc)
-      && (o.data.src === "draft" ? Math.abs(Date.parse(o.data.createdAt || "") - Date.parse(at)) < 12 * 3600e3 : (!!wDate && (o.data.expected === wDate || Math.abs(Date.parse(o.data.expected || "") - Date.parse(wDate)) <= 864e5 && Math.abs(Date.parse(o.data.createdAt || "") - Date.parse(at)) < 36 * 3600e3))));
+      && (o.data.src === "draft" ? Math.abs(Date.parse(o.data.createdAt || "") - Date.parse(at)) < 12 * 3600e3 : (!!wDate && (o.data.expected === wDate || Math.abs(Date.parse(o.data.expected || "") - Date.parse(wDate)) <= 864e5 && Math.abs(Date.parse(o.data.createdAt || "") - Date.parse(at)) < 36 * 3600e3
+        && (!p.itemCount || !(o.data.lines || []).length || Math.abs(p.itemCount - o.data.lines.length) <= Math.max(2, 0.4 * p.itemCount))))));
     // several on the same day (e.g. two Walmart orders): pick the one whose total / item count is closest
     const tot = (o: Json) => +o.total || (o.lines || []).reduce((a: number, l: Json) => a + (+l.price || 0), 0);
     const sc = (o: { data: Json }) => (p.total && tot(o.data) ? Math.abs(tot(o.data) - p.total) / p.total : 0.5) + (p.itemCount && (o.data.lines || []).length ? Math.abs(p.itemCount - o.data.lines.length) / p.itemCount : 0.5) + (o.data.expected === wDate ? 0 : 0.3);
