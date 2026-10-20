@@ -1666,7 +1666,7 @@ const FC_BUF=[[0,'Lean','Staff to the average'],[0.5,'Normal','Small cushion for
 const DEF_GEO={wh:{lat:41.7621,lon:-72.742,name:'West Hartford, CT'},nh:{lat:41.3046,lon:-72.9157,name:'New Haven, CT'}};
 const fcCfg=()=>({...FC_DEF,...(D.schedCfg?.forecast||{})});
 const fcGeo=loc=>fcCfg().geo?.[loc]||DEF_GEO[loc]||null;
-const hourlyOf=loc=>(D.hourly||{})[loc]||{};
+const hourlyOf=loc=>{const H=(D.hourly||{})[loc]||{};if(D.hourly?.[loc])LOC_OF_H.set(H,loc);return H};
 const dayTot=v=>Object.values(v||{}).reduce((a,x)=>a+(+x?.[0]||0),0);
 // hour values are [net sales, orders, tips, tax, account receivable]; older data may only have the first two
 const daySum=(v,i)=>Object.values(v||{}).reduce((a,x)=>a+(+x?.[i]||0),0);
@@ -1692,18 +1692,18 @@ function wxFor(loc){const g=fcGeo(loc);if(!g)return Promise.resolve({});const ke
 const wxWet=w=>w&&w.snow<0.5&&w.rain>=0.1?1:0,wxSnow=w=>w&&w.snow>=0.5?1:0;
 const wxLabel=w=>!w?'':`${Math.round(w.tmax)}°F${wxSnow(w)?' · snow':wxWet(w)?' · rain':''}`;
 /* baseline: same weekday in earlier weeks (before today, store open that day) */
-const SETTLE=new WeakMap();
+const SETTLE=new WeakMap(),LOC_OF_H=new WeakMap();
 /* a new store's first 6 weeks (opening buzz) are not used as normal sales */
 /* opening day = the store's setting, else the first day with a real day of sales ($300+; test orders before opening are smaller) */
 function openedOn(loc){const H=hourlyOf(loc);const set=fcCfg().opened?.[loc];if(set&&/^\d{4}-\d\d-\d\d$/.test(set))return set;if(SETTLE.has(H))return SETTLE.get(H);const f=Object.keys(H).sort().find(d=>dayTot(H[d])>=300)||null;SETTLE.set(H,f);return f}
 function settledFrom(H){const loc=Object.keys(D.hourly||{}).find(l=>D.hourly[l]===H);const o=loc?openedOn(loc):null;return o?addDays(o,42):'9999'}
-function fcSamples(H,date,h,weeks){const xs=[],td=today(),st=settledFrom(H);for(let k=1;k<=weeks+8&&xs.length<weeks;k++){const d=addDays(date,-7*k);if(d>=td||d<st)continue;const v=H[d];if(!v||dayTot(v)<30)continue;xs.push({w:Math.pow(.85,xs.length),v:h==null?dayTot(v):(+v[h]?.[0]||0),d})}return xs}
+function fcSamples(H,date,h,weeks){const xs=[],td=today(),st=settledFrom(H);for(let k=1;k<=weeks+8&&xs.length<weeks;k++){const d=addDays(date,-7*k);if(d>=td||d<st)continue;const v=H[d];if(!v||dayTot(v)<30)continue;if(LOC_OF_H.get(H)&&isSpecialDay(LOC_OF_H.get(H),d))continue;xs.push({w:Math.pow(.85,xs.length),v:h==null?dayTot(v):(+v[h]?.[0]||0),d})}return xs}
 function wstat(xs){let a=xs.slice();if(a.length>=5){a.sort((p,q)=>p.v-q.v);a=a.slice(1,-1)}const sw=a.reduce((s,x)=>s+x.w,0);if(!sw)return null;const m=a.reduce((s,x)=>s+x.w*x.v,0)/sw;return{m,sd:Math.sqrt(a.reduce((s,x)=>s+x.w*(x.v-m)**2,0)/sw),n:xs.length}}
 /* weather effect learned per store: log(actual/baseline) ≈ b0·(temp − baseline weeks' temp) + b1·rain + b2·snow, pulled toward sensible defaults when there is little data */
 let FCM={};
 function fcModel(){const c=fcCfg(),L=Object.keys(D.hourly||{}).filter(l=>wxNow(l));const sig=L.map(l=>l+Object.keys(hourlyOf(l)).length+'.'+Object.keys(wxNow(l)).length).join('|')+'|'+c.weeks;if(FCM.all?.sig===sig)return FCM.all;
   const prior=[0.01,Math.log(0.9),Math.log(0.7)],rows=[];
-  L.forEach(loc=>{const H=hourlyOf(loc),wx=wxNow(loc);Object.keys(H).sort().forEach(d=>{const w=wx[d];if(!w||d>=today())return;const tot=dayTot(H[d]);if(tot<30)return;const xs=fcSamples(H,d,null,c.weeks).filter(x=>x.d<d);const b=wstat(xs);if(!b||b.n<3||b.m<=0)return;
+  L.forEach(loc=>{const H=hourlyOf(loc),wx=wxNow(loc);Object.keys(H).sort().forEach(d=>{const w=wx[d];if(!w||d>=today()||isSpecialDay(loc,d))return;const tot=dayTot(H[d]);if(tot<30)return;const xs=fcSamples(H,d,null,c.weeks).filter(x=>x.d<d);const b=wstat(xs);if(!b||b.n<3||b.m<=0)return;
     const tw=xs.map(x=>wx[x.d]?.tmax).filter(t=>t!=null);if(tw.length<2)return;const x0=w.tmax-tw.reduce((a,t)=>a+t,0)/tw.length;
     rows.push({x:[x0,wxWet(w),wxSnow(w)],y:Math.max(-1,Math.min(0.7,Math.log(tot/b.m)))})})});
   const K=12,fl=[25,0.08,0.03],A_=[[0,0,0],[0,0,0],[0,0,0]],B_=[0,0,0];
@@ -1712,20 +1712,41 @@ function fcModel(){const c=fcCfg(),L=Object.keys(D.hourly||{}).filter(l=>wxNow(l
   const b=solve3(A_,B_)||prior.slice();b[0]=Math.max(0,Math.min(0.03,b[0]));b[1]=Math.max(Math.log(0.7),Math.min(Math.log(1.05),b[1]));b[2]=Math.max(Math.log(0.35),Math.min(0,b[2]));
   return FCM.all={sig,b,n:rows.length,wet:rows.filter(r=>r.x[1]).length,snow:rows.filter(r=>r.x[2]).length}}
 function solve3(A,b){const M=A.map((r,i)=>[...r,b[i]]);for(let i=0;i<3;i++){let p=i;for(let r=i+1;r<3;r++)if(Math.abs(M[r][i])>Math.abs(M[p][i]))p=r;if(Math.abs(M[p][i])<1e-12)return null;[M[i],M[p]]=[M[p],M[i]];for(let r=0;r<3;r++){if(r===i)continue;const f=M[r][i]/M[i][i];for(let k=i;k<4;k++)M[r][k]-=f*M[i][k]}}return M.map((r,i)=>r[3]/r[i])}
+/* holidays and events: built-in US holidays (+ Lunar New Year, Mid-Autumn), plus the owner's own events.
+   Owner settings (mgr/sched forecast): evt[<id>_<year>] = {pct, closed} for a holiday; events = [{id,name,from,to,loc,pct,closed}] */
+const HOL_LUNAR={2025:'2025-01-29',2026:'2026-02-17',2027:'2027-02-06',2028:'2028-01-26',2029:'2029-02-13',2030:'2030-02-03'};
+const HOL_MOON={2025:'2025-10-06',2026:'2026-09-25',2027:'2027-09-15',2028:'2028-10-03',2029:'2029-09-22',2030:'2030-09-12'};
+function nthDow(y,m,dow,n){if(n>0){const d=new Date(y,m,1);const off=(dow-d.getDay()+7)%7;return ymd(new Date(y,m,1+off+7*(n-1)))}const d=new Date(y,m+1,0);return ymd(new Date(y,m,d.getDate()-((d.getDay()-dow+7)%7)))}
+function easterOf(y){const a=y%19,b=Math.floor(y/100),c=y%100,d=Math.floor(b/4),e=b%4,f=Math.floor((b+8)/25),g=Math.floor((b-f+1)/3),h=(19*a+b-d-g+15)%30,i=Math.floor(c/4),k=c%4,l=(32+2*e+2*i-h-k)%7,m=Math.floor((a+11*h+22*l)/451),mo=Math.floor((h+l-7*m+114)/31),da=((h+l-7*m+114)%31)+1;return `${y}-${pad(mo)}-${pad(da)}`}
+const HOL_CACHE={};
+function holidaysOf(y){if(HOL_CACHE[y])return HOL_CACHE[y];const f=(m,d)=>`${y}-${pad(m)}-${pad(d)}`;const tg=nthDow(y,10,4,4);
+  const l=[['newyear',"New Year's Day",f(1,1),'🎉'],['mlk','Martin Luther King Jr. Day',nthDow(y,0,1,3),''],['lunar','Lunar New Year',HOL_LUNAR[y],'🧧'],['valentine',"Valentine's Day",f(2,14),'💝'],
+    ['presidents',"Presidents' Day",nthDow(y,1,1,3),''],['easter','Easter',easterOf(y),'🐣'],['mothers',"Mother's Day",nthDow(y,4,0,2),'💐'],['memorial','Memorial Day',nthDow(y,4,1,-1),'🇺🇸'],
+    ['fathers',"Father's Day",nthDow(y,5,0,3),''],['juneteenth','Juneteenth',f(6,19),''],['july4','Independence Day',f(7,4),'🎆'],['labor','Labor Day',nthDow(y,8,1,1),''],
+    ['midautumn','Mid-Autumn Festival',HOL_MOON[y],'🥮'],['columbus','Columbus / Indigenous Peoples Day',nthDow(y,9,1,2),''],['halloween','Halloween',f(10,31),'🎃'],['veterans','Veterans Day',f(11,11),''],
+    ['thanksgiving','Thanksgiving',tg,'🦃'],['blackfriday','Black Friday',addDays(tg,1),'🛍'],['xmaseve','Christmas Eve',f(12,24),'🎄'],['xmas','Christmas Day',f(12,25),'🎄'],['nye',"New Year's Eve",f(12,31),'🎉']];
+  return HOL_CACHE[y]=l.filter(x=>x[2]).map(([id,name,date,icon])=>({key:`${id}_${y}`,id,name,date,icon,builtin:true}))}
+// everything on one date for one store, with the owner's settings applied
+function eventsOn(loc,date){const c=fcCfg(),y=+date.slice(0,4),out=[];
+  holidaysOf(y).filter(h=>h.date===date).forEach(h=>{const st=c.evt?.[h.key]||{};out.push({...h,pct:+st.pct||0,closed:!!st.closed})});
+  (c.events||[]).forEach(e=>{if(e.from<=date&&date<=(e.to||e.from)&&(!e.loc||e.loc===loc))out.push({key:'ev_'+e.id,name:e.name,date,icon:'📌',pct:+e.pct||0,closed:!!e.closed,custom:true,ev:e})});return out}
+const evFactor=evs=>evs.reduce((a,e)=>a*(1+(+e.pct||0)/100),1);
+const isSpecialDay=(loc,date)=>eventsOn(loc,date).length>0;
 /* one day's forecast */
 function fcDay(loc,date){const H=hourlyOf(loc),c=fcCfg();const days=fcSamples(H,date,null,c.weeks);if(days.length<3)return{ok:false,why:settledFrom(H)>addDays(today(),-21)?'Store is new — forecast starts 3 weeks after its first 6 weeks.':`Only ${days.length} earlier ${DOW[parseYmd(date).getDay()]}s with sales — need 3.`};
+  const EV=eventsOn(loc,date);if(EV.some(e=>e.closed))return{ok:false,closed:true,events:EV,why:'Closed · '+EV.filter(e=>e.closed).map(e=>e.name).join(', ')};const ef=evFactor(EV);
   const wx=wxNow(loc)||{},w=wx[date];let f=1,tdiff=null;
   if(w){const tw=days.map(x=>wx[x.d]?.tmax).filter(t=>t!=null);if(tw.length){const M=fcModel();tdiff=w.tmax-tw.reduce((a,t)=>a+t,0)/tw.length;f=Math.exp(M.b[0]*tdiff+M.b[1]*wxWet(w)+M.b[2]*wxSnow(w));f=Math.max(0.5,Math.min(1.3,f))}}
   const hs=new Set();days.forEach(x=>Object.entries(H[x.d]).forEach(([h,v])=>{if(+v[0]>0)hs.add(+h)}));
   const hours={};let tot=0;[...hs].sort((a,b)=>a-b).forEach(h=>{const xs=fcSamples(H,date,h,c.weeks);if(xs.filter(x=>x.v>0).length/xs.length<0.3)return;const s=wstat(xs);if(!s)return;
-    const m=s.m*f,sd=s.sd*f,staffS=m+(+c.buffer||0)*sd;hours[h]={m,sd,staffS,need:Math.max(+c.minStaff||0,fcPeople(staffS,c))};tot+=m});
+    const m=s.m*f*ef,sd=s.sd*f*ef,staffS=m+(+c.buffer||0)*sd;hours[h]={m,sd,staffS,need:Math.max(+c.minStaff||0,fcPeople(staffS,c))};tot+=m});
   // tips, tax and total receivable: this store's recent ratio to net sales on the same sample days
   const ex=days.filter(x=>hasExtra(H[x.d]));let extra=null;
   if(ex.length>=2){const S=ex.reduce((a,x)=>{const m=dayMoney(H[x.d]);a.net+=m.net;a.tips+=m.tips;a.tax+=m.tax;a.recv+=m.recv;return a},{net:0,tips:0,tax:0,recv:0});
     if(S.net>0)extra={tips:tot*S.tips/S.net,tax:tot*S.tax/S.net,recv:tot*S.recv/S.net,tipRate:S.tips/S.net}}
-  return{ok:true,hours,tot,f,tdiff,wx:w||null,n:days.length,...(extra||{})}}
+  return{ok:true,hours,tot,f,tdiff,wx:w||null,n:days.length,events:EV,ef,...(extra||{})}}
 /* turn hourly people into shift "needs" layers inside the store's open window (from Shifts needed) */
-function fcNeeds(loc,date){const man=needsFor(loc,parseYmd(date).getDay());if(!man.length)return{needs:[],fc:null};const F=fcDay(loc,date);if(!F.ok)return{needs:man,fc:F};
+function fcNeeds(loc,date){const man=needsFor(loc,parseYmd(date).getDay());if(!man.length)return{needs:[],fc:null};const F=fcDay(loc,date);if(F.closed)return{needs:[],fc:F};if(!F.ok)return{needs:man,fc:F};
   const c=fcCfg(),lo=Math.min(...man.map(n=>toMin(n.start))),hi=Math.max(...man.map(n=>toMin(n.end)));const minS=Math.max(0,+c.minStaff||0);
   const cnt=[];for(let t=lo;t<hi;t+=30){const h=Math.floor(t/60)%24;cnt.push(F.hours[h]?Math.max(minS,F.hours[h].need):minS)}
   const top=Math.max(0,...cnt);const out=[];const hhmm=m=>`${pad(Math.floor(m/60)%24)}:${pad(m%60)}`;
@@ -1913,7 +1934,7 @@ function asNeedsCard(ws,n){if(!isOwner)return asNeedsCardMgr(ws,n);const loc=cur
     <div class="hint">Add hourly sales and the app will decide how many people each hour needs from your sales forecast and the weather. <button class="btn sm" data-act="fcSettings" style="margin-top:6px">${ic('spark')} Set up sales forecast</button></div></div>`;
   const days=[...Array(n)].map((_,i)=>{const d=addDays(ws,i);const r=use?fcNeeds(loc,d):{needs:needsFor(loc,parseYmd(d).getDay()),fc:null};const F=r.fc;const ov=needsOverOf(loc,d);if(ov)r.needs=ov;
     return `<div class="row tap" data-act="ndDay" data-d="${d}" role="button" tabindex="0" title="Change this day" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line);gap:8px;cursor:pointer"><div style="width:58px;flex:none"><b>${WD()[parseYmd(d).getDay()]}</b><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>
-      <div class="grow stack" style="gap:2px">${!r.needs.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(r.needs)}</span>`}${ov?` ${chip('info','Edited')}`:''}
+      <div class="grow stack" style="gap:2px">${!r.needs.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(r.needs)}</span>`}${ov?` ${chip('info','Edited')}`:''}${eventsOn(loc,d).length?`<div>${evChips(eventsOn(loc,d))}</div>`:''}
       ${F?.ok?`<span class="tiny muted">Forecast ${kmoney(F.tot)}${F.wx?` · ${esc(wxLabel(F.wx))}${Math.abs(F.f-1)>=0.02?` (${F.f>1?'+':'−'}${Math.round(Math.abs(F.f-1)*100)}% weather)`:''}`:''}</span>`:F&&!F.ok?`<span class="tiny muted">Using usual shifts: ${esc(F.why)}</span>`:''}</div><span class="muted" style="flex:none;align-self:center">${ic('chev')}</span></div>`}).join('');
   return `<div class="card stack"><div class="row wrapr"><h3 class="grow">Shifts needed</h3><label class="row small" style="gap:6px"><input type="checkbox" data-act="fcToggle" ${use?'checked':''}> From sales forecast</label></div>
     ${use?`<div class="tiny muted">People on shift at each time. Open and close times come from your usual shifts. Tap a day to change it. ${wxReady?'':'Loading weather…'}</div>${hsyncLine()}${days}
@@ -1925,7 +1946,7 @@ function asNeedsCardMgr(ws,n){const loc=curLoc(),use=fcUse(loc);
   if(!use)return `<div class="card stack"><div class="row"><h3 class="grow">Shifts needed</h3><button class="btn sm" data-act="needsEdit">Edit</button></div>${usual}</div>`;
   const days=[...Array(n)].map((_,i)=>{const d=addDays(ws,i);const x=fcNeedsOf(loc,d);const nds=needsAt(loc,d);const ov=needsOverOf(loc,d);
     return `<div class="row tap" data-act="ndDay" data-d="${d}" role="button" tabindex="0" title="Change this day" style="align-items:flex-start;padding-block:6px;border-top:1px solid var(--line);gap:8px;cursor:pointer"><div style="width:58px;flex:none"><b>${WD()[parseYmd(d).getDay()]}</b><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>
-      <div class="grow stack" style="gap:2px">${!nds.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(nds)}</span>`}<span class="tiny muted">${ov?'Changed by hand':x?`From the sales forecast${x.wx?' · '+esc(x.wx):''}`:'Usual shifts (no forecast for this day yet)'}</span></div>${ov?chip('info','Edited'):''}<span class="muted" style="flex:none;align-self:center">${ic('chev')}</span></div>`}).join('');
+      <div class="grow stack" style="gap:2px">${!nds.length?'<span class="small muted">Closed</span>':`<span class="small">${curveTxt(nds)}</span>`}${eventsOn(loc,d).length?`<div>${evChips(eventsOn(loc,d))}</div>`:''}<span class="tiny muted">${ov?'Changed by hand':x?`From the sales forecast${x.wx?' · '+esc(x.wx):''}`:'Usual shifts (no forecast for this day yet)'}</span></div>${ov?chip('info','Edited'):''}<span class="muted" style="flex:none;align-self:center">${ic('chev')}</span></div>`}).join('');
   return `<div class="card stack"><div class="row"><h3 class="grow">Shifts needed</h3><button class="btn sm" data-act="needsEdit">Usual shifts</button></div>
     <div class="tiny muted">People on shift at each time, set from the owner's sales forecast and the weather. Open and close times come from your usual shifts. Tap a day to change it.</div>${hsyncLine()}${days}</div>`}
 function fcDetailSheet(ws0,n0){const loc=curLoc(),ws=ws0||AS?.ws||nextWk(),n=n0||AS?.n||7,c=fcCfg();
@@ -1944,10 +1965,10 @@ function fcModelTxt(M){const p=x=>Math.round(Math.abs(Math.exp(x)-1)*100);return
 // average day over the last 4 weeks (store open), to say how this weekday compares
 function fcAvgDay(loc,date){const H=hourlyOf(loc),st=settledFrom(H);const xs=[];for(let i=1;i<=28;i++){const d=addDays(date,-i);if(d>=today()||d<st)continue;const t=dayTot(H[d]);if(t>=30)xs.push(t)}return xs.length>=7?xs.reduce((a,b)=>a+b,0)/xs.length:null}
 const pct=x=>`${x>=0?'+':'−'}${Math.round(Math.abs(x)*100)}%`;
-function fcTodayCardMgr(){const loc=curLoc(),d=bizDate(),x=fcNeedsOf(loc,d);if(!x)return '';const hrs=Object.entries(x.hours||{}).map(([h,n])=>[+h,n]).sort((a,b)=>a[0]-b[0]);const nowH=new Date().getHours();
+function fcTodayCardMgr(){const loc=curLoc(),d=bizDate(),x=fcNeedsOf(loc,d);if(!x){const st=eventsStrip(loc,21,false);return st?`<div class="card">${st}</div>`:''}const hrs=Object.entries(x.hours||{}).map(([h,n])=>[+h,n]).sort((a,b)=>a[0]-b[0]);const nowH=new Date().getHours();
   return `<div class="card stack" style="gap:8px"><div class="row"><div class="grow"><div class="eyebrow">Staffing today · ${esc(locName(loc))}</div><div class="small muted">${DOW[parseYmd(d).getDay()]}${x.wx?' · '+esc(x.wx):''}</div></div></div>
    <div class="row" style="gap:3px">${hrs.map(([h,n])=>`<div style="flex:1;min-width:0;text-align:center;padding:6px 0;border-radius:8px;background:${n>1?'color-mix(in srgb,var(--brand) 22%,transparent)':'var(--sunk)'};${h===nowH?'outline:2px solid var(--brand);':''}"><div style="font-weight:700">${n}</div><div class="tiny muted">${LANG_HOUR(h)}</div></div>`).join('')}</div>
-   <div class="tiny muted">People needed each hour, from the sales forecast and the weather.</div></div>`}
+   <div class="tiny muted">People needed each hour, from the sales forecast and the weather.</div>${eventsStrip(loc,21,false)}</div>`}
 function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())return fcTodayCardMgr();if(!fcHas(loc))return '';
   if(!wxNow(loc)&&!fcTodayCard.p)fcTodayCard.p=wxAll().then(()=>{fcTodayCard.p=null;rerender()});
   // the day shown: today, or a day picked in the strip below
@@ -1966,6 +1987,7 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())re
    ${F.recv!=null?`<div class="row" style="gap:6px;flex-wrap:wrap">${[['Tax',F.tax],['Tips',F.tips],['Total receivable',F.recv]].map(([n,v],i)=>`<div style="flex:1;min-width:92px;padding:8px 10px;border-radius:10px;background:${i===2?'color-mix(in srgb,var(--brand) 14%,transparent)':'var(--sunk)'}"><div class="tiny muted">${n}</div><div style="font-weight:${i===2?800:700};font-size:${i===2?18:16}px">${kmoney(v)}</div></div>`).join('')}</div>`:`<div class="tiny muted">Tax, tips and total receivable appear after the next full sync.</div>`}
    <div class="small" style="display:grid;grid-template-columns:auto 1fr;gap:2px 10px">
     ${avg?`<span class="muted">${wd}s</span><span>usually ${kmoney(base)} — ${pct(base/avg-1)} vs an average day (${kmoney(avg)})</span>`:`<span class="muted">${wd}s</span><span>usually ${kmoney(base)}</span>`}
+    ${F.events?.length?`<span class="muted">Holiday</span><span>${F.events.map(e=>`${e.icon||'📅'} ${esc(e.name)} — ${e.pct?effTxt(e):'no change set'}`).join('; ')}${F.events.some(e=>!e.pct)?` <a href="#" data-act="evSheet" style="color:var(--brand)">set</a>`:''}</span>`:''}
     <span class="muted">Weather</span><span>${F.wx?(Math.abs(F.f-1)<0.02?'no real effect today':`${pct(F.f-1)}${F.tdiff!=null?` (${Math.abs(Math.round(F.tdiff))}°F ${F.tdiff<0?'colder':'warmer'} than recent ${wd}s${wxSnow(F.wx)?', snow':wxWet(F.wx)?', rain':''})`:''}`):'loading…'}</span>
     ${Fy?.ok?`<span class="muted">Yesterday</span><span>forecast ${kmoney(Fy.tot)} · actual ${kmoney(ay)} (${pct(ay/Fy.tot-1)})${(()=>{const m=dayMoney(Hy);return m.full?`<br><span class="muted">tax ${kmoney(m.tax)} · tips ${kmoney(m.tips)} · receivable ${kmoney(m.recv)}</span>`:''})()}</span>`:''}
    </div>
@@ -1977,11 +1999,18 @@ function fcTodayCard(){const loc=curLoc();if(!isMgr)return '';if(!ownerView())re
    </div>
    <div class="tiny muted">Bars = forecast sales per hour; number on top = people needed. Updated each morning from Menusifu.</div>
    ${fcStaffRow()}
-   <div class="row" style="gap:4px;overflow-x:auto">${week.map(w=>`<div role="button" tabindex="0" data-act="fcPick" data-d="${w.d}" aria-pressed="${w.d===d}" style="flex:1;min-width:46px;text-align:center;padding:6px 2px;border-radius:10px;cursor:pointer;background:${w.d===d?'color-mix(in srgb,var(--brand) 16%,transparent)':'var(--sunk)'};${w.d===d?'outline:2px solid var(--brand);outline-offset:-2px;':''}"><div class="tiny ${w.d===d?'':'muted'}" style="${w.d===d?'font-weight:700':''}">${w.d===d0?'Today':WD()[parseYmd(w.d).getDay()]}</div><div class="small" style="font-weight:700">${!w.open?'—':w.F.ok?kmoney(w.F.tot):'?'}</div>${w.open&&w.F.ok&&w.F.tips!=null?`<div class="tiny muted">+${kmoney(w.F.tips)} tips</div>`:''}<div class="tiny muted">${w.F.ok&&w.F.wx?Math.round(w.F.wx.tmax)+'°'+(wxSnow(w.F.wx)?'❄':wxWet(w.F.wx)?'☂':''):''}</div></div>`).join('')}</div>
+   ${eventsStrip(loc,21,true)}
+   <div class="row" style="gap:4px;overflow-x:auto">${week.map(w=>`<div role="button" tabindex="0" data-act="fcPick" data-d="${w.d}" aria-pressed="${w.d===d}" style="flex:1;min-width:46px;text-align:center;padding:6px 2px;border-radius:10px;cursor:pointer;background:${w.d===d?'color-mix(in srgb,var(--brand) 16%,transparent)':'var(--sunk)'};${w.d===d?'outline:2px solid var(--brand);outline-offset:-2px;':''}"><div class="tiny ${w.d===d?'':'muted'}" style="${w.d===d?'font-weight:700':''}">${w.d===d0?'Today':WD()[parseYmd(w.d).getDay()]}</div><div class="small" style="font-weight:700">${w.F.closed?'Closed':!w.open?'—':w.F.ok?kmoney(w.F.tot):'?'}</div>${eventsOn(loc,w.d).length?`<div class="tiny" title="${esc(eventsOn(loc,w.d).map(e=>e.name).join(', '))}">${eventsOn(loc,w.d).map(e=>e.icon||'📅').join('')}</div>`:''}${w.open&&w.F.ok&&w.F.tips!=null?`<div class="tiny muted">+${kmoney(w.F.tips)} tips</div>`:''}<div class="tiny muted">${w.F.ok&&w.F.wx?Math.round(w.F.wx.tmax)+'°'+(wxSnow(w.F.wx)?'❄':wxWet(w.F.wx)?'☂':''):''}</div></div>`).join('')}</div>
    ${hsyncLine()}
   </div>`}
 ACT.fcWeek=()=>fcDetailSheet(addDays(bizDate(),0),8);
 ACT.tnEdit=d=>taskNoteSheet(d.type,d.date);
+ACT.evSheet=()=>{if(!isOwner){toast('Only the owner can change holidays and events');return}evSheet()};
+ACT.evDel=async d=>{const c=fcCfg();await evSave({events:(c.events||[]).filter(x=>x.id!==d.id)},'Event removed')};
+ACT.evAdd=async()=>{const name=($('#ev_name')?.value||'').trim(),from=$('#ev_from')?.value,to=$('#ev_to')?.value||from;if(!name||!from){toast('Enter a name and a date');return}
+  if(to<from){toast('The end date is before the start');return}const v=$('#ev_eff').value;const c=fcCfg();
+  const ev={id:uidGen(),name:name.slice(0,60),from,to,loc:$('#ev_loc').value||'',...(v==='closed'?{closed:true,pct:0}:{closed:false,pct:+v||0})};
+  const keep=(c.events||[]).filter(x=>(x.to||x.from)>=addDays(today(),-60));await evSave({events:[...keep,ev]},'Event added')};
 ACT.fcPick=d=>{UI.fcSel=d.d===bizDate()?null:d.d;render()};
 // owner: staffing rule + cushion right on the card
 function fcStaffRow(){const c=fcCfg();
@@ -2039,6 +2068,39 @@ function ofcTodayCard(L2){if(!L2.some(l=>fcHas(l.id)))return '';const t=weekStar
   return `<div class="card row tap" data-act="ownerSub" data-k="fc" tabindex="0" style="gap:12px;cursor:pointer">${ic('spark')}<div class="grow"><div class="t">This week · sales forecast</div>
    <div class="small muted">${kmoney(S.net)} net · ${kmoney(S.recv)} receivable · labor ${kmoney(S.lc)} (${lp==null?'—':Math.round(lp*100)+'%'})</div></div>${ic('chev')}</div>`}
 ACT.ofcPer=d=>{UI.ofc=d.k;render()};
+/* ---------- holidays & events: reminders and settings ---------- */
+function upcomingEvents(loc,days){const out=[];for(let i=0;i<days;i++){const d=addDays(bizDate(),i);eventsOn(loc,d).forEach(e=>out.push({...e,date:d,inDays:i}))}
+  const seen=new Set();return out.filter(e=>{const k=e.key;if(e.custom&&seen.has(k))return false;seen.add(k);return true})}
+// last year's same holiday vs a normal day (owner only; needs a year of history)
+function lastYearEff(loc,e){if(!e.builtin)return null;const H=hourlyOf(loc);const py=holidaysOf(+e.date.slice(0,4)-1).find(x=>x.id===e.id);if(!py||!H[py.date])return null;
+  const a=dayTot(H[py.date]);const s=wstat(fcSamples(H,py.date,null,fcCfg().weeks));if(!s||s.m<=0||a<=0)return null;return a/s.m-1}
+const effTxt=e=>e.closed?'Closed':e.pct?`${e.pct>0?'+':'−'}${Math.abs(e.pct)}%`:'no change set';
+const whenTxt=n=>n===0?'today':n===1?'tomorrow':`in ${n} days`;
+function eventsStrip(loc,days,canEdit){const ev=upcomingEvents(loc,days);if(!ev.length)return '';
+  return `<div class="stack" style="gap:4px"><div class="row"><span class="eyebrow grow">Coming up</span>${canEdit?`<button class="btn sm" data-act="evSheet">Holidays & events</button>`:''}</div>
+   ${ev.slice(0,5).map(e=>`<div class="row small" style="gap:8px;padding:6px 10px;border-radius:10px;background:${e.inDays<=7?'color-mix(in srgb,var(--warn) 14%,transparent)':'var(--sunk)'}"><span style="width:20px;text-align:center">${e.icon||'📅'}</span><span class="grow"><b>${esc(e.name)}</b> · ${fmtD(e.date,{weekday:'short',month:'short',day:'numeric'})} · ${whenTxt(e.inDays)}</span><span class="tiny ${e.closed||e.pct?'':'muted'}" style="${e.closed?'color:var(--bad);font-weight:700':''}">${effTxt(e)}</span></div>`).join('')}</div>`}
+const evChips=evs=>(evs||[]).map(e=>chip(e.closed?'bad':'info',`${e.icon||'📅'} ${esc(e.name)}${e.closed?' · closed':e.pct?' '+effTxt(e):''}`)).join(' ');
+let EVS=null;
+function evSheet(){const loc=curLoc();EVS={add:false};
+  openSheet({title:()=>'Holidays & events',body:()=>{const c=fcCfg();const list=[];for(let i=0;i<75;i++){const d=addDays(bizDate(),i);eventsOn(loc,d).forEach(e=>{if(!list.some(x=>x.key===e.key))list.push({...e,date:e.custom?e.ev.from:d,inDays:i})})}
+    const opts=[['closed','Closed'],[-50,'−50%'],[-30,'−30%'],[-20,'−20%'],[-10,'−10%'],[0,'No change'],[10,'+10%'],[20,'+20%'],[30,'+30%'],[50,'+50%']];
+    return `<p class="small muted">Set how each day changes sales at ${esc(locName(loc))}. The forecast, Shifts needed and managers' staffing follow it. Built-in holidays repeat every year; set them again each year.</p>
+    ${list.length?list.map(e=>{const ly=lastYearEff(loc,e);const v=e.closed?'closed':String(e.pct||0);const cur=opts.some(([k])=>String(k)===v)?v:'custom';
+      return `<div class="card stack" style="gap:6px"><div class="row" style="gap:8px"><span style="font-size:20px">${e.icon||'📅'}</span><div class="grow"><b>${esc(e.name)}</b><div class="tiny muted">${e.custom&&e.ev.to&&e.ev.to!==e.ev.from?`${fmtD(e.ev.from,{month:'short',day:'numeric'})} – ${fmtD(e.ev.to,{month:'short',day:'numeric'})}`:fmtD(e.date,{weekday:'short',month:'short',day:'numeric'})} · ${whenTxt(e.inDays)}${e.custom?` · ${e.ev.loc?esc(locName(e.ev.loc)):'both stores'}`:''}</div></div>
+        <select class="in" style="width:auto" data-evset="${esc(e.key)}" aria-label="Effect on sales">${opts.map(([k,n])=>`<option value="${k}" ${String(k)===v?'selected':''}>${n}</option>`).join('')}${cur==='custom'?`<option value="${esc(v)}" selected>${effTxt(e)}</option>`:''}</select>
+        ${e.custom?`<button class="x" style="color:var(--bad)" data-act="evDel" data-id="${esc(e.ev.id)}" aria-label="Delete event">${ic('x')}</button>`:''}</div>
+        <div class="tiny muted">${ly!=null?`Last year: ${ly>=0?'+':'−'}${Math.round(Math.abs(ly)*100)}% vs a normal ${DOW[parseYmd(e.date).getDay()]}`:e.builtin?'No sales from last year for this day yet':''}</div></div>`}).join(''):'<div class="empty">No holidays in the next 75 days.</div>'}
+    <div class="card stack"><h3>Add your own event</h3><div class="tiny muted">School breaks, local events, promotions, renovations…</div>
+     <label class="f">Name<input class="in" id="ev_name" placeholder="e.g. Yale winter break"></label>
+     <div class="g2"><label class="f">From<input class="in" type="date" id="ev_from" value="${bizDate()}"></label><label class="f">To<input class="in" type="date" id="ev_to"></label></div>
+     <div class="g2"><label class="f">Store<select class="in" id="ev_loc"><option value="">Both stores</option>${LOCS().map(l=>`<option value="${esc(l.id)}" ${l.id===loc?'selected':''}>${esc(l.name)}</option>`).join('')}</select></label>
+      <label class="f">Effect on sales<select class="in" id="ev_eff">${opts.map(([k,n])=>`<option value="${k}" ${k===0?'selected':''}>${n}</option>`).join('')}</select></label></div>
+     <button class="btn pri" data-act="evAdd">${ic('plus')} Add event</button></div>`}});}
+async function evSave(cfgPatch,msg){if(await fcSaveCfg({...fcCfg(),...cfgPatch})){toast(msg);drawSheet();render();fcPublishNeeds().then(()=>render())}}
+document.addEventListener('change',e=>{const t=e.target;if(!t.matches?.('select[data-evset]'))return;if(!isOwner)return;const key=t.dataset.evset,v=t.value;const c=fcCfg();
+  const val=v==='closed'?{closed:true,pct:0}:{closed:false,pct:+v||0};
+  if(key.startsWith('ev_')){const id=key.slice(3);evSave({events:(c.events||[]).map(x=>x.id===id?{...x,...val}:x)},'Event updated')}
+  else{const evt={...(c.evt||{})};if(!val.closed&&!val.pct)delete evt[key];else evt[key]=val;evSave({evt},'Holiday updated')}});
 let FCS=null;
 function fcSettingsSheet(){const c=fcCfg();FCS={geo:{...(c.geo||{})},msg:''};
   openSheet({title:()=>'Sales forecast settings',body:()=>{const c=fcCfg();const L2=LOCS();

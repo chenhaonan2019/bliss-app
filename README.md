@@ -168,3 +168,10 @@ This week / next week / next 2 weeks, per store and in total: net sales, tax, ti
 past, forecast for the rest), labor hours and labor cost, and labor as a % of net sales. Labor uses clock-in hours for past days,
 scheduled shifts otherwise (each person's payroll rate + employer payroll tax, cash rate, 1.5× past the weekly overtime limit),
 and for days not scheduled yet the forecast's staffing × the store's average hourly cost ("est."). Owner → Today shows this week's summary.
+
+## Holidays & events
+Built-in US holidays (plus Lunar New Year and Mid-Autumn Festival) and your own events (school breaks, local events,
+promotions; one store or both, a date range). The Today card shows what's coming up in the next 3 weeks; Shifts needed
+tags those days. In **Holidays & events** (owner) set each one's effect on sales (−50% … +50%, or Closed); the forecast,
+staffing and managers' needs follow it. Past holidays and events are left out of the normal-day averages and the weather
+learning. Once a store has a year of history, each holiday shows how last year's compared with a normal day.
