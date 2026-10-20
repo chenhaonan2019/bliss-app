@@ -584,10 +584,23 @@ function vPick(){const es=emps().sort((a,b)=>a.name.localeCompare(b.name));
   ${es.length?`<div class="card flush list">${es.map(e=>`<div class="li tap" data-act="kioskPick" data-id="${e.id}" tabindex="0">${avatar(e.id)}<div class="grow t">${esc(e.name)}</div>${openPunch(e.id)?chip('ok',L('Clocked in','已打卡')):''}${ic('chev')}</div>`).join('')}</div>`:`<div class="empty"><b>${L('No team members yet','还没有员工')}</b>${L('Tap Manager to add the team.','点右上角"经理"添加员工。')}</div>`}</div>`}
 
 /* ---------- employee views ---------- */
+// Staff only see deliveries that land during their own shift (at that shift's store). Managers see them all.
+function delivWhen(o){const t=o.track||{};const day=t.wDate||o.expected;const at=x=>{const d=new Date(x);return d.getHours()*60+d.getMinutes()};const dayOf=x=>ymd(new Date(x));
+  if(t.deliveredAt)return{day:dayOf(t.deliveredAt),a:at(t.deliveredAt),b:at(t.deliveredAt)};
+  if(t.etaAt)return{day:dayOf(t.etaAt),a:at(t.etaAt)-30,b:at(t.etaAt)+15};
+  if(t.wStart)return{day,a:toMin(t.wStart),b:toMin(t.wEnd||t.wStart)};
+  if(o.window){const m=String(o.window).match(/(\d{1,2})(?::(\d\d))?\s*([ap])?m?\s*[-–]\s*(\d{1,2})(?::(\d\d))?\s*([ap])m?/i);if(m){const h=(H,M,ap)=>((+H%12)+(/p/i.test(ap||'')?12:0))*60+(+M||0);return{day,a:h(m[1],m[2],m[3]||m[6]),b:h(m[4],m[5],m[6])}}}
+  return{day,a:null,b:null}}
+function myDeliveries(me,d){const sh=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=d&&shiftVisible(s));const op=openPunch(me);
+  return Object.values(D.orders).filter(o=>o.status==='ordered'&&o.kind!=='stockin').filter(o=>{const w=delivWhen(o);const lc=o.loc||'wh';const atDoor=!!o.track?.deliveredAt;
+    const inShift=s=>{if(shLoc(s)!==lc)return false;if(atDoor)return s.date===d;if((w.day||d)!==s.date)return false;if(w.a==null)return true;
+      const a=toMin(s.start)-30;let b=toMin(s.end);if(b<=toMin(s.start))b+=1440;return w.a<=b&&w.b>=a};
+    return sh.some(inShift)||(!!op&&atDoor&&(op.loc||locOf(me))===lc)})
+   .sort((a,b)=>String(a.expected).localeCompare(String(b.expected)))}
 function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op=openPunch(me);
   const todayP=Object.values(D.punches).filter(p=>p.empId===me&&p.date===d);
   const next=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>d&&shiftVisible(s)).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start))[0];
-  const cnt=C()[d];const pend=ORD().filter(o=>o.status==='ordered').sort((a,b)=>(a.expected||'').localeCompare(b.expected||''));const dueD=pend.filter(o=>!o.expected||o.expected<=d);const deliveries=pend.filter(o=>o.expected&&o.expected>d);
+  const cnt=C()[d];const mine=myDeliveries(me,d);const dueD=mine.filter(o=>!o.track&&(!o.expected||o.expected<=d));const deliveries=mine.filter(o=>!o.track&&o.expected&&o.expected>d);const myTrk=mine.filter(o=>o.track&&(o.track.deliveredAt||(o.expected||d)<=d));const myTrkLater=mine.filter(o=>o.track&&!myTrk.includes(o));
   return `<div class="stack">
   <div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})}</div><h2>${L('Hi','你好')}, ${esc(empName(me).split(' ')[0])}</h2></div>
   <div class="card stack">
@@ -602,9 +615,7 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
     ${todayP.filter(p=>p.out).map(p=>`<div class="small muted">${fmtT(hm(new Date(p.in)))} – ${fmtT(hm(new Date(p.out)))} · ${fmtH(punchHrs(p))} h</div>`).join('')}
   </div>
   ${coverStaffCard(me)}${pushCard()}
-  ${(()=>{if(!isMgr)return'';const dr=smartDraft();if(!dr.length)return'';if(!UI.rdTried&&rdNeedCheck().length){UI.rdTried=true;setTimeout(()=>rdAutoCheck(),500)}const by={};dr.forEach(r=>{by[r.st]=(by[r.st]||0)+(r.cost||0)});const sv=dr.reduce((a,r)=>a+(r.save>0?r.save:0),0);
-    return `<div class="card row tap" data-act="orderList" tabindex="0" style="border-left:4px solid var(--brand)"><span style="font-size:22px">🛒</span><div class="grow"><div class="t">${L(`Reorder ready · ${dr.length} low item${dr.length>1?'s':''}`,`待补货 · ${dr.length} 样偏低`)}</div><div class="small muted">${Object.entries(by).map(([st,t])=>`${esc(st)}${t?' ~'+money(t):''}`).join(' · ')}${sv>0.5?` · ${L('saves','省')} ${money(sv)}`:''} · ${L('review & confirm','检查并确认')}</div></div>${ic('chev')}</div>`})()}
-  ${trkSection(d)}
+  ${myTrk.length?`<h3>${L('Delivery during your shift','你这班要收的货')}</h3>${myTrk.map(o=>trkCard(o,o.track?.deliveredAt?'receive':'orderView')).join('')}`:''}
   ${availCard(me)}
   <h3>${L('Today’s tasks','今日任务')}</h3>
   ${allTasksDone(d)?`<div class="card row" style="gap:12px;border-left:4px solid var(--ok);background:var(--ok-bg)"><span style="font-size:24px;color:var(--ok)">✓</span><div class="grow"><div class="t">All of today's tasks are done</div><div class="small muted">Thank you!</div></div></div>`:''}
@@ -613,6 +624,7 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
     ${dueD.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · take photos when it arrives</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}
     ${countRows(d)}
   </div>
+  ${myTrkLater.length?`<h3>${L('Coming on your next shifts','你之后班次会到的货')}</h3><div class="card flush list">${myTrkLater.map(o=>{const w=delivWhen(o);return `<div class="li tap" data-act="orderView" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">${esc(o.store||'')}${o.track?.items?` · ${o.track.items} ${L('items','件')}`:''}</div><div class="small muted">${fmtD(o.expected)}${w.a!=null?' · '+fmtT(hhmmM(Math.max(0,w.a)))+'–'+fmtT(hhmmM(w.b)):''}</div></div>${ic('chev')}</div>`}).join('')}</div>`:''}
   ${deliveries.length?`<h3>Upcoming deliveries</h3><div class="card flush list">${deliveries.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">${esc(o.store||'')} · ${(o.lines||[]).length} ${L('items','项')}</div><div class="small muted">${L('Expected','预计')} ${o.expected?fmtD(o.expected):'—'}${o.window?' · '+esc(o.window):''}</div></div>${chip('info','Upcoming')}</div>`).join('')}</div>`:''}
   ${next?`<div class="card row">${ic('cal')}<div class="grow"><div class="small muted">${L('Next shift','下一班')}</div><div class="t">${fmtD(next.date)} · ${fmtT(next.start)} – ${fmtT(next.end)}</div></div></div>`:''}
   </div>`}
@@ -695,6 +707,8 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
   ${pushCard()}
   ${coverMgrCard()}
   ${attnList(att)}
+  ${(()=>{if(!isMgr)return'';const dr=smartDraft();if(!dr.length)return'';if(!UI.rdTried&&rdNeedCheck().length){UI.rdTried=true;setTimeout(()=>rdAutoCheck(),500)}const by={};dr.forEach(r=>{by[r.st]=(by[r.st]||0)+(r.cost||0)});const sv=dr.reduce((a,r)=>a+(r.save>0?r.save:0),0);
+    return `<div class="card row tap" data-act="orderList" tabindex="0" style="border-left:4px solid var(--brand)"><span style="font-size:22px">🛒</span><div class="grow"><div class="t">${L(`Reorder ready · ${dr.length} low item${dr.length>1?'s':''}`,`待补货 · ${dr.length} 样偏低`)}</div><div class="small muted">${Object.entries(by).map(([st,t])=>`${esc(st)}${t?' ~'+money(t):''}`).join(' · ')}${sv>0.5?` · ${L('saves','省')} ${money(sv)}`:''} · ${L('review & confirm','检查并确认')}</div></div>${ic('chev')}</div>`})()}
   ${trkSection(d)}
   ${reviewCard()}
   <h3>${L('Shifts today','今日班次')}</h3>
