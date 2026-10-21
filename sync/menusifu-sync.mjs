@@ -72,6 +72,7 @@ async function describePage(page) {
     buttons: [...document.querySelectorAll("button")].map((b) => (b.innerText || "").trim().slice(0, 30)).filter(Boolean).slice(0, 10),
   })).catch(() => null);
   log("page structure:", JSON.stringify(d));
+  console.log(`::warning title=Menusifu page::${JSON.stringify(d)}`);
 }
 
 // Open Breakdowns once so the page makes its own hourly-report request, and reuse its headers.
@@ -175,6 +176,7 @@ async function main() {
     log("done");
   } catch (e) {
     log("FAILED:", e.message);
+    console.log(`::error title=Menusifu sync failed::${String(e.message).replace(/[\r\n]+/g, " ")}`);
     await status({ ok: false, error: String(e.message).slice(0, 200), saved: done });
     process.exitCode = 1;
   } finally { await browser.close(); }
