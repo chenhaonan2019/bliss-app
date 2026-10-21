@@ -1046,7 +1046,7 @@ function photoTaskSheet(type,date){date=date||bizDate();const T=TASKS().find(x=>
     const tcfg=taskList().find(x=>x.id===type)||{};const note=taskNote(type,date);
     return `<div class="row"><div class="grow small muted">${fmtD(date)} · Take a photo of each item, or tap the check items when done.</div>${chip(stChip(s.st),s.label)}</div>
     ${note||isMgr?`<div class="card stack" style="gap:6px;border:2px solid ${note?'var(--brand)':'var(--line)'}"><div class="row"><b class="grow">${L('Today','今天')} · ${esc(T.name())}</b>${isMgr?`<button class="btn sm" data-act="tnEdit" data-type="${type}" data-date="${date}">${note?L('Edit','编辑'):`${ic('plus')} ${L('Add for today','添加今天的安排')}`}</button>`:''}</div>
-      ${note?`<div style="white-space:pre-wrap">${esc(note.text)}</div><div class="tiny muted">${esc(note.by||'')}${note.at?' · '+fmtDT(note.at):''}</div>`:`<div class="tiny muted">${L('Nothing special for today. Add what staff should focus on, e.g. "Today: clean the ice machine and under the fridges."','今天没有特别安排。可以写今天要重点做什么。')}</div>`}</div>`:''}
+      ${note?`<div style="white-space:pre-wrap">${esc(note.text)}</div><div class="tiny muted">${note.weekly?L(`Every ${DOW[parseYmd(date).getDay()]}`,'每周这一天'):`${esc(note.by||'')}${note.at?' · '+fmtDT(note.at):''}`}</div>`:`<div class="tiny muted">${L('Nothing special for today. Add what staff should focus on, e.g. "Today: clean the ice machine and under the fridges."','今天没有特别安排。可以写今天要重点做什么。')}</div>`}</div>`:''}
     ${tcfg.instr?`<details class="card" ${note?'':'open'}><summary style="cursor:pointer;font-weight:600">${L('Instructions','说明')}</summary><div class="small" style="white-space:pre-wrap;margin-top:6px">${esc(tcfg.instr)}</div></details>`:''}
     ${A.assets?'':`<div class="hint warn">${L('Photo upload is not turned on for this account. Ask the manager.','此账号没有开通照片上传，请联系经理。')}</div>`}
     ${slots.length?`<div class="tiles">${slots.map(sl=>{const p=s.doc?.photos?.[sl.id];const ex=sl.ref?`<button class="chip info" style="position:absolute;top:6px;left:6px;border:0;cursor:pointer;z-index:2" data-act="viewPh" data-pid="${esc(sl.ref)}" data-cap="Example: ${esc(sl.name)}">Example</button>`:'';
@@ -1105,16 +1105,19 @@ const aiIssues=doc=>Object.entries(doc?.ai||{}).filter(([sl,a])=>!a.ok&&doc.phot
 function aiBackfill(date,type){if(!A.sample)return;const doc=photoDoc(date,type);if(!doc)return;
   Object.entries(doc.photos||{}).forEach(([slot,p])=>{if(!AIC[p.id]&&doc.ai?.[slot]?.photo!==p.id)aiCheckPhoto({type,slot,date,loc:curLoc(),id:p.id})})}
 /* today's plan for a task, per store and date (config/tasknotes: staff read, managers write) */
-const taskNote=(type,date,loc)=>(D.taskNotes||{})[`${loc||curLoc()}_${date}_${type}`]||null;
+// a note for that date, else the store's repeating note for that weekday (e.g. which deep-cleaning area is due)
+const taskNote=(type,date,loc)=>{const l=loc||curLoc();const n=(D.taskNotes||{})[`${l}_${date}_${type}`];if(n)return n;const w=(D.taskWeekly||{})[`${l}_${parseYmd(date).getDay()}_${type}`];return w?{...w,weekly:true}:null};
 function taskNoteSheet(type,date){const T=TASKS().find(x=>x.type===type)||{name:()=>'Task'};let d=date;const back=SH;
   openSheet({title:()=>`${esc(T.name())} · ${L('plan for the day','当天安排')}`,body:()=>{const n=taskNote(type,d);return `<label class="f">${L('Date','日期')}<input class="in" type="date" id="tn_date" value="${d}" min="${addDays(today(),-1)}"></label>
      <label class="f">${L('What should staff do?','员工需要做什么？')}<textarea class="in" id="tn_text" rows="5" placeholder="e.g. Today: clean the ice machine, wipe under the fridges and descale the kettle.">${esc(n?.text||'')}</textarea></label>
-     <div class="tiny muted">${L(`Shows at the top of ${T.name()} for ${locName(curLoc())} on that day.`,`会显示在当天 ${locName(curLoc())} 的 ${T.name()} 最上面。`)}</div>`},
+     <label class="row" style="gap:8px"><input type="checkbox" id="tn_rep" ${n?.weekly?'checked':''}><span class="small">${L(`Repeat every ${DOW[parseYmd(d).getDay()]}`,`每个星期${'日一二三四五六'[parseYmd(d).getDay()]}都显示`)}</span></label>
+     <div class="tiny muted">${L(`Shows at the top of ${T.name()} for ${locName(curLoc())}.`,`会显示在 ${locName(curLoc())} 的 ${T.name()} 最上面。`)}</div>`},
    foot:()=>`${taskNote(type,d)?`<button class="btn bad" data-act="tnSave" data-clear="1">${L('Remove','删除')}</button>`:''}<button class="btn pri big" data-act="tnSave">${L('Save','保存')}</button>`,
    mount:()=>{const el=$('#tn_date');if(el)el.onchange=()=>{const t=$('#tn_text').value;d=el.value||d;drawSheet();if(!taskNote(type,d))$('#tn_text').value=t}}});
   ACT.tnSave=async x=>{const text=x.clear?'':($('#tn_text')?.value||'').trim();const notes={...(D.taskNotes||{})};Object.keys(notes).forEach(k=>{const dd=(k.match(/_(\d{4}-\d\d-\d\d)_/)||[])[1];if(dd&&dd<addDays(today(),-30))delete notes[k]});
-    const k=`${curLoc()}_${d}_${type}`;if(text)notes[k]={text,by:myName(),at:new Date().toISOString()};else delete notes[k];
-    if(await W(A.db.doc('config/tasknotes').set({notes}))){D.taskNotes=notes;toast(text?L('Saved','已保存'):L('Removed','已删除'));photoTaskSheet(type,date)}}}
+    const k=`${curLoc()}_${d}_${type}`;const rep=!!$('#tn_rep')?.checked;const weekly={...(D.taskWeekly||{})};const wk=`${curLoc()}_${parseYmd(d).getDay()}_${type}`;
+    if(rep){delete notes[k];if(text)weekly[wk]={text,by:myName(),at:new Date().toISOString()};else delete weekly[wk]}else{if(text)notes[k]={text,by:myName(),at:new Date().toISOString()};else if(notes[k])delete notes[k];else if(x.clear)delete weekly[wk]}
+    if(await W(A.db.doc('config/tasknotes').set({notes,weekly}))){D.taskNotes=notes;D.taskWeekly=weekly;toast(text?L('Saved','已保存'):L('Removed','已删除'));photoTaskSheet(type,date)}}}
 async function onTaskUpload(inp){const f=inp.files?.[0];if(!f)return;const{type,slot,date}=inp.dataset;const tile=inp.closest('.tile');tile&&tile.classList.add('busy');
   const id=await uploadImg(f);if(!id){tile&&tile.classList.remove('busy');return}
   const loc=curLoc();const ref=A.db.doc(`photoLogs/${loc}_${date}_${type}`);const me=actor()||'manager';const now=new Date().toISOString();const cur=photoDoc(date,type);
@@ -2453,7 +2456,7 @@ async function boot(){
   if(!db){render();return}
   uid=user?await user.id():null;isMgr=user?await user.canEdit():false;isOwner=user?await user.isOwner():false;
   c.use('assets').then(x=>{A.assets=x;rerender()});c.use('sample').then(x=>{A.sample=x;rerender()});c.use('downloads').then(x=>{A.downloads=x;rerender()});
-  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='files')D.files=v.list||[];if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='tasknotes')D.taskNotes=v.notes||{};if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='guide')D.guideCfg=v;if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
+  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='files')D.files=v.list||[];if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='tasknotes'){D.taskNotes=v.notes||{};D.taskWeekly=v.weekly||{}}if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='guide')D.guideCfg=v;if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
   subscribe(db.collection('employees'),s=>{D.employees=mapDocs(s)});
   subscribe(db.collection('links'),s=>{D.links=mapDocs(s)});
   subscribe(db.collection('counts').orderBy('date','desc').limit(120),s=>{D.counts=mapDocs(s)});
