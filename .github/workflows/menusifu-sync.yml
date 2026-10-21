@@ -5,6 +5,8 @@ on:
   schedule:
     - cron: "17 9 * * *"   # every day ~5:17am New York time (GitHub may start it a little late)
     - cron: "7 14 * * *"   # ~10:07am again, so a failed early run is caught up the same morning
+    - cron: "7 17 * * *"   # ~1:07pm: the stores have sales by now, which the sign-in check relies on
+    - cron: "7 20 * * *"   # ~4:07pm: last catch-up of the day
   workflow_dispatch:       # "Run workflow" button for a manual run
     inputs:
       full:
@@ -25,6 +27,12 @@ jobs:
           node-version: 20
       - run: npm install --no-save --no-audit --no-fund playwright@1.56.0
       - run: npx playwright install --with-deps chromium
+      # remembered hourly-report id from the last good run (not a secret: no session token is stored)
+      - uses: actions/cache/restore@v4
+        with:
+          path: .menusifu-report.json
+          key: menusifu-report-${{ github.run_id }}
+          restore-keys: menusifu-report-
       - name: Sync hourly sales
         run: node sync/menusifu-sync.mjs
         env:
@@ -35,3 +43,8 @@ jobs:
           SUPABASE_ANON_KEY: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZ5bHludXV6ZW5pcW15b3JyZWZsIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTIxOTI5NzEsImV4cCI6MjEwNzc2ODk3MX0.J0Avgg9G3YmxuvuOz7SMRSdiMOdxYqIYL2MipTvEeM8
           MENUSIFU_STORES: M000023561=nh,M000026022=wh
           FULL_REFETCH: ${{ inputs.full }}
+      - uses: actions/cache/save@v4
+        if: always() && hashFiles('.menusifu-report.json') != ''
+        with:
+          path: .menusifu-report.json
+          key: menusifu-report-${{ github.run_id }}

@@ -4,7 +4,7 @@
 // The repository is public, so this script never logs sales numbers, tokens or page contents —
 // only counts, dates and short status messages.
 import { chromium } from "playwright";
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import vm from "node:vm";
 
 const env = (k, d) => { const v = process.env[k]; if (v == null || v === "") { if (d !== undefined) return d; throw new Error(`Missing setting ${k}`); } return v; };
@@ -17,6 +17,11 @@ const BACKFILL_DAYS = +env("BACKFILL_DAYS", "400");
 const REFETCH_DAYS = +env("REFETCH_DAYS", "3");
 const FULL = env("FULL_REFETCH", "") === "true"; // re-read all history (e.g. after adding new columns) // re-read the last few days in case late orders were added
 const ORIGIN = "https://cloud.menusifucloud.com";
+// The hourly report's id, remembered from the last good run (kept in the GitHub Actions cache, not in the repo).
+// Early in the morning the Breakdowns page may not ask for the hourly table itself (no sales yet today), so the
+// script then reuses the session headers from any report request with this id.
+const RID_FILE = env("MENUSIFU_RID_FILE", ".menusifu-report.json");
+const savedRid = (() => { try { return JSON.parse(readFileSync(RID_FILE, "utf8")).reportid || ""; } catch { return ""; } })();
 const ORDER_TYPES = ["DINE_IN", "DOORDASH_D_DELIVERY", "DOORDASH_D_PICKUP", "GRUBHUB_D_DELIVERY", "ONLINE_PICKUP", "TOGO", "UBER_EATS_D_DELIVERY", "UBER_EATS_D_PICKUP"];
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a);
@@ -116,12 +121,22 @@ async function captureHeaders(page) {
     await tab.click();
     for (let i = 0; i < 40 && cands.length < 2; i++) await page.waitForTimeout(500);   // up to 20 s
     await page.waitForTimeout(2000);
-    for (const h of [...cands].reverse()) {    // the data request comes last
-      const hdr = pick(h), k = JSON.stringify(hdr);
+    // each captured request as is (the data request comes last), then the newest session headers with every
+    // report id seen so far and the one remembered from the last good run
+    const rk = (h) => Object.keys(h).find((k) => k.toLowerCase() === "reportid");
+    const rids = [...new Set([savedRid, ...cands.map((h) => h[rk(h)])].filter(Boolean))];
+    const tries = [...cands].reverse().map(pick);
+    for (const h of [...cands].reverse().map(pick)) { const k = rk(h); if (k) for (const id of rids) tries.push({ ...h, [k]: id }); }
+    for (const hdr of tries) {
+      const k = JSON.stringify(hdr);
       if (tried.has(k)) continue; tried.add(k);
-      if (await works(hdr)) { log(`hourly report found on try ${attempt} (${cands.length} report requests seen)`); return hdr; }
+      if (await works(hdr)) {
+        log(`hourly report found on try ${attempt} (${cands.length} report requests seen${hdr[rk(hdr)] === savedRid && savedRid ? ", remembered report id" : ""})`);
+        try { if (hdr[rk(hdr)]) writeFileSync(RID_FILE, JSON.stringify({ reportid: hdr[rk(hdr)] })); } catch {}
+        return hdr;
+      }
     }
-    log(`try ${attempt}: hourly report not found yet (${cands.length} report requests seen)`);
+    log(`try ${attempt}: hourly report not found yet (${cands.length} report requests seen, ${rids.length} report ids, remembered id: ${savedRid ? "yes" : "no"})`);
   }
   await describePage(page);
   throw new Error(`The hourly report did not load (${cands.length} report requests seen, 3 tries)`);

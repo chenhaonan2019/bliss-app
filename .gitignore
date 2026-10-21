@@ -2,3 +2,4 @@
 *.local.sql
 node_modules/
 .vercel
+.menusifu-report.json
