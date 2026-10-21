@@ -430,7 +430,10 @@ const stChip=s=>({ontime:'ok',late:'warn',missed:'bad',progress:'info',todo:''}[
 function shiftsOn(date,emp){return Object.values(D.shifts).filter(s=>s.date===date&&shiftVisible(s)&&(emp?s.empId===emp:shLoc(s)===curLoc())).sort((a,b)=>toMin(a.start)-toMin(b.start))}
 const shiftHrs=s=>{let m=toMin(s.end)-toMin(s.start);if(m<0)m+=1440;return m/60};
 const openPunch=emp=>Object.values(D.punches).find(p=>p.empId===emp&&!p.out);
-const punchHrs=p=>p.out?Math.max(0,(new Date(p.out)-new Date(p.in))/36e5):0;
+// Owner-only rule (mgr/wages.noearly): for the people it is on for, time before their shift starts is not counted.
+const punchShift=p=>{const s=p.shiftId&&D.shifts[p.shiftId];if(s&&s.empId===p.empId)return s;const t=new Date(p.in);let b=null;Object.values(D.shifts).forEach(x=>{if(x.empId!==p.empId||x.date!==p.date||!x.start)return;const dt=Math.abs(t-atTime(p.date,x.start));if(!b||dt<b.dt)b={x,dt}});return b?.x||null};
+const countedIn=p=>{if(!p.in||!D.noEarly?.[p.empId])return p.in;const s=punchShift(p);if(!s)return p.in;const st=atTime(p.date,s.start);return new Date(p.in)<st?st.toISOString():p.in};
+const punchHrs=p=>p.out?Math.max(0,(new Date(p.out)-new Date(countedIn(p)))/36e5):0;
 function availFor(emp,date,start,end){const a=D.avail[emp];if(!a)return'unknown';if((a.off||[]).includes(date))return'off';
   const w=(a.snap?.[weekStart(date)]?.weekly||a.weekly)?.[parseYmd(date).getDay()];if(!w||w.mode==='no')return'no';if(w.mode==='all')return'yes';
   if(!start)return'partial';return toMin(start)>=toMin(w.from)&&toMin(end)<=toMin(w.to)?'yes':'partial'}
@@ -1423,7 +1426,9 @@ ${seePay()?`   <div class="g3"><label class="f">Payroll $/h<input class="in" typ
     <div style="display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px"><label class="f" style="min-width:0">Training $/h<input class="in" type="number" step="0.01" id="e_trate" value="${esc(D.trainRates?.[id]??'')}" style="min-width:0"></label>
      <label class="f" style="min-width:0">Paid as<select class="in" id="e_tvia" style="min-width:0"><option value="payroll" ${D.trainVia?.[id]!=='cash'?'selected':''}>Payroll</option><option value="cash" ${D.trainVia?.[id]==='cash'?'selected':''}>Cash</option></select></label>
      <label class="f" style="min-width:0;grid-column:1/-1">Training ends<input class="in" type="date" id="e_tuntil" value="${esc(D.trainUntil?.[id]||'')}" style="min-width:0"></label></div>
-    <p class="tiny muted" style="margin:0">Hours worked up to and including the end date are paid at the training rate; after that the normal rate applies. Leave the end date empty to use the training rate while their role is Trainee.</p></div>`:''}
+    <p class="tiny muted" style="margin:0">Hours worked up to and including the end date are paid at the training rate; after that the normal rate applies. Leave the end date empty to use the training rate while their role is Trainee.</p></div>
+   <label class="row"><input type="checkbox" id="e_noearly" ${D.noEarly?.[id]?'checked':''}> ${L("Don't count time before their shift starts","提前打卡不算工时")}</label>
+   <p class="tiny muted" style="margin-top:-6px">${L('If they clock in early, their hours start at the scheduled shift time. Only owners see this.','提前打卡的话，工时从排班开始时间算起。只有老板能看到这个设置。')}</p>`:''}
    <label class="f">${L('Store-phone PIN','共用手机 PIN')}<input class="in" inputmode="numeric" maxlength="6" id="e_pin" value="${esc(D.mgrSet.pins?.[id]||'')}"></label>
    <div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:var(--muted)">Color on schedule<div class="swatches" role="radiogroup" aria-label="Color">${COLORS.map((c,i)=>`<label title="${COLOR_NAMES[i]}"><input type="radio" name="e_color" value="${c}" ${(e.color||COLORS[0])===c?'checked':''}><span class="sw" style="background:${c}">${esc((e.name||'A').trim().charAt(0).toUpperCase())}</span><small>${COLOR_NAMES[i]}</small></label>`).join('')}</div></div>
    <label class="row"><input type="checkbox" id="e_active" ${e.active!==false?'checked':''}> ${L('Active (shows in schedule and store phone)','在职（显示在排班和共用手机）')}</label>
@@ -1713,7 +1718,7 @@ const ACT={
    for(const s of fut)await W(A.db.doc('shifts/'+s.id).delete());
    if(!await W(A.db.doc('employees/'+d.id).delete()))return;
    const drop=o=>{const x={...(o||{})};delete x[d.id];return x};
-   if(isOwner)await W(A.db.doc('mgr/wages').set({rates:drop(D.wages),cash:drop(D.cashRates),caps:drop(D.payCaps),train:drop(D.trainRates),tvia:drop(D.trainVia),tuntil:drop(D.trainUntil)}));
+   if(isOwner)await W(A.db.doc('mgr/wages').set({...(D.wagesDoc||{}),noearly:drop(D.noEarly),rates:drop(D.wages),cash:drop(D.cashRates),caps:drop(D.payCaps),train:drop(D.trainRates),tvia:drop(D.trainVia),tuntil:drop(D.trainUntil)}));
    if(D.mgrSet.pins?.[d.id])await W(A.db.doc('mgr/settings').set({...D.mgrSet,pins:drop(D.mgrSet.pins)}));
    D.former={...(D.former||{}),[d.id]:e.name};delete D.employees[d.id];closeSheet();toast(`${e.name} removed`);render()},
  empSave:async d=>{const name=$('#e_name').value.trim();if(!name){toast(L('Enter a name','请填写姓名'));return}const id=d.id||slug(name)+'-'+uidGen().slice(-4);
@@ -1723,7 +1728,7 @@ const ACT={
    if(!await W(A.db.doc('employees/'+id).set(body)))return;
    if(body.email&&body.active&&window.blissAccount?.ensureUsers&&(!prev||body.email.toLowerCase()!==String(prev.email||'').toLowerCase()||prev.active===false)){
      window.blissAccount.ensureUsers([body.email]).then(r=>{if(r?.created?.length)toast(`${name} can now sign in with ${body.email}`)}).catch(e=>toast(e.message))}
-   const st=(o,v)=>{const x={...(o||{})};if(v==null)delete x[id];else x[id]=v;return x};if(seePay()&&$('#e_wage'))await W(A.db.doc('mgr/wages').set({rates:st(D.wages,num($('#e_wage').value)),cash:st(D.cashRates,num($('#e_cash').value)),caps:st(D.payCaps,num($('#e_cap').value)),
+   const st=(o,v)=>{const x={...(o||{})};if(v==null)delete x[id];else x[id]=v;return x};if(seePay()&&$('#e_wage'))await W(A.db.doc('mgr/wages').set({...(D.wagesDoc||{}),noearly:st(D.noEarly,$('#e_noearly')?.checked?true:null),rates:st(D.wages,num($('#e_wage').value)),cash:st(D.cashRates,num($('#e_cash').value)),caps:st(D.payCaps,num($('#e_cap').value)),
      train:st(D.trainRates,num($('#e_trate').value)),tvia:st(D.trainVia,num($('#e_trate').value)!=null?$('#e_tvia').value:null),tuntil:st(D.trainUntil,$('#e_tuntil').value||null)}));
    const pin=$('#e_pin').value.trim();const pins={...(D.mgrSet.pins||{})};if(pin)pins[id]=pin;else delete pins[id];await W(A.db.doc('mgr/settings').set({...D.mgrSet,pins}));closeSheet()},
  linkAcct:async d=>{const e=$('#lk_'+CSS.escape(d.u))?.value;if(!e){toast(L('Choose a team member','请选择员工'));return}if(await W(A.db.doc('links/'+d.u).set({empId:e,at:new Date().toISOString()}))){await W(A.db.doc('pending/'+d.u).delete());toast(L('Linked','已关联'))}},
@@ -2422,7 +2427,7 @@ async function doClockOut(id){const p=D.punches[id];if(!p)return;const out=new D
   if(await W(A.db.doc('punches/'+id).update({out})))toast(L(`Clocked out · ${fmtH(punchHrs({...p,out}))} h`,`已下班 · ${fmtH(punchHrs({...p,out}))} 小时`))}
 function empTimeSheet(emp,ps,pl){const pe=addDays(ps,pl-1);
   openSheet({live:true,title:()=>`${esc(empName(emp))} · ${L('Hours','工时')}`,body:()=>{const P=Object.values(D.punches).filter(p=>p.empId===emp&&p.date>=ps&&p.date<=pe).sort((a,b)=>a.in.localeCompare(b.in));
-   return `<div class="small muted">${fmtD(ps)} – ${fmtD(pe)}</div><div class="card flush list">${P.map(p=>{const sh=D.shifts[p.shiftId];return `<div class="li tap" data-act="punchEdit" data-id="${p.id}"><div class="grow"><div class="t">${fmtD(p.date)}</div><div class="small muted">${fmtT(hm(new Date(p.in)))} – ${p.out?fmtT(hm(new Date(p.out))):'?'}${sh?` · ${L('shift','排班')} ${fmtT(sh.start)}–${fmtT(sh.end)}`:''}${p.edited?' · '+L('edited','已修改'):''}</div></div>${p.late?chip('warn',L(`Late ${p.late}m`,`迟到${p.late}分`)):''}${p.out?`<b>${fmtH(punchHrs(p))}</b>`:chip('bad',L('No clock-out','缺下班卡'))}${selfieThumb(p)}</div>`}).join('')||`<div class="empty">${L('No punches','没有打卡记录')}</div>`}</div>
+   return `<div class="small muted">${fmtD(ps)} – ${fmtD(pe)}</div><div class="card flush list">${P.map(p=>{const sh=D.shifts[p.shiftId];return `<div class="li tap" data-act="punchEdit" data-id="${p.id}"><div class="grow"><div class="t">${fmtD(p.date)}</div><div class="small muted">${fmtT(hm(new Date(p.in)))} – ${p.out?fmtT(hm(new Date(p.out))):'?'}${sh?` · ${L('shift','排班')} ${fmtT(sh.start)}–${fmtT(sh.end)}`:''}${p.edited?' · '+L('edited','已修改'):''}${isOwner&&p.out&&countedIn(p)!==p.in?' · '+L(`counted from ${fmtT(hm(new Date(countedIn(p))))}`,`从 ${fmtT(hm(new Date(countedIn(p))))} 起算`):''}</div></div>${p.late?chip('warn',L(`Late ${p.late}m`,`迟到${p.late}分`)):''}${p.out?`<b>${fmtH(punchHrs(p))}</b>`:chip('bad',L('No clock-out','缺下班卡'))}${selfieThumb(p)}</div>`}).join('')||`<div class="empty">${L('No punches','没有打卡记录')}</div>`}</div>
    ${bonusDetail(emp,ps,pl)}<button class="btn" data-act="punchNew" data-emp="${emp}">${ic('plus')} ${L('Add missed punch','补录打卡')}</button>`}})}
 function punchSheet(id,emp){const p=id?D.punches[id]:{empId:emp,date:today(),in:null,out:null,late:0};const inT=p.in?hm(new Date(p.in)):'',outT=p.out?hm(new Date(p.out)):'';
   openSheet({title:()=>`${esc(empName(p.empId))} · ${L('Punch','打卡')}`,body:()=>`<label class="f">${L('Date','日期')}<input class="in" type="date" id="pu_date" value="${esc(p.date)}"></label>
@@ -2472,7 +2477,7 @@ async function boot(){
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:d.data().days||{}};FCM={}}if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wagesDoc=v;D.noEarly=v.noearly||{};D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
