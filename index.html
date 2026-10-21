@@ -620,9 +620,8 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
       ${op?chip(op.late?'warn':'ok',op.late?L(`Late ${op.late} min`,`迟到 ${op.late} 分钟`):L('On time','准时')):''}</div>
     ${op?`${op.selfieAi&&op.selfieAi.ok===false?`<div class="hint warn">${L('BLISS logo not visible in your clock-in selfie.','打卡自拍里看不到 BLISS logo。')} <label class="btn sm" style="cursor:pointer;margin-top:6px">${ic('cam')} ${L('Retake selfie','重拍自拍')}<input type="file" accept="image/*" capture="user" data-up="reselfie" data-id="${esc(op.id)}" hidden></label></div>`:op.selfie&&AIC['s'+op.id]?`<div class="tiny muted">${L('Checking your selfie…','正在检查自拍…')}</div>`:''}<div class="row"><div class="grow"><div class="muted small">${L('Clocked in at','上班打卡')}</div><div class="clock" data-since="${esc(op.in)}">${fmtT(hm(new Date(op.in)))}</div></div></div>
       <button class="btn big block" data-act="clockOut" data-id="${op.id}">${ic('clock')} ${L('Clock out','下班打卡')}</button>`
-    :A.assets?`<label class="btn pri big block" style="cursor:pointer">${ic('clock')} ${L('Clock in','上班打卡')}<input type="file" accept="image/*" capture="user" data-up="selfie" hidden></label>
-      <div class="tiny muted" style="text-align:center">${L('Take a selfie with the BLISS logo behind you.','请在 BLISS logo 前自拍打卡。')}</div>`
-    :`<button class="btn pri big block" data-act="clockIn">${ic('clock')} ${L('Clock in','上班打卡')}</button>`}
+    :`<label class="btn pri big block" style="cursor:pointer">${ic('clock')} ${L('Clock in','上班打卡')}<input type="file" accept="image/*" capture="user" data-up="selfie" hidden></label>
+      <div class="tiny muted" style="text-align:center">${L('Take a selfie with the BLISS logo behind you.','请在 BLISS logo 前自拍打卡。')}</div>`}
     ${todayP.filter(p=>p.out).map(p=>`<div class="small muted">${fmtT(hm(new Date(p.in)))} – ${fmtT(hm(new Date(p.out)))} · ${fmtH(punchHrs(p))} h</div>`).join('')}
   </div>
   ${coverStaffCard(me)}${pushCard()}
@@ -2406,7 +2405,9 @@ function chartSheet(){let ws=UI.week||weekStart(today());
     ${sh.length?schedChart(sh,ws,7,[]):'<div class="empty">No shifts this week.</div>'}`}});
   ACT.chW=d=>{ws=addDays(ws,+d.n);UI.week=ws;drawSheet()}}
 /* ---------- clock ---------- */
-async function doClockIn(selfie,now){const me=actor();if(!me)return;if(openPunch(me)){toast(L('Already clocked in','已经打过卡'));return}now=now||new Date();const d=bizDate();
+// Clock-in always needs a selfie: any path without one opens the camera instead.
+function pickSelfie(){const x=document.createElement('input');x.type='file';x.accept='image/*';x.setAttribute('capture','user');x.dataset.up='selfie';x.hidden=true;document.body.appendChild(x);x.addEventListener('change',()=>setTimeout(()=>x.remove(),0));x.click()}
+async function doClockIn(selfie,now){if(!selfie){pickSelfie();return null}const me=actor();if(!me)return;if(openPunch(me)){toast(L('Already clocked in','已经打过卡'));return}now=now||new Date();const d=bizDate();
   const sh=shiftsOn(d,me);let best=null;sh.forEach(s=>{const dt=Math.abs(now-atTime(d,s.start));if(!best||dt<best.dt)best={s,dt}});
   let late=0;if(best){const m=(now-atTime(d,best.s.start))/6e4;if(m>(D.settings.lateGrace||0))late=Math.round(m)}
   const body={empId:me,loc:curLoc(),date:d,in:now.toISOString(),out:null,shiftId:best?.s.id||null,late,selfie:selfie||null};const pid=uidGen();
