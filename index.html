@@ -385,7 +385,9 @@ function render(force){if(DRAGGING){setTimeout(()=>render(force),300);return}
   if(UI.pv&&isMgr)h=`<div class="hint" style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span class="grow"><b>Preview:</b> you are seeing what ${UI.pv==='mgr'?'a store manager':(UI.kActor?esc(empName(UI.kActor))+' (staff)':'staff')} sees${UI.pv==='mgr'?' at '+esc(locName(curLoc())):''}.</span><button class="btn sm" data-act="pvExit">Exit preview</button></div>`+h;
   v.innerHTML=h;mountView()}
 // clock-in selfie as a small photo on the right (tap = full size); yellow ring when AI found no BLISS logo
-const selfieThumb=(p,emp)=>p?.selfie?`<img src="${BLOB}${esc(p.selfie)}" alt="Clock-in selfie" title="Clock-in selfie${p.selfieAi?.ok===false?' — no BLISS logo':''}" data-act="viewPh" data-pid="${esc(p.selfie)}" data-cap="${esc(empName(emp||p.empId))} · clock-in ${esc(fmtT(hm(new Date(p.in))))}${p.selfieAi?.ok===false?' · BLISS logo not visible':''}" style="width:40px;height:40px;flex:none;border-radius:10px;object-fit:cover;cursor:zoom-in;${p.selfieAi?.ok===false?'outline:2px solid var(--warn);outline-offset:1px':'border:1px solid var(--line)'}">`:'';
+const selfieImg=(p,emp,o)=>{const ph=o?p?.selfieOut:p?.selfie,ai=o?p?.selfieOutAi:p?.selfieAi,t=o?p?.out:p?.in,w=o?'Clock-out':'Clock-in';return ph?`<img src="${BLOB}${esc(ph)}" alt="${w} selfie" title="${w} selfie${ai?.ok===false?' — no BLISS logo':''}" data-act="viewPh" data-pid="${esc(ph)}" data-cap="${esc(empName(emp||p.empId))} · ${w.toLowerCase()} ${t?esc(fmtT(hm(new Date(t)))):''}${ai?.ok===false?' · BLISS logo not visible':''}" style="width:40px;height:40px;flex:none;border-radius:10px;object-fit:cover;cursor:zoom-in;${ai?.ok===false?'outline:2px solid var(--warn);outline-offset:1px':'border:1px solid var(--line)'}">`:''};
+const selfieThumb=(p,emp)=>selfieImg(p,emp,false)+selfieImg(p,emp,true);
+const selfieBad=p=>p?.selfieAi?.ok===false||p?.selfieOutAi?.ok===false;
 const storePick=st=>`<select class="hbtn" id="locsel" aria-label="Store">${st.map(l=>`<option value="${l}" ${curLoc()===l?'selected':''}>${esc(locName(l))}</option>`).join('')}</select>`;
 function drawHeader(m){
   const loc=esc(locName(curLoc()));const tag=t=>`<span class="hbtn" style="background:none">${t}</span>`;let r='';
@@ -619,10 +621,11 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
       <div class="t" style="font-weight:700;font-size:17px">${sh.length?sh.map(s=>`${fmtT(s.start)} – ${fmtT(s.end)}`).join(', '):L('No shift scheduled','今天没有排班')}</div></div>
       ${op?chip(op.late?'warn':'ok',op.late?L(`Late ${op.late} min`,`迟到 ${op.late} 分钟`):L('On time','准时')):''}</div>
     ${op?`${op.selfieAi&&op.selfieAi.ok===false?`<div class="hint warn">${L('BLISS logo not visible in your clock-in selfie.','打卡自拍里看不到 BLISS logo。')} <label class="btn sm" style="cursor:pointer;margin-top:6px">${ic('cam')} ${L('Retake selfie','重拍自拍')}<input type="file" accept="image/*" capture="user" data-up="reselfie" data-id="${esc(op.id)}" hidden></label></div>`:op.selfie&&AIC['s'+op.id]?`<div class="tiny muted">${L('Checking your selfie…','正在检查自拍…')}</div>`:''}<div class="row"><div class="grow"><div class="muted small">${L('Clocked in at','上班打卡')}</div><div class="clock" data-since="${esc(op.in)}">${fmtT(hm(new Date(op.in)))}</div></div></div>
-      <button class="btn big block" data-act="clockOut" data-id="${op.id}">${ic('clock')} ${L('Clock out','下班打卡')}</button>`
+      <label class="btn big block" style="cursor:pointer">${ic('clock')} ${L('Clock out','下班打卡')}<input type="file" accept="image/*" capture="user" data-up="selfieout" data-id="${esc(op.id)}" hidden></label>
+      <div class="tiny muted" style="text-align:center">${L('Clocking out also needs a selfie with the BLISS logo.','下班打卡也要在 BLISS logo 前自拍。')}</div>`
     :`<label class="btn pri big block" style="cursor:pointer">${ic('clock')} ${L('Clock in','上班打卡')}<input type="file" accept="image/*" capture="user" data-up="selfie" hidden></label>
       <div class="tiny muted" style="text-align:center">${L('Take a selfie with the BLISS logo behind you.','请在 BLISS logo 前自拍打卡。')}</div>`}
-    ${todayP.filter(p=>p.out).map(p=>`<div class="small muted">${fmtT(hm(new Date(p.in)))} – ${fmtT(hm(new Date(p.out)))} · ${fmtH(punchHrs(p))} h</div>`).join('')}
+    ${todayP.filter(p=>p.out).map(p=>`<div class="small muted">${fmtT(hm(new Date(p.in)))} – ${fmtT(hm(new Date(p.out)))} · ${fmtH(punchHrs(p))} h</div>${p.selfieOutAi?.ok===false?`<div class="hint warn">${L('BLISS logo not visible in your clock-out selfie.','下班自拍里看不到 BLISS logo。')} <label class="btn sm" style="cursor:pointer;margin-top:6px">${ic('cam')} ${L('Retake selfie','重拍自拍')}<input type="file" accept="image/*" capture="user" data-up="reselfieout" data-id="${esc(p.id)}" hidden></label></div>`:p.selfieOut&&AIC['so'+p.id]?`<div class="tiny muted">${L('Checking your selfie…','正在检查自拍…')}</div>`:''}`).join('')}
   </div>
   ${coverStaffCard(me)}${pushCard()}
   ${myTrk.length?`<h3>${L('Delivery during your shift','你这班要收的货')}</h3>${myTrk.map(o=>trkCard(o,o.track?.deliveredAt?'receive':'orderView')).join('')}`:''}
@@ -725,7 +728,7 @@ function vHome(){const d=bizDate();const sh=shiftsOn(d);const att=attention();co
     if(!p)c=Date.now()>atTime(d,s.start).getTime()+(D.settings.lateGrace||0)*6e4?chip('bad',L('Not clocked in','未打卡')):chip('',L('Not started','未开始'));
     else if(!p.out)c=chip(p.late?'warn':'ok',(p.late?L(`Late ${p.late}m · `,`迟到${p.late}分 · `):'')+L('In ','上班 ')+fmtT(hm(new Date(p.in))));
     else c=chip(p.late?'warn':'ok',`${fmtH(ps.reduce((a,x)=>a+punchHrs(x),0))} h`+(p.late?L(` · late ${p.late}m`,` · 迟到${p.late}分`):''));
-    return `<div class="li">${avatar(s.empId)}<div class="grow"><div class="t">${esc(empName(s.empId))}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)}${p?.selfieAi?.ok===false?` · <span style="color:var(--warn);font-weight:600">${L('selfie: no logo','自拍无 logo')}</span>`:''}</div></div>${c}${selfieThumb(p,s.empId)}</div>`}).join('')}</div>`
+    return `<div class="li">${avatar(s.empId)}<div class="grow"><div class="t">${esc(empName(s.empId))}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)}${selfieBad(p)?` · <span style="color:var(--warn);font-weight:600">${L('selfie: no logo','自拍无 logo')}</span>`:''}</div></div>${c}${selfieThumb(p,s.empId)}</div>`}).join('')}</div>`
    :`<div class="card empty"><b>${L('No shifts scheduled today','今天没有排班')}</b><button class="btn sm" data-act="tab" data-k="sched">${L('Open schedule','去排班')}</button></div>`}
   ${(()=>{const dd=ORD().filter(o=>o.status==='ordered'&&!o.track&&(!o.expected||o.expected<=d));return dd.length?`<h3>Deliveries to receive today</h3><div class="card flush list">${dd.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · shows on staff Today tasks</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}</div>`:''})()}
   <h3>${L('Checklists','每日检查')}</h3>
@@ -1825,6 +1828,9 @@ document.addEventListener('change',async e=>{const t=e.target;
   else if(kind==='tguide'){const fs=[...(t.files||[])];if(!fs.length||!TR)return;tgGrab();toast('Uploading…');for(const f of fs){const id=await uploadImg(f);if(id)TR.S[TR.cur].items[TR.gi].photos.push(id)}drawSheet()}
   else if(kind==='tref'){const f=t.files?.[0];if(!f||!TK)return;tkGrab();toast('Uploading example…');const id=await uploadImg(f);if(!id)return;const x=tkList()[+t.dataset.i];if(x){x.ref=id;drawSheet()}}
   else if(kind==='selfie'){const f=t.files?.[0];if(!f)return;const t0=new Date();const lab=t.closest('label');if(lab){lab.style.opacity=.6;lab.firstChild&&0}toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(lab)lab.style.opacity='';if(!id)return;const pid=await doClockIn(id,t0);if(pid)compress(f).then(b=>aiCheckSelfie(pid,id,b)).catch(()=>aiCheckSelfie(pid,id))}
+  else if(kind==='selfieout'){const f=t.files?.[0];if(!f)return;const pid=t.dataset.id;const t0=new Date();toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(!id)return;if(await doClockOut(pid,id,t0))compress(f).then(b=>aiCheckSelfie(pid,id,b,true)).catch(()=>aiCheckSelfie(pid,id,null,true))}
+  else if(kind==='reselfieout'){const f=t.files?.[0];if(!f)return;const pid=t.dataset.id;toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(!id)return;
+    if(await W(A.db.doc('punches/'+pid).update({selfieOut:id,selfieOutAi:null}))){D.punches[pid]={...D.punches[pid],selfieOut:id,selfieOutAi:null};render();compress(f).then(b=>aiCheckSelfie(pid,id,b,true)).catch(()=>aiCheckSelfie(pid,id,null,true))}}
   else if(kind==='reselfie'){const f=t.files?.[0];if(!f)return;const pid=t.dataset.id;toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(!id)return;
     if(await W(A.db.doc('punches/'+pid).update({selfie:id,selfieAi:null}))){D.punches[pid]={...D.punches[pid],selfie:id,selfieAi:null};render();compress(f).then(b=>aiCheckSelfie(pid,id,b)).catch(()=>aiCheckSelfie(pid,id))}}
   else if(kind==='shot'){const fs=[...(t.files||[])];if(!fs.length)return;grabOrderLines();for(const f of fs){const blob=await compress(f);SH_ORDER.shots.push({blob,url:URL.createObjectURL(blob)})}SH_ORDER.msg='';drawSheet()}
@@ -2406,33 +2412,33 @@ function chartSheet(){let ws=UI.week||weekStart(today());
   ACT.chW=d=>{ws=addDays(ws,+d.n);UI.week=ws;drawSheet()}}
 /* ---------- clock ---------- */
 // Clock-in always needs a selfie: any path without one opens the camera instead.
-function pickSelfie(){const x=document.createElement('input');x.type='file';x.accept='image/*';x.setAttribute('capture','user');x.dataset.up='selfie';x.hidden=true;document.body.appendChild(x);x.addEventListener('change',()=>setTimeout(()=>x.remove(),0));x.click()}
+function pickSelfie(kind,id){const x=document.createElement('input');x.type='file';x.accept='image/*';x.setAttribute('capture','user');x.dataset.up=kind||'selfie';if(id)x.dataset.id=id;x.hidden=true;document.body.appendChild(x);x.addEventListener('change',()=>setTimeout(()=>x.remove(),0));x.click()}
 async function doClockIn(selfie,now){if(!selfie){pickSelfie();return null}const me=actor();if(!me)return;if(openPunch(me)){toast(L('Already clocked in','已经打过卡'));return}now=now||new Date();const d=bizDate();
   const sh=shiftsOn(d,me);let best=null;sh.forEach(s=>{const dt=Math.abs(now-atTime(d,s.start));if(!best||dt<best.dt)best={s,dt}});
   let late=0;if(best){const m=(now-atTime(d,best.s.start))/6e4;if(m>(D.settings.lateGrace||0))late=Math.round(m)}
   const body={empId:me,loc:curLoc(),date:d,in:now.toISOString(),out:null,shiftId:best?.s.id||null,late,selfie:selfie||null};const pid=uidGen();
   if(await W(A.db.doc('punches/'+pid).set(body))){D.punches[pid]={id:pid,...body};toast(late?L(`Clocked in · ${late} min late`,`已打卡 · 迟到 ${late} 分钟`):L('Clocked in. Have a great shift!','已打卡，上班愉快！'));return pid}return null}
 /* AI: the clock-in selfie should show a person at the store with the BLISS logo (B with a leaf, or the word BLISS) */
-async function aiCheckSelfie(pid,photoId,blob){if(!A.sample||AIC['s'+pid])return;AIC['s'+pid]=true;render();
+async function aiCheckSelfie(pid,photoId,blob,out){const K=(out?'so':'s')+pid,F=out?'selfieOut':'selfie',FA=out?'selfieOutAi':'selfieAi';if(!A.sample||AIC[K])return;AIC[K]=true;render();
   try{blob=blob||await blobOf(photoId);if(!blob)return;
-    const r=await A.sample.json(`This is a clock-in selfie from a staff member at BLISS, a matcha shop. The rule: the selfie must be taken in the store with the BLISS logo visible behind the person.
+    const r=await A.sample.json(`This is a ${out?'clock-out':'clock-in'} selfie from a staff member at BLISS, a matcha shop. The rule: the selfie must be taken in the store with the BLISS logo visible behind the person.
 The BLISS logo is a white or green outline letter "B" with a leaf inside it, and/or the word "BLISS" (often with "MATCHA AND BEYOND"); it may be on a wall, sign, window, cup, menu board or apron.
 Check: 1) a person's face is visible; 2) the BLISS logo or word BLISS is visible anywhere in the photo (it can be small, partly covered or at an angle).
 Return JSON only: {"person": true|false, "logo": true|false, "note": "if something is missing, say what in at most 10 words, else empty"}`,{images:[blob],modelTier:'default'});
     const ok=r?.logo!==false&&r?.person!==false;const res={ok,logo:r?.logo!==false,person:r?.person!==false,note:String(r?.note||'').slice(0,100),photo:photoId,at:new Date().toISOString()};
-    if(D.punches[pid]?.selfie!==photoId)return;
-    await A.db.doc('punches/'+pid).update({selfieAi:res});D.punches[pid]={...D.punches[pid],selfieAi:res};
+    if(D.punches[pid]?.[F]!==photoId)return;
+    await A.db.doc('punches/'+pid).update({[FA]:res});D.punches[pid]={...D.punches[pid],[FA]:res};
     if(!ok)toast(L('BLISS logo not visible — please retake your selfie','看不到 BLISS logo，请重拍自拍'));
-  }catch(e){console.warn('ai selfie',e)}finally{delete AIC['s'+pid];render()}}
-async function doClockOut(id){const p=D.punches[id];if(!p)return;const out=new Date().toISOString();
-  if(await W(A.db.doc('punches/'+id).update({out})))toast(L(`Clocked out · ${fmtH(punchHrs({...p,out}))} h`,`已下班 · ${fmtH(punchHrs({...p,out}))} 小时`))}
+  }catch(e){console.warn('ai selfie',e)}finally{delete AIC[K];render()}}
+async function doClockOut(id,selfie,now){const p=D.punches[id];if(!p)return false;if(!selfie){pickSelfie('selfieout',id);return false}const out=(now||new Date()).toISOString();
+  if(await W(A.db.doc('punches/'+id).update({out,selfieOut:selfie,selfieOutAi:null}))){D.punches[id]={...p,out,selfieOut:selfie,selfieOutAi:null};toast(L(`Clocked out · ${fmtH(punchHrs({...p,out}))} h`,`已下班 · ${fmtH(punchHrs({...p,out}))} 小时`));return true}return false}
 function empTimeSheet(emp,ps,pl){const pe=addDays(ps,pl-1);
   openSheet({live:true,title:()=>`${esc(empName(emp))} · ${L('Hours','工时')}`,body:()=>{const P=Object.values(D.punches).filter(p=>p.empId===emp&&p.date>=ps&&p.date<=pe).sort((a,b)=>a.in.localeCompare(b.in));
    return `<div class="small muted">${fmtD(ps)} – ${fmtD(pe)}</div><div class="card flush list">${P.map(p=>{const sh=D.shifts[p.shiftId];return `<div class="li tap" data-act="punchEdit" data-id="${p.id}"><div class="grow"><div class="t">${fmtD(p.date)}</div><div class="small muted">${fmtT(hm(new Date(p.in)))} – ${p.out?fmtT(hm(new Date(p.out))):'?'}${sh?` · ${L('shift','排班')} ${fmtT(sh.start)}–${fmtT(sh.end)}`:''}${p.edited?' · '+L('edited','已修改'):''}${isOwner&&p.out&&countedIn(p)!==p.in?' · '+L(`counted from ${fmtT(hm(new Date(countedIn(p))))}`,`从 ${fmtT(hm(new Date(countedIn(p))))} 起算`):''}</div></div>${p.late?chip('warn',L(`Late ${p.late}m`,`迟到${p.late}分`)):''}${p.out?`<b>${fmtH(punchHrs(p))}</b>`:chip('bad',L('No clock-out','缺下班卡'))}${selfieThumb(p)}</div>`}).join('')||`<div class="empty">${L('No punches','没有打卡记录')}</div>`}</div>
    ${bonusDetail(emp,ps,pl)}<button class="btn" data-act="punchNew" data-emp="${emp}">${ic('plus')} ${L('Add missed punch','补录打卡')}</button>`}})}
 function punchSheet(id,emp){const p=id?D.punches[id]:{empId:emp,date:today(),in:null,out:null,late:0};const inT=p.in?hm(new Date(p.in)):'',outT=p.out?hm(new Date(p.out)):'';
   openSheet({title:()=>`${esc(empName(p.empId))} · ${L('Punch','打卡')}`,body:()=>`<label class="f">${L('Date','日期')}<input class="in" type="date" id="pu_date" value="${esc(p.date)}"></label>
-   ${p.selfie?`<img src="${BLOB}${esc(p.selfie)}" alt="Clock-in selfie" style="max-height:240px;object-fit:contain;border-radius:10px;background:var(--sunk);cursor:zoom-in" data-act="viewPh" data-pid="${esc(p.selfie)}" data-cap="Clock-in selfie">`:''}
+   ${p.selfie||p.selfieOut?`<div class="g2">${[[p.selfie,p.selfieAi,L('Clock-in selfie','上班自拍')],[p.selfieOut,p.selfieOutAi,L('Clock-out selfie','下班自拍')]].map(([ph,ai,cap])=>ph?`<div class="stack" style="gap:4px"><img src="${BLOB}${esc(ph)}" alt="${cap}" style="max-height:240px;width:100%;object-fit:contain;border-radius:10px;background:var(--sunk);cursor:zoom-in" data-act="viewPh" data-pid="${esc(ph)}" data-cap="${cap}"><div class="tiny ${ai?.ok===false?'':'muted'}" ${ai?.ok===false?'style="color:var(--warn);font-weight:600"':''}>${cap}${ai?.ok===false?' · '+L('no BLISS logo','无 BLISS logo'):''}</div></div>`:`<div class="tiny muted">${cap}: ${L('none','无')}</div>`).join('')}</div>`:''}
    <div class="g3"><label class="f">${L('In','上班')}<input class="in" type="time" id="pu_in" value="${inT}"></label><label class="f">${L('Out','下班')}<input class="in" type="time" id="pu_out" value="${outT}"></label><label class="f">${L('Late (min)','迟到(分)')}<input class="in" type="number" id="pu_late" value="${p.late||0}"></label></div>`,
    foot:()=>`${id?`<button class="btn bad" data-act="punchDel" data-id="${id}">${L('Delete','删除')}</button>`:''}<button class="btn pri" data-act="punchSave" data-id="${id||''}">${L('Save','保存')}</button>`,mount:()=>{SH.emp=p.empId}})}
 
