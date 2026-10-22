@@ -296,6 +296,14 @@ async function tick() {
       await merge(org, `cover/${cid}`, { stage: 3 }); cv.stage = 3; await log(org, cid, cv, `Still no offers after ${Math.round(mins)} min: called ${n} people`); done.push(`${cid} call ${n}`);
     }
   }
+  // delivery receiving jobs for whoever is on shift (also runs with each Gmail check; one push per person per order)
+  const orgs = (await q("orgs?select=id")) as Json[];
+  for (const g of orgs) {
+    try {
+      const orders = (await docsOf(g.id, "orders")).map((r) => ({ id: r.doc_id, data: r.data })).filter((o) => dutyDue(o.data, etParts().ymd));
+      if (orders.length) done.push(...(await deliveryDuty(g.id, await deliveryCtx(g.id), orders)).map((x) => `duty ${x.order} ${x.duty}`));
+    } catch (e) { console.warn("duty", e); }
+  }
   return { open: open.length, done };
 }
 // A response from a text or a call: same rules as the app (urgent → first one gets it; otherwise an offer).
