@@ -534,13 +534,50 @@ async function deliveryCtx(org: string) {
     if (dv.owner === "all" || (dv.owner === "key" && who === "plan")) members.filter((m) => m.role === "owner").forEach((m) => ids.add(m.user_id));
     return [...ids];
   }
+  // staff working at this store right now: scheduled now (from 30 min before the start) or clocked in
+  function onShift(loc: string) {
+    const now = toMin(etParts().hm); const ids = new Set<string>();
+    shifts.filter((s) => (s.data.loc || empLoc(s.data.empId)) === loc && toMin(s.data.end || "23:59") + (toMin(s.data.end) < toMin(s.data.start) ? 1440 : 0) > now && toMin(s.data.start) - 30 <= now).forEach((s) => userOfEmp[s.data.empId] && ids.add(userOfEmp[s.data.empId]));
+    punches.filter((p) => !p.data.out && (p.data.loc || empLoc(p.data.empId)) === loc).forEach((p) => userOfEmp[p.data.empId] && ids.add(userOfEmp[p.data.empId]));
+    return dv.staff ? [...ids] : [];
+  }
   const owners = members.filter((m) => m.role === "owner").map((m) => m.user_id);
-  return { locs, recipients, push, owners, settings: settings || {}, locName: (id: string) => locs.find((l) => l.id === id)?.name || id };
+  return { locs, recipients, onShift, push, owners, settings: settings || {}, locName: (id: string) => locs.find((l) => l.id === id)?.name || id };
 }
 const orderUrl = (id: string) => `${(env("APP_URL") || "").replace(/\/$/, "")}/?order=${id}`;
 async function alertOrder(org: string, ctx: Json, id: string, o: Json, stage: string) {
   const a = deliveryAlert(o, stage, ctx.locName(o.loc), ctx.locs.length > 1); if (!a || !ctx.push) return 0;
-  return await sendPush(ctx.recipients(o.loc, a.who), a.title, a.body, orderUrl(id));
+  const to = ctx.recipients(o.loc, a.who);
+  // whoever was told it's at the door already has the receiving job: don't send them the shift reminder too
+  if (["delivered", "late1"].includes(stage)) { const pinged = [...new Set([...(o.duty?.pinged || []), ...ctx.onShift(o.loc)])]; o.duty = { ...(o.duty || {}), pinged }; await merge(org, `orders/${id}`, { duty: { pinged } }).catch(() => {}); }
+  return await sendPush(to, a.title, a.body, orderUrl(id));
+}
+
+// Receiving is a job for whoever is on shift that day: when a delivery is at the door (or an order without
+// email tracking is due today) and someone starts their shift / clocks in, push them once to count it and take photos.
+export function dutyDue(o: Json, today: string, now = Date.now()) {
+  if (o.status !== "ordered" || o.kind === "stockin") return false;
+  const t = o.track;
+  if (t?.deliveredAt) return now - Date.parse(t.deliveredAt) < 14 * 3600e3;
+  if (t && t.stage === "canceled") return false;
+  if (!t) return !!o.expected && o.expected <= today && o.expected >= addDaysYmd(today, -1);
+  return false; // tracked but not delivered yet: the store emails trigger the alerts
+}
+const addDaysYmd = (s: string, n: number) => { const d = new Date(s + "T12:00:00Z"); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+async function deliveryDuty(org: string, ctx: Json, orders: { id: string; data: Json }[]) {
+  const out: Json[] = []; if (!ctx.push) return out; const today = etParts().ymd;
+  for (const o of orders) {
+    if (!dutyDue(o.data, today)) continue;
+    const loc = o.data.loc || ctx.locs[0]?.id; const done = new Set<string>(o.data.duty?.pinged || []);
+    const to = ctx.onShift(loc).filter((u: string) => !done.has(u)); if (!to.length) continue;
+    const t = o.data.track || {}; const n = t.items || (o.data.lines || []).length; const at = ctx.locs.length > 1 ? ` · ${ctx.locName(loc)}` : "";
+    const title = t.deliveredAt ? `📦 ${o.data.store} delivery is waiting${at}` : `📦 ${o.data.store} delivery today${at}`;
+    const body = `${t.deliveredAt ? "It was delivered and nobody has received it yet." : `Expected today${o.data.window ? " " + o.data.window : ""}.`}${n ? ` ${n} items.` : ""} Bring it in, count every item and take photos in the app (Receive delivery).`;
+    await sendPush(to, title, body, orderUrl(o.id));
+    const pinged = [...done, ...to]; o.data.duty = { ...(o.data.duty || {}), pinged };
+    await merge(org, `orders/${o.id}`, { duty: { pinged } }); out.push({ order: o.id, duty: to.length });
+  }
+  return out;
 }
 
 // Items canceled (out of stock): look at the bigger picture like a store manager would — has this item been
@@ -659,6 +696,7 @@ export async function onMail(org: string, msgs: Json[]) {
   const ids = [...seen].slice(-600);
   await q("docs", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ org_id: org, path: "owner/mail_seen", coll: "owner", doc_id: "mail_seen", data: { ids, at: new Date().toISOString(), last: [...out, ...(seenDoc.last || [])].slice(0, 40) } }) });
   out.push(...await deliveryReminders(org, ctx, orders));
+  out.push(...await deliveryDuty(org, ctx, orders));
   return out;
 }
 
