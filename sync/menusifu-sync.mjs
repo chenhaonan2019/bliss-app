@@ -89,6 +89,21 @@ async function describePage(page) {
 async function captureHeaders(page) {
   const cands = [], seen = new Set();
   let armed = false;
+  // The store opens at 11:30 and usually has no sales before ~12pm, so in the morning "today" is empty and the
+  // Breakdowns page shows nothing. Point the page's own report requests at yesterday instead, so it loads a full
+  // day (only requests for today or later are changed; the sync itself only ever asks for past days).
+  const today = nyDate(), yday = addDays(today, -1);
+  await page.route("**/cloud-report-service/fetchReportData*", (route) => {
+    const req = route.request();
+    try {
+      const b = JSON.parse(req.postData() || "null");
+      if (b?.curDate?.startDate && b.curDate.startDate >= today) {
+        b.curDate = { ...b.curDate, startDate: yday, endDate: today };
+        return route.continue({ postData: JSON.stringify(b) });
+      }
+    } catch {}
+    return route.continue();
+  });
   page.on("request", (r) => {
     if (!armed || !r.url().includes("/cloud-report-service/fetchReportData")) return;
     const h = r.headers(), k = JSON.stringify(h) + "|" + (r.postData() || "").replace(/"\d{4}-\d\d-\d\d"/g, "");
