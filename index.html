@@ -1308,7 +1308,11 @@ Inventory items: ${JSON.stringify(D.items.map(i=>({id:i.id,name:i.name,countUnit
       st.msg=`${st.split>1?L(`These screenshots are ${st.split} different orders (${[st.store,...st.queue.map(q=>q.store)].join(', ')}). This is order 1 of ${st.split}: ${st.store}. Save it and the next one opens. `,`这些截图是 ${st.split} 个不同的订单（${[st.store,...st.queue.map(q=>q.store)].join('、')}）。现在是第 1 个：${st.store}。保存后会自动打开下一个。`):''}Found ${st.lines.length} items for ${esc(locName(st.loc))}${st.gotDel?` · delivery ${fmtD(st.expected)}${st.window?' '+st.window:''}`:' · no delivery date found, please set it'}. Please check before saving.`}else st.msg=L('Could not read items. Enter them below.','没能识别出商品，请手动填写。')}
   catch(e){console.warn(e);st.msg=e?.code==='not_granted'?L('Allow Claude access when asked to use automatic reading.','需要允许 Claude 访问才能自动识别。'):e?.code==='rate_limited'?L('Too many requests. Try again in a minute.','请求太频繁，请稍后再试。'):L('Could not read this screenshot. Enter items below.','无法识别这张截图，请手动填写。')}
   st.busy=false;drawSheet()}
-async function orderSave(){grabOrderLines();const st=SH_ORDER;if(st.mode!=='instock'&&!st.shots.length){toast(L('Upload the order screenshot first','请先上传订单截图'));return}const lines=st.lines.filter(l=>l.name&&l.name.trim());if(!lines.length){toast(L('Add at least one item','至少添加一项'));return}
+async function orderSave(){const st=SH_ORDER;if(!st||st.saving)return;st.saving=true;const b=document.querySelector('[data-act="orderSave"]');if(b){b.disabled=true;b.textContent=L('Saving…','保存中…')}
+  try{await orderSaveRun()}finally{st.saving=false;if(SH_ORDER===st){const b2=document.querySelector('[data-act="orderSave"]');if(b2){b2.disabled=false;b2.textContent=st.mode==='instock'?'Add to stock':L('Save order','保存订单')}}}}
+async function orderSaveRun(){grabOrderLines();const st=SH_ORDER;if(st.mode!=='instock'&&!st.shots.length){toast(L('Upload the order screenshot first','请先上传订单截图'));return}const lines=st.lines.filter(l=>l.name&&l.name.trim());if(!lines.length){toast(L('Add at least one item','至少添加一项'));return}
+  if(st.mode!=='instock'&&st.orderNo){const dup=Object.values(D.orders).find(o=>o.store===st.store&&o.status!=='merged'&&o.src!=='email'&&(normNo(o.orderNo)===normNo(st.orderNo)||normNo(o.track?.no)===normNo(st.orderNo)));
+    if(dup){toast(L(`${st.store} #${st.orderNo} is already saved`,`${st.store} #${st.orderNo} 已经保存过了`));closeSheet();return}}
   const shotIds=[];for(const x of st.shots){const id=await uploadImg(x.blob);if(!id)return;shotIds.push(id)}const shotId=shotIds[0]||null;
   const id=uidGen();let body={...(st.fee!=null?{fee:st.fee}:{}),...(st.feePct!=null?{feePct:st.feePct}:{}),loc:st.loc||curLoc(),store:st.store,date:st.date,expected:st.expected,window:(st.window||'').trim(),lines,screenshot:shotId,screenshots:shotIds,status:'ordered',createdAt:new Date().toISOString(),createdBy:actor()||'manager',...(st.orderNo?{orderNo:st.orderNo}:{}),...(st.total?{total:st.total}:{})};
   if(st.mode==='instock'){if(!lines.some(l=>l.itemId)){toast('Pick the inventory item on at least one line');return}if(lines.some(l=>num(l.qty)==null)){toast('Enter a quantity on every line');return}
@@ -1322,14 +1326,18 @@ async function orderSave(){grabOrderLines();const st=SH_ORDER;if(st.mode!=='inst
 const normNo=x=>String(x||'').replace(/[^0-9]/g,'');
 function emailTwin(o,pool){const lc=o.loc||'wh';const cand=(pool||Object.values(D.orders)).filter(e=>e.id!==o.id&&e.track&&e.src==='email'&&!(e.lines||[]).length&&e.status!=='merged'&&e.status!=='canceled'&&e.store===o.store&&(e.loc||'wh')===lc);
   if(o.orderNo){const hit=cand.find(e=>normNo(e.track.no)===normNo(o.orderNo));if(hit)return hit;if(normNo(o.orderNo).length>=6&&cand.some(e=>e.track.no))return null}
-  const n=(o.lines||[]).length;const close=e=>!e.track.items||!n||Math.abs(e.track.items-n)<=Math.max(2,0.4*e.track.items);
+  const n=(o.lines||[]).length,u=(o.lines||[]).reduce((a,l)=>a+(num(l.qty)||1),0),ot=num(o.total)||(o.lines||[]).reduce((a,l)=>a+(num(l.price)||0),0);
+  const near2=(a,b)=>Math.abs(a-b)<=Math.max(2,0.4*a);const close=e=>!e.track.items||!n||near2(e.track.items,n)||near2(e.track.items,u)||(ot>0&&num(e.track.total)>0&&Math.abs(num(e.track.total)-ot)<=Math.max(3,0.08*num(e.track.total)));
   const near=cand.filter(e=>!e.track.no||!o.orderNo).filter(e=>Math.abs(Date.parse(e.createdAt||e.date)-Date.parse(o.createdAt||o.date))<36*3600e3&&(o.expected&&e.expected&&o.expected===e.expected?true:(!o.expected||!e.expected||Math.abs(Date.parse(e.expected)-Date.parse(o.expected))<=864e5)&&close(e)));
   if(near.length<=1)return near[0]||null;
   const tot=num(o.total)||(o.lines||[]).reduce((a,l)=>a+(num(l.price)||0),0);
   const sc=e=>(tot&&num(e.track.total)?Math.abs(num(e.track.total)-tot)/tot:0.5)+(e.track.items&&(o.lines||[]).length?Math.abs(e.track.items-(o.lines||[]).length)/e.track.items:0.5);
   const s2=near.map(e=>({e,v:sc(e)})).sort((a,b)=>a.v-b.v);return s2[0].v+0.15<s2[1].v?s2[0].e:null}
 function mergeEmail(o,e){const out={...o,ref:e.ref,track:e.track,src:'screenshot+email',orderNo:o.orderNo||e.track?.no||null,expected:e.expected||o.expected,window:o.window||e.window||'',date:o.date||e.date};
-  if(o.status==='ordered'&&e.status==='canceled')out.status='canceled';return out}
+  if(o.status==='ordered'&&e.status==='canceled')out.status='canceled';
+  // the email order was already received in the app: keep that, don't send it back to "Ordered"
+  if(o.status==='ordered'&&['received','issue'].includes(e.status))for(const k of['status','receivedAt','receivedDate','receivedBy','recvNote','issueSeen','diffs'])if(e[k]!==undefined)out[k]=e[k];
+  return out}
 // existing pairs (made before linking existed): link them once, quietly
 async function relinkEmailOrders(){if(!isMgr||UI.relinked||!D.ready)return;UI.relinked=true;const all=Object.values(D.orders);
   for(const o of all){if(o.track||o.src==='email'||o.kind==='stockin'||!(o.lines||[]).length||o.status==='merged'||Date.now()-Date.parse(o.createdAt||o.date)>4*864e5)continue;
