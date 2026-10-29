@@ -1318,7 +1318,10 @@ function batNewSheet(){openSheet({title:()=>L('Made a batch','做了一批'),bod
     return `<div class="stack"><div class="hint">${L('Write this on the label and stick it on the container:','把这个写在标签上，贴在容器上：')}</div>
       <div class="card" style="font-family:ui-monospace,monospace;font-size:18px;line-height:1.5;border:2px dashed var(--ink);text-align:center"><b style="font-size:22px">${esc(b.name)}</b><br>${L('Made','制作')} ${dtShort(b.madeAt)}${b.madeByName?` · ${esc(b.madeByName.split(' ')[0])}`:''}<br><b style="font-size:22px">${L('USE BY','用到')} ${dtShort(b.expAt)}</b></div>
       <p class="small muted">${L('The app will remind whoever is on shift before it expires and when it\'s time to throw it out.','快过期和该扔的时候，app 会提醒当班的人。')}</p></div>`})()
-    :`<div class="stack"><p class="small muted">${L('What did you just make?','刚做了什么？')} · ${esc(locName(curLoc()))}</p>
+    :`<div class="stack"><p class="small muted">${L('What did you make?','做了什么？')} · ${esc(locName(curLoc()))}</p>
+      <div class="card stack" style="gap:6px;background:var(--sunk)"><label class="f">${L('When was it made?','什么时候做的？')}<input class="in" type="datetime-local" id="bat_at" value="${esc(UI.batAt||'')}" max="${(()=>{const n=new Date();return ymd(n)+'T'+hm(n)})()}"></label>
+        <div class="row" style="gap:6px;flex-wrap:wrap"><button class="btn sm ${!UI.batAt?'pri':''}" data-act="batAt" data-k="now">${L('Just now','刚刚')}</button>${[1,2,4].map(h=>`<button class="btn sm" data-act="batAt" data-k="${h}">${L(`${h}h ago`,`${h}小时前`)}</button>`).join('')}<button class="btn sm" data-act="batAt" data-k="y">${L('Yesterday','昨天')}</button></div>
+        <span class="tiny muted">${L('For a batch made earlier that wasn\'t logged. The use-by time counts from when it was made.','补记之前没记的批次。保质期从制作时间开始算。')}</span></div>
       <div class="g2">${PREP().map(x=>`<button class="btn" style="flex-direction:column;align-items:flex-start;text-align:left;min-height:64px" data-act="batMake" data-id="${esc(x.id)}"><b>${esc(x.name)}</b><span class="tiny muted">${lifeTxt(x.h)}${x.store?' · '+esc(x.store):''}</span></button>`).join('')}</div>
       ${isMgr?`<button class="btn sm" data-act="prepCfg">${L('Edit prep items','编辑备料')}</button>`:''}</div>`,
   foot:()=>`<button class="btn pri" data-act="batDone">${L('Done','完成')}</button>`})}
@@ -1348,10 +1351,12 @@ function regionPrep(){const since=addDays(bizDate(),-7);const S=LOCS().filter(l=
           ${b.review?chip(b.review.ok?'ok':'bad',(b.review.ok?L('Checked ✓','已检查 ✓'):L('Problem','有问题'))+` · ${esc(b.review.by)}`)
             :isMgr&&!UI.pv?`<div class="row" style="gap:6px"><button class="btn sm" data-act="batRev" data-id="${esc(b.id)}" data-k="1">✓ ${L('OK','合格')}</button><button class="btn sm bad" data-act="batRev" data-id="${esc(b.id)}" data-k="0">${L('Problem','有问题')}</button></div>`:''}</div>`}).join('')}</div></details>`:''}</div>`}).join('')}`}
 const PREP_ACT={
-  batNew:()=>{UI.batLabel=null;batNewSheet()},
+  batNew:()=>{UI.batLabel=null;UI.batAt='';batNewSheet()},
   batDone:()=>{UI.batLabel=null;closeSheet()},
-  batMake:async d=>{const x=PREP().find(p=>p.id===d.id);if(!x)return;const now=new Date();const id=bizDate().replace(/-/g,'')+'-'+uidGen().slice(-6);
-    const b={id,item:x.id,name:x.name,loc:curLoc(),madeAt:now.toISOString(),madeDate:bizDate(),madeBy:actor()||null,madeByName:meName(),life:x.h,store:x.store||'',expAt:new Date(now.getTime()+x.h*3600e3).toISOString(),status:'active'};
+  batAt:d=>{const n=new Date();if(d.k==='now')UI.batAt='';else{const t=d.k==='y'?new Date(n.getTime()-864e5):new Date(n.getTime()-(+d.k)*3600e3);UI.batAt=ymd(t)+'T'+hm(t)}drawSheet()},
+  batMake:async d=>{const x=PREP().find(p=>p.id===d.id);if(!x)return;const inp=$('#bat_at')?.value;const now=inp?new Date(inp):new Date();if(isNaN(now)||now.getTime()>Date.now()+6e4){toast(L('That time is in the future','时间不能是将来'));return}
+    const bd=(()=>{const t=new Date(now);if(t.getHours()<4)t.setDate(t.getDate()-1);return ymd(t)})();const id=bd.replace(/-/g,'')+'-'+uidGen().slice(-6);
+    const b={id,item:x.id,name:x.name,loc:curLoc(),madeAt:now.toISOString(),madeDate:bd,...(inp?{loggedAt:new Date().toISOString()}:{}),madeBy:actor()||null,madeByName:meName(),life:x.h,store:x.store||'',expAt:new Date(now.getTime()+x.h*3600e3).toISOString(),status:'active'};
     if(await W(A.db.doc('batches/'+id).set(b))){D.batches={...(D.batches||{}),[id]:b};UI.batLabel=id;drawSheet();render()}},
   batTaste:async d=>{const ok=d.k==='1';const v={ok,by:meName(),at:new Date().toISOString()};const k=bizDate();
     if(await W(A.db.doc('batches/'+d.id).update({tastes:{[k]:v}}))){const b=D.batches[d.id];D.batches[d.id]={...b,tastes:{...(b.tastes||{}),[k]:v}};render();
