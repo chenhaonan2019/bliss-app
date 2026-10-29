@@ -18,7 +18,9 @@ permissions:
 concurrency: menusifu-sync
 jobs:
   sync:
-    runs-on: ubuntu-latest
+    # Pinned: 'ubuntu-latest' became Ubuntu 26 on Oct 25 2026 and Playwright 1.56 can't
+    # install Chromium's system packages there, so every run failed at the install step.
+    runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
