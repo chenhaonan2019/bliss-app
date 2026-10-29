@@ -641,6 +641,7 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
   </div>
   ${coverStaffCard(me)}${pushCard()}
   ${myTrk.length?`<h3>${L('Delivery during your shift','你这班要收的货')}</h3>${myTrk.map(o=>trkCard(o,o.track?.deliveredAt?'receive':'orderView')).join('')}`:''}
+  ${prepCard()}
   ${availCard(me)}
   <h3>${L('Today’s tasks','今日任务')}</h3>
   ${allTasksDone(d)?`<div class="card row" style="gap:12px;border-left:4px solid var(--ok);background:var(--ok-bg)"><span style="font-size:24px;color:var(--ok)">✓</span><div class="grow"><div class="t">All of today's tasks are done</div><div class="small muted">Thank you!</div></div></div>`:''}
@@ -744,6 +745,7 @@ function vHome(){if(isPre(curLoc()))return vPreopen();const d=bizDate();const sh
     return `<div class="li">${avatar(s.empId)}<div class="grow"><div class="t">${esc(empName(s.empId))}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)}${selfieBad(p)?` · <span style="color:var(--warn);font-weight:600">${L('selfie: no logo','自拍无 logo')}</span>`:''}</div></div>${c}${selfieThumb(p,s.empId)}</div>`}).join('')}</div>`
    :`<div class="card empty"><b>${L('No shifts scheduled today','今天没有排班')}</b><button class="btn sm" data-act="tab" data-k="sched">${L('Open schedule','去排班')}</button></div>`}
   ${(()=>{const dd=ORD().filter(o=>o.status==='ordered'&&!o.track&&(!o.expected||o.expected<=d));return dd.length?`<h3>Deliveries to receive today</h3><div class="card flush list">${dd.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · shows on staff Today tasks</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}</div>`:''})()}
+  ${prepCard()}
   <h3>${L('Checklists','每日检查')}</h3>
   <div class="card flush list">${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" data-d="${d}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time(d))}</div><div class="small muted">${s.doc?.completedBy?esc(empName(s.doc.completedBy)):''}${s.doc?.review?' · '+(s.doc.review.status==='ok'?L('Passed','已合格'):L('Issue flagged','有问题')):''}${!s.doc?.review&&aiIssues(s.doc)?` · <span style="color:var(--warn)">AI: ${aiIssues(s.doc)} to check</span>`:''}</div></div>${chip(stChip(s.st),s.label)}</div>`}).join('')}
   ${countRows(d,1)}</div>
@@ -1071,6 +1073,7 @@ const RM_DEF=[
   {id:'photos',name:'Review checklist photos and flagged issues',perStore:true,rep:'weekly'},
   {id:'quality',name:'Taste test: drinks match the recipes',perStore:true,rep:'weekly'},
   {id:'clean',name:"Deep cleaning done for the week",perStore:true,rep:'weekly'},
+  {id:'prepchk',name:'Prep labels and throw-out photos checked (Region tab)',perStore:true,rep:'weekly',how:'Open the fridge: every container has a label and nothing is past its use-by time. Review the throw-out photos.'},
   {id:'stock',name:'Inventory count checked, reorders approved',perStore:true,rep:'weekly'},
   {id:'sched',name:"Next week's schedule and labor hours reviewed",perStore:true,rep:'weekly'},
   {id:'train',name:'Trainees on track',perStore:true,rep:'weekly'},
@@ -1124,6 +1127,7 @@ function vRegion(){const d=bizDate();
       <div class="small muted">${t.low==null?L('No count yet','还没盘点'):`${t.low} ${L('low / out','偏低')}`} · ${t.arriving} ${L('deliveries','到货')}</div></div>`}).join('');
   return `<div class="stack"><div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})}</div><h2>${L('Region','区域')}</h2></div>
   <h3>${L('Stores today','各店今天')}</h3><div class="g2">${stores}</div><p class="tiny muted" style="margin-top:-6px">${L('Tap a store to open it.','点门店进入。')}</p>
+  ${regionPrep()}
   <div class="row"><h3 class="grow">${L('Weekly checklist','每周清单')}</h3>${pvRM()?'':`<button class="btn sm" data-act="rmEdit">${L('Edit list','编辑清单')}</button>`}</div>
   ${rmBody()}</div>`}
 function rmEditSheet(){openSheet({live:true,title:()=>L('Edit regional checklist','编辑区域清单'),body:()=>rmEditBody(),
@@ -1260,6 +1264,79 @@ const PRE_ACT={
     if(await preWrite(l,{items:it})){closeSheet();toast(L('Saved','已保存'))}},
   preDel:async d=>{if(SH.confirmDel!==+d.i){SH.confirmDel=+d.i;drawSheet();return}const l=curLoc();const it=preItems(l).filter((_,i)=>i!==+d.i);if(await preWrite(l,{items:it}))closeSheet()},
 };
+
+/* ---------- Prep batches & expiry ----------
+   Managers list what gets made in-store and how long it lasts (config/prep). Staff tap "Made a batch" (batches/<id>);
+   the app shows what to write on the label, counts down, and the server pushes whoever is on shift before it expires,
+   when it expires, and the store's managers + regional manager if it's still not thrown out 30 min later.
+   Throwing out needs a photo; the regional manager reviews those photos in the Region tab. */
+const PREP=()=>D.prepCfg||[];
+const BAT=()=>Object.values(D.batches||{});
+const batActive=l=>BAT().filter(b=>b.loc===l&&b.status==='active').sort((a,b)=>String(a.expAt).localeCompare(String(b.expAt)));
+const lifeTxt=h=>h>=24&&h%24===0?L(`${h/24} day${h===24?'':'s'}`,`${h/24}天`):L(`${h} h`,`${h}小时`);
+const batWarnMs=b=>Math.min(60*6e4,Math.max(15*6e4,(Date.parse(b.expAt)-Date.parse(b.madeAt))*0.2));
+const batState=(b,now=Date.now())=>{const e=Date.parse(b.expAt);return now>=e?'exp':now>=e-batWarnMs(b)?'soon':'ok'};
+function fmtLeft(ms){const m=Math.max(1,Math.round(Math.abs(ms)/6e4));if(m<60)return L(`${m} min`,`${m}分钟`);if(m<1440){const h=Math.floor(m/60),r=m%60;return L(`${h}h${r?' '+r+'m':''}`,`${h}小时${r?r+'分':''}`)}const d=Math.floor(m/1440),h=Math.floor(m%1440/60);return L(`${d}d${h?' '+h+'h':''}`,`${d}天${h?h+'小时':''}`)}
+const dtShort=iso=>{const d=new Date(iso);return `${d.getMonth()+1}/${d.getDate()} ${fmtT(hm(d))}`};
+function batRow(b,opts={}){const s=batState(b);const left=Date.parse(b.expAt)-Date.now();
+  const st=s==='exp'?chip('bad',L(`Expired ${fmtLeft(left)} ago`,`已过期 ${fmtLeft(left)}`)):s==='soon'?chip('warn',L(`Expires in ${fmtLeft(left)}`,`${fmtLeft(left)}后过期`)):`<span class="tiny muted">${L(`${fmtLeft(left)} left`,`还剩 ${fmtLeft(left)}`)}</span>`;
+  return `<div class="li" style="flex-wrap:wrap;gap:8px;${s==='exp'?'background:var(--bad-bg,#fdecec)':''}"><div class="grow" style="min-width:55%"><div class="t">${s==='exp'?'🗑️ ':s==='soon'?'⏳ ':''}${esc(b.name)}${opts.store?` · <span class="small muted">${esc(locName(b.loc))}</span>`:''}</div>
+    <div class="tiny muted">${L('Made','制作')} ${dtShort(b.madeAt)}${b.madeByName?' · '+esc(b.madeByName):''} → <b>${L('use by','用到')} ${dtShort(b.expAt)}</b></div></div>${st}
+    ${opts.ro?'':`<div class="row" style="gap:6px;flex:1 1 100%;justify-content:flex-end">${s!=='exp'?`<button class="btn sm" data-act="batUsed" data-id="${esc(b.id)}">${L('Used up','用完了')}</button>`:''}<label class="btn sm ${s==='exp'?'bad':''}" style="cursor:pointer">${ic('cam')} ${L('Thrown out','已丢弃')}<input type="file" accept="image/*" capture="environment" data-up="bdisc" data-id="${esc(b.id)}" hidden></label></div>`}</div>`}
+function prepCard(){const l=curLoc();if(isPre(l))return'';const act=batActive(l);if(!PREP().length&&!isMgr)return'';const nExp=act.filter(b=>batState(b)==='exp').length;
+  return `<div class="row"><h3 class="grow">${L('Prep & expiry','备料和保质期')}${nExp?` ${chip('bad',L(`${nExp} to throw out`,`${nExp} 个要扔`))}`:''}</h3>${PREP().length?`<button class="btn sm pri" data-act="batNew">${ic('plus')} ${L('Made a batch','做了一批')}</button>`:''}</div>
+  ${!PREP().length?`<div class="card stack" style="gap:8px"><div class="small">${L('List what you make in-store (e.g. Black Sesame, boba, cream foam) and how long each lasts. Staff log each batch, the app counts down and reminds them to throw it out.','列出店里自己做的东西（比如 Black Sesame、珍珠、奶盖）和能放多久。员工每做一批就记一下，app 会倒计时并提醒扔掉。')}</div><button class="btn" data-act="prepCfg">${L('Set up prep items','设置备料')}</button></div>`
+   :`<div class="card flush list">${act.map(b=>batRow(b)).join('')||`<div class="empty small">${L('Nothing open. Tap "Made a batch" each time you make something on the list.','目前没有。每做一批就点"做了一批"。')}</div>`}</div>`}`}
+function batNewSheet(){openSheet({title:()=>L('Made a batch','做了一批'),body:()=>UI.batLabel?(()=>{const b=D.batches?.[UI.batLabel];if(!b)return'';
+    return `<div class="stack"><div class="hint">${L('Write this on the label and stick it on the container:','把这个写在标签上，贴在容器上：')}</div>
+      <div class="card" style="font-family:ui-monospace,monospace;font-size:18px;line-height:1.5;border:2px dashed var(--ink);text-align:center"><b style="font-size:22px">${esc(b.name)}</b><br>${L('Made','制作')} ${dtShort(b.madeAt)}${b.madeByName?` · ${esc(b.madeByName.split(' ')[0])}`:''}<br><b style="font-size:22px">${L('USE BY','用到')} ${dtShort(b.expAt)}</b></div>
+      <p class="small muted">${L('The app will remind whoever is on shift before it expires and when it\'s time to throw it out.','快过期和该扔的时候，app 会提醒当班的人。')}</p></div>`})()
+    :`<div class="stack"><p class="small muted">${L('What did you just make?','刚做了什么？')} · ${esc(locName(curLoc()))}</p>
+      <div class="g2">${PREP().map(x=>`<button class="btn" style="flex-direction:column;align-items:flex-start;text-align:left;min-height:64px" data-act="batMake" data-id="${esc(x.id)}"><b>${esc(x.name)}</b><span class="tiny muted">${lifeTxt(x.h)}${x.store?' · '+esc(x.store):''}</span></button>`).join('')}</div>
+      ${isMgr?`<button class="btn sm" data-act="prepCfg">${L('Edit prep items','编辑备料')}</button>`:''}</div>`,
+  foot:()=>`<button class="btn pri" data-act="batDone">${L('Done','完成')}</button>`})}
+function prepCfgSheet(){UI.prepE=UI.prepE||PREP().map(x=>({...x}));openSheet({live:true,title:()=>L('Prep items & shelf life','备料和保质期'),body:()=>`<div class="stack">
+   <p class="small muted">${L('How long each one is good for after it\'s made. Same for every store.','做好后能放多久。所有门店通用。')}</p>
+   <div class="card flush list">${UI.prepE.map((x,i)=>`<div class="li" style="flex-wrap:wrap;gap:6px"><input class="in grow" id="pp_n${i}" value="${esc(x.name)}" style="min-width:55%" aria-label="Name">
+     <input class="in" type="number" min="1" step="1" id="pp_v${i}" value="${x.h>=24&&x.h%24===0?x.h/24:x.h}" style="width:70px" aria-label="How long">
+     <select class="in" id="pp_u${i}" style="width:auto"><option value="h" ${!(x.h>=24&&x.h%24===0)?'selected':''}>${L('hours','小时')}</option><option value="d" ${x.h>=24&&x.h%24===0?'selected':''}>${L('days','天')}</option></select>
+     <select class="in" id="pp_s${i}" style="width:auto">${[['Fridge',L('Fridge','冷藏')],['Room temp',L('Room temp','常温')],['Freezer',L('Freezer','冷冻')]].map(([k,n])=>`<option value="${k}" ${x.store===k?'selected':''}>${n}</option>`).join('')}</select>
+     <button class="btn sm bad" data-act="ppDel" data-i="${i}" aria-label="Delete">✕</button></div>`).join('')||`<div class="empty small">${L('Nothing yet.','还没有。')}</div>`}</div>
+   <div class="row"><input class="in grow" id="pp_new" placeholder="${L('e.g. Black Sesame','例如 Black Sesame')}"><button class="btn" data-act="ppAdd">${ic('plus')} ${L('Add','添加')}</button></div></div>`,
+  foot:()=>`<button class="btn" data-act="ppX">${L('Cancel','取消')}</button><button class="btn pri" data-act="ppSave">${L('Save','保存')}</button>`})}
+function ppGrab(){UI.prepE=UI.prepE.map((x,i)=>{const v=+($('#pp_v'+i)?.value||0);const u=$('#pp_u'+i)?.value||'h';return{...x,name:$('#pp_n'+i)?.value.trim()??x.name,h:v>0?(u==='d'?v*24:v):x.h,store:$('#pp_s'+i)?.value||x.store}})}
+// Region tab: per store — open batches, expired and not thrown out, and the throw-out photos to review
+function regionPrep(){const since=addDays(bizDate(),-7);const S=LOCS().filter(l=>!isPre(l.id));if(!PREP().length)return'';
+  return `<h3>${L('Prep & expiry','备料和保质期')}</h3>${S.map(l=>{const act=batActive(l.id);const exp=act.filter(b=>batState(b)==='exp');
+    const disc=BAT().filter(b=>b.loc===l.id&&b.status==='discarded'&&String(b.discardedAt||'').slice(0,10)>=since).sort((a,b)=>String(b.discardedAt).localeCompare(String(a.discardedAt)));const todo=disc.filter(b=>!b.review);
+    return `<div class="card stack" style="gap:8px"><div class="row"><b class="grow">${esc(l.name)}</b>${exp.length?chip('bad',L(`${exp.length} expired, not thrown out`,`${exp.length} 个过期未扔`)):chip('ok',L('Nothing expired','没有过期'))}</div>
+      ${exp.length?`<div class="list">${exp.map(b=>batRow(b,{ro:true})).join('')}</div>`:''}
+      <div class="small muted">${act.length} ${L('open','在用')} · ${disc.length} ${L('thrown out this week','本周丢弃')}${todo.length?` · <b style="color:var(--warn)">${todo.length} ${L('to check','待检查')}</b>`:''}</div>
+      ${disc.length?`<details ${todo.length?'open':''}><summary class="small" style="cursor:pointer;font-weight:600">${L('Throw-out photos','丢弃照片')}</summary><div class="list" style="margin-top:6px">${disc.map(b=>{const late=b.lateMin>0;
+        return `<div class="li" style="gap:8px;flex-wrap:wrap">${b.photo?`<img src="${BLOB}${esc(b.photo)}" alt="" data-act="viewPh" data-pid="${esc(b.photo)}" data-cap="${esc(b.name)} · ${esc(b.discardedByName||'')}" style="width:48px;height:48px;object-fit:cover;border-radius:8px;cursor:zoom-in">`:''}
+          <div class="grow" style="min-width:50%"><div class="t">${esc(b.name)}</div><div class="tiny muted">${L('Use by','用到')} ${dtShort(b.expAt)} · ${L('thrown out','丢弃')} ${dtShort(b.discardedAt)} ${esc(b.discardedByName||'')}</div></div>
+          ${b.early?chip('info',L('Early','提前扔')):late?chip(b.lateMin>60?'bad':'warn',L(`${fmtLeft(b.lateMin*6e4)} late`,`晚了 ${fmtLeft(b.lateMin*6e4)}`)):chip('ok',L('On time','准时'))}
+          ${b.review?chip(b.review.ok?'ok':'bad',(b.review.ok?L('Checked ✓','已检查 ✓'):L('Problem','有问题'))+` · ${esc(b.review.by)}`)
+            :isMgr&&!UI.pv?`<div class="row" style="gap:6px"><button class="btn sm" data-act="batRev" data-id="${esc(b.id)}" data-k="1">✓ ${L('OK','合格')}</button><button class="btn sm bad" data-act="batRev" data-id="${esc(b.id)}" data-k="0">${L('Problem','有问题')}</button></div>`:''}</div>`}).join('')}</div></details>`:''}</div>`}).join('')}`}
+const PREP_ACT={
+  batNew:()=>{UI.batLabel=null;batNewSheet()},
+  batDone:()=>{UI.batLabel=null;closeSheet()},
+  batMake:async d=>{const x=PREP().find(p=>p.id===d.id);if(!x)return;const now=new Date();const id=bizDate().replace(/-/g,'')+'-'+uidGen().slice(-6);
+    const b={id,item:x.id,name:x.name,loc:curLoc(),madeAt:now.toISOString(),madeDate:bizDate(),madeBy:actor()||null,madeByName:meName(),life:x.h,store:x.store||'',expAt:new Date(now.getTime()+x.h*3600e3).toISOString(),status:'active'};
+    if(await W(A.db.doc('batches/'+id).set(b))){D.batches={...(D.batches||{}),[id]:b};UI.batLabel=id;drawSheet();render()}},
+  batUsed:async d=>{const p={status:'used',usedAt:new Date().toISOString(),usedByName:meName()};if(await W(A.db.doc('batches/'+d.id).update(p))){D.batches[d.id]={...D.batches[d.id],...p};toast(L('Marked used up','已标记用完'));render()}},
+  batRev:async d=>{const p={review:{ok:d.k==='1',by:meName(),at:new Date().toISOString()}};if(await W(A.db.doc('batches/'+d.id).update(p))){D.batches[d.id]={...D.batches[d.id],...p};render()}},
+  prepCfg:()=>{UI.prepE=null;prepCfgSheet()},
+  ppAdd:()=>{ppGrab();const v=$('#pp_new').value.trim();if(!v)return;UI.prepE.push({id:slug(v)+'-'+uidGen().slice(-3),name:v,h:24,store:'Fridge'});drawSheet()},
+  ppDel:d=>{ppGrab();UI.prepE.splice(+d.i,1);drawSheet()},
+  ppX:()=>{UI.prepE=null;closeSheet()},
+  ppSave:async()=>{ppGrab();const list=UI.prepE.filter(x=>x.name&&x.h>0).map(x=>({id:x.id,name:x.name,h:x.h,store:x.store||''}));
+    if(await W(A.db.doc('config/prep').set({list}))){D.prepCfg=list;UI.prepE=null;toast(L('Saved','已保存'));closeSheet();render()}},
+};
+async function onBatchDiscard(t){const f=t.files?.[0];const id=t.dataset.id;const b=D.batches?.[id];if(!f||!b)return;toast(L('Uploading photo…','正在上传照片…'));
+  const ph=await uploadImg(f);if(!ph)return;const now=new Date();const late=Math.round((now-Date.parse(b.expAt))/6e4);
+  const p={status:'discarded',discardedAt:now.toISOString(),discardedBy:actor()||null,discardedByName:meName(),photo:ph,lateMin:Math.max(0,late),...(late<0?{early:true}:{})};
+  if(await W(A.db.doc('batches/'+id).update(p))){D.batches[id]={...b,...p};toast(L('Thrown out — thanks!','已丢弃，谢谢！'));render()}}
 
 function mountView(){
   document.querySelectorAll('[data-pname]').forEach(async el=>{const u=el.dataset.pname;if(!A.user){el.textContent=L('New account','新账号');return}const ps=await A.user.profiles([u]);el.textContent=ps[u]?.name||L('New account','新账号')});
@@ -2061,6 +2138,7 @@ document.addEventListener('change',async e=>{const t=e.target;
   if(kind==='task'){await onTaskUpload(t)}
   else if(kind==='files'){await onFilesUpload(t);t.value=''}
   else if(kind==='tguide'){const fs=[...(t.files||[])];if(!fs.length||!TR)return;tgGrab();toast('Uploading…');for(const f of fs){const id=await uploadImg(f);if(id)TR.S[TR.cur].items[TR.gi].photos.push(id)}drawSheet()}
+  else if(kind==='bdisc'){await onBatchDiscard(t);t.value=''}
   else if(kind==='tref'){const f=t.files?.[0];if(!f||!TK)return;tkGrab();toast('Uploading example…');const id=await uploadImg(f);if(!id)return;const x=tkList()[+t.dataset.i];if(x){if(TK.loc)x.refs={...(x.refs||{}),[TK.loc]:id};else x.ref=id;drawSheet()}}
   else if(kind==='selfie'){const f=t.files?.[0];if(!f)return;const t0=new Date();const lab=t.closest('label');if(lab){lab.style.opacity=.6;lab.firstChild&&0}toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(lab)lab.style.opacity='';if(!id)return;const pid=await doClockIn(id,t0);if(pid)compress(f).then(b=>aiCheckSelfie(pid,id,b)).catch(()=>aiCheckSelfie(pid,id))}
   else if(kind==='selfieout'){const f=t.files?.[0];if(!f)return;const pid=t.dataset.id;const t0=new Date();toast('Uploading selfie…');const id=await uploadImg(f);t.value='';if(!id)return;if(await doClockOut(pid,id,t0))compress(f).then(b=>aiCheckSelfie(pid,id,b,true)).catch(()=>aiCheckSelfie(pid,id,null,true))}
@@ -2589,7 +2667,7 @@ function fcGrab(){const c=fcCfg();const v=(id,d)=>{const x=num($(id)?.value);ret
   return{...c,cap:Math.max(20,v('#fc_cap',c.cap)),max1:Math.max(20,v('#fc_max1',c.max1)),minStaff:Math.max(0,Math.round(v('#fc_min',c.minStaff))),buffer:v('#fc_buf',c.buffer),weeks:Math.max(3,Math.min(16,Math.round(v('#fc_weeks',c.weeks)))),geo:{...(c.geo||{}),...FCS.geo},
   opened:Object.fromEntries(LOCS().map(l=>{const x=$('#fc_open_'+l.id)?.value;return[l.id,x&&/^\d{4}-\d\d-\d\d$/.test(x)?x:(c.opened?.[l.id]||'')]}).filter(([,x])=>x))}}
 async function fcSaveCfg(f){const cfg={...(D.schedCfg||{}),forecast:f};if(!await W(A.db.doc('mgr/sched').set(cfg)))return false;D.schedCfg=cfg;FCM={};return true}
-Object.assign(ACT,RM_ACT,PRE_ACT);
+Object.assign(ACT,RM_ACT,PRE_ACT,PREP_ACT);
 // Manager / owner: make the photos on a checklist this store's example photos (for every checklist that has the same item).
 ACT.exAll=async d=>{const k=d.type+d.date;if(UI.exAll!==k){UI.exAll=k;drawSheet();return}UI.exAll=null;
   const loc=curLoc();const doc=photoDoc(d.date,d.type);const ph=doc?.photos||{};const list=JSON.parse(JSON.stringify(taskList()));let n=0;
@@ -2709,8 +2787,9 @@ async function boot(){
   if(!db){render();return}
   uid=user?await user.id():null;isMgr=user?await user.canEdit():false;isOwner=user?await user.isOwner():false;
   c.use('assets').then(x=>{A.assets=x;rerender()});c.use('sample').then(x=>{A.sample=x;rerender()});c.use('downloads').then(x=>{A.downloads=x;rerender()});
-  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='files')D.files=v.list||[];if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='tasknotes'){D.taskNotes=v.notes||{};D.taskWeekly=v.weekly||{}}if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='guide')D.guideCfg=v;if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
+  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='files')D.files=v.list||[];if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='prep')D.prepCfg=v.list||[];if(d.id==='tasknotes'){D.taskNotes=v.notes||{};D.taskWeekly=v.weekly||{}}if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='guide')D.guideCfg=v;if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
   subscribe(db.collection('employees'),s=>{D.employees=mapDocs(s)});
+  subscribe(db.collection('batches').where('madeDate','>=',addDays(today(),-40)),s=>{D.batches=mapDocs(s)});
   subscribe(db.collection('links'),s=>{D.links=mapDocs(s)});
   subscribe(db.collection('counts').orderBy('date','desc').limit(120),s=>{D.counts=mapDocs(s)});
   subscribe(db.collection('orders').orderBy('createdAt','desc').limit(150),s=>{D.orders=mapDocs(s)});

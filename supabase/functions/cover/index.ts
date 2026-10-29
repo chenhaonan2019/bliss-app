@@ -303,6 +303,7 @@ async function tick() {
       const orders = (await docsOf(g.id, "orders")).map((r) => ({ id: r.doc_id, data: r.data })).filter((o) => dutyDue(o.data, etParts().ymd));
       if (orders.length) done.push(...(await deliveryDuty(g.id, await deliveryCtx(g.id), orders)).map((x) => `duty ${x.order} ${x.duty}`));
     } catch (e) { console.warn("duty", e); }
+    try { done.push(...(await batchDuty(g.id, await deliveryCtx(g.id))).map((x) => `batch ${x.batch} ${x.kind} ${x.to}`)); } catch (e) { console.warn("batch", e); }
   }
   return { open: open.length, done };
 }
@@ -581,7 +582,9 @@ async function deliveryCtx(org: string) {
     return dv.staff ? [...ids] : [];
   }
   const owners = members.filter((m) => m.role === "owner").map((m) => m.user_id);
-  return { locs, recipients, onShift, push, owners, settings: settings || {}, locName: (id: string) => locs.find((l) => l.id === id)?.name || id };
+  // store managers of this store + every regional manager (escalations)
+  const managers = (loc: string) => [...new Set(emps.filter((e) => e.data.active !== false && e.data.role === "Manager" && (e.data.regional || empLoc(e.doc_id) === loc || (e.data.locs || []).includes(loc))).map((e) => userOfEmp[e.doc_id]).filter(Boolean))] as string[];
+  return { locs, recipients, onShift, managers, push, owners, settings: settings || {}, locName: (id: string) => locs.find((l) => l.id === id)?.name || id };
 }
 const orderUrl = (id: string) => `${(env("APP_URL") || "").replace(/\/$/, "")}/?order=${id}`;
 async function alertOrder(org: string, ctx: Json, id: string, o: Json, stage: string) {
@@ -590,6 +593,35 @@ async function alertOrder(org: string, ctx: Json, id: string, o: Json, stage: st
   // whoever was told it's at the door already has the receiving job: don't send them the shift reminder too
   if (["delivered", "late1"].includes(stage)) { const pinged = [...new Set([...(o.duty?.pinged || []), ...ctx.onShift(o.loc)])]; o.duty = { ...(o.duty || {}), pinged }; await merge(org, `orders/${id}`, { duty: { pinged } }).catch(() => {}); }
   return await sendPush(to, a.title, a.body, orderUrl(id));
+}
+
+// Prep batches (Black Sesame, boba…): remind whoever is on shift before it expires and when it does; if it's still
+// not thrown out 30 min after that reminder, tell the store's managers and the regional manager. Pure, for tests.
+export function batchAlert(b: Json, now = Date.now()) {
+  if (b.status !== "active" || !b.expAt) return null;
+  const e = Date.parse(b.expAt), a = b.alerts || {};
+  const warn = Math.min(60 * 6e4, Math.max(15 * 6e4, (e - Date.parse(b.madeAt || b.expAt)) * 0.2));
+  if (now >= e) { if (!a.exp) return "exp"; if (!a.esc && now - Date.parse(a.exp) >= 30 * 6e4) return "esc"; return null; }
+  if (now >= e - warn && !a.soon) return "soon";
+  return null;
+}
+const hmOf = (iso: string) => { const p = etParts(new Date(iso)); return fmtT(p.hm); };
+async function batchDuty(org: string, ctx: Json) {
+  const out: Json[] = []; if (!ctx.push) return out;
+  const rows = (await q(`docs?select=doc_id,data&org_id=eq.${org}&coll=eq.batches&data->>status=eq.active`)) as { doc_id: string; data: Json }[];
+  for (const r of rows) {
+    const b = r.data; const kind = batchAlert(b); if (!kind) continue;
+    const loc = b.loc || ctx.locs[0]?.id; if (ctx.locs.find((l: Json) => l.id === loc)?.stage === "preopen") continue;
+    const at = ctx.locs.length > 1 ? ` · ${ctx.locName(loc)}` : "";
+    const to: string[] = kind === "esc" ? ctx.managers(loc) : ctx.onShift(loc);
+    if (!to.length) continue; // nobody on shift (store closed): try again on the next run
+    const title = kind === "soon" ? `⏳ ${b.name} expires at ${hmOf(b.expAt)}${at}` : kind === "exp" ? `🗑️ Throw out ${b.name} now${at}` : `⚠️ ${b.name} expired and is still not thrown out${at}`;
+    const body = kind === "soon" ? `Use it first. When it's done or expired, mark it in the app.` : kind === "exp" ? `It expired at ${hmOf(b.expAt)}. Throw it out and tap "Thrown out" in the app with a photo.` : `It expired at ${hmOf(b.expAt)}. Staff were reminded 30 min ago. Please make sure it's thrown out.`;
+    await sendPush(to, title, body, `${(env("APP_URL") || "").replace(/\/$/, "")}/`);
+    await merge(org, `batches/${r.doc_id}`, { alerts: { [kind]: new Date().toISOString() } });
+    out.push({ batch: r.doc_id, kind, to: to.length });
+  }
+  return out;
 }
 
 // Receiving is a job for whoever is on shift that day: when a delivery is at the door (or an order without
