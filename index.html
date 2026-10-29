@@ -242,7 +242,7 @@ const num=v=>{const n=parseFloat(v);return isFinite(n)?n:null};
 const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)||('x'+Math.random().toString(36).slice(2,7));
 const uidGen=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const WD=()=>curLang()==='zh'?['日','一','二','三','四','五','六']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const ICON={map:'<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/>',
+const ICON={qc:'<path d="M12 3l7 3v5c0 4.5-3 8.5-7 10-4-1.5-7-5.5-7-10V6l7-3z"/><path d="M9 12l2 2 4-4"/>',map:'<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/>',
  home:'<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
  box:'<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
  cam:'<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -380,7 +380,7 @@ const EMP_TABS=[['etoday','home',()=>L('Today','今天')],['eshift','cal',()=>L(
 function render(force){if(DRAGGING){setTimeout(()=>render(force),300);return}
   if(!force&&typing($('#view'))){pendingMain=true;return}
   const m=mode();
-  const RT=['region','map',()=>L('Region','区域')];const tabs=m==='mgr'?(ownerView()?[['owner','star',()=>'Owner'],RT,...MGR_TABS]:canRM()?[...MGR_TABS.slice(0,1),RT,...MGR_TABS.slice(1)]:MGR_TABS):m==='emp'?(D.employees[actor()]?.role==='Trainee'?EMP_TABS:EMP_TABS.filter(t=>t[0]!=='etrain')):null;
+  const RT=['region','map',()=>L('Region','区域')],QT=['qc','qc',()=>L('Quality','品控')];const MT=[MGR_TABS[0],QT,...MGR_TABS.slice(1)],ET=[EMP_TABS[0],['eqc','qc',()=>L('Quality','品控')],...EMP_TABS.slice(1)];const tabs=m==='mgr'?(ownerView()?[['owner','star',()=>'Owner'],RT,...MT]:canRM()?[MT[0],RT,...MT.slice(1)]:MT):m==='emp'?(D.employees[actor()]?.role==='Trainee'?ET:ET.filter(t=>t[0]!=='etrain')):null;
   const nav=$('#nav');
   if(tabs&&!tabs.some(t=>t[0]===UI.tab))UI.tab=tabs[0][0];drawHeader(m);
   if(tabs){nav.hidden=false;
@@ -641,7 +641,7 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
   </div>
   ${coverStaffCard(me)}${pushCard()}
   ${myTrk.length?`<h3>${L('Delivery during your shift','你这班要收的货')}</h3>${myTrk.map(o=>trkCard(o,o.track?.deliveredAt?'receive':'orderView')).join('')}`:''}
-  ${prepCard()}
+  ${qcLink()}
   ${availCard(me)}
   <h3>${L('Today’s tasks','今日任务')}</h3>
   ${allTasksDone(d)?`<div class="card row" style="gap:12px;border-left:4px solid var(--ok);background:var(--ok-bg)"><span style="font-size:24px;color:var(--ok)">✓</span><div class="grow"><div class="t">All of today's tasks are done</div><div class="small muted">Thank you!</div></div></div>`:''}
@@ -745,7 +745,7 @@ function vHome(){if(isPre(curLoc()))return vPreopen();const d=bizDate();const sh
     return `<div class="li">${avatar(s.empId)}<div class="grow"><div class="t">${esc(empName(s.empId))}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)}${selfieBad(p)?` · <span style="color:var(--warn);font-weight:600">${L('selfie: no logo','自拍无 logo')}</span>`:''}</div></div>${c}${selfieThumb(p,s.empId)}</div>`}).join('')}</div>`
    :`<div class="card empty"><b>${L('No shifts scheduled today','今天没有排班')}</b><button class="btn sm" data-act="tab" data-k="sched">${L('Open schedule','去排班')}</button></div>`}
   ${(()=>{const dd=ORD().filter(o=>o.status==='ordered'&&!o.track&&(!o.expected||o.expected<=d));return dd.length?`<h3>Deliveries to receive today</h3><div class="card flush list">${dd.map(o=>`<div class="li tap" data-act="receive" data-id="${o.id}" tabindex="0">${ic('box')}<div class="grow"><div class="t">Receive delivery · ${esc(o.store||'')}</div><div class="small muted">${(o.lines||[]).length} items${o.window?' · '+esc(o.window):''} · shows on staff Today tasks</div></div>${o.expected&&o.expected<d?chip('bad','Overdue'):chip('warn','Due today')}${ic('chev')}</div>`).join('')}</div>`:''})()}
-  ${prepCard()}
+  ${qcLink()}
   <h3>${L('Checklists','每日检查')}</h3>
   <div class="card flush list">${tasksOn(d).map(T=>{const s=taskState(d,T.type);return `<div class="li tap" data-act="photoTask" data-type="${T.type}" data-d="${d}" tabindex="0">${ic('cam')}<div class="grow"><div class="t">${T.name()} · ${fmtT(T.time(d))}</div><div class="small muted">${s.doc?.completedBy?esc(empName(s.doc.completedBy)):''}${s.doc?.review?' · '+(s.doc.review.status==='ok'?L('Passed','已合格'):L('Issue flagged','有问题')):''}${!s.doc?.review&&aiIssues(s.doc)?` · <span style="color:var(--warn)">AI: ${aiIssues(s.doc)} to check</span>`:''}</div></div>${chip(stChip(s.st),s.label)}</div>`}).join('')}
   ${countRows(d,1)}</div>
@@ -1061,7 +1061,7 @@ function businessCard(){const a=window.blissAccount;if(!a?.renameOrg)return'';
    ${UI.ownErr?`<div class="hint warn">${esc(UI.ownErr)}</div>`:''}
    <div class="row"><input class="in grow" id="bz_own" type="email" inputmode="email" autocomplete="off" placeholder="email@example.com"><button class="btn pri" data-act="bzOwnAdd">Add owner</button></div></div>`}
 function accountCard(){const a=window.blissAccount;if(!a)return'';return `<div class="card row wrapr"><div class="grow"><div class="eyebrow">Signed in</div><div class="t" style="font-weight:600">${esc(a.email||'')}</div><div class="small muted">${esc(a.org||'')} · ${esc(a.role||'')}</div></div>${(a.orgs||[]).length>1?`<button class="btn sm" data-act="switchOrg">Switch business</button>`:''}<button class="btn sm" data-act="signOut">Sign out</button></div>`}
-const VIEWS={region:vRegion,owner:vOwner,home:vHome,stock:vStock,photos:vPhotos,sched:vSched,team:vTeam,etoday:vEToday,eshift:vEShift,etrain:vETrain,efiles:vEFiles};
+const VIEWS={qc:vQC,eqc:vQC,region:vRegion,owner:vOwner,home:vHome,stock:vStock,photos:vPhotos,sched:vSched,team:vTeam,etoday:vEToday,eshift:vEShift,etrain:vETrain,efiles:vEFiles};
 function level(t){if(t>=90)return['ok','Excellent'];if(t>=80)return['info','Good'];if(t>=70)return['warn','Needs Improvement'];return['bad','Unsatisfactory']}
 
 /* ---------- Regional manager weekly checklist ----------
@@ -1279,7 +1279,7 @@ const batState=(b,now=Date.now())=>{const e=Date.parse(b.expAt);return now>=e?'e
 function fmtLeft(ms){const m=Math.max(1,Math.round(Math.abs(ms)/6e4));if(m<60)return L(`${m} min`,`${m}分钟`);if(m<1440){const h=Math.floor(m/60),r=m%60;return L(`${h}h${r?' '+r+'m':''}`,`${h}小时${r?r+'分':''}`)}const d=Math.floor(m/1440),h=Math.floor(m%1440/60);return L(`${d}d${h?' '+h+'h':''}`,`${d}天${h?h+'小时':''}`)}
 const dtShort=iso=>{const d=new Date(iso);return `${d.getMonth()+1}/${d.getDate()} ${fmtT(hm(d))}`};
 // Morning taste check: every batch made before today gets tasted once a day, before the store opens.
-const tasteDue=b=>b.status==='active'&&b.madeDate<bizDate();
+const tasteDue=b=>b.status==='active'&&b.madeDate<bizDate()&&batState(b)!=='exp';
 const tasted=b=>b.tastes?.[bizDate()];
 const openAt=l=>storeHrs(l,parseYmd(bizDate()).getDay())?.[0]||D.settings.prep1||'11:30';
 function tasteState(l){const due=batActive(l).filter(tasteDue);const done=due.filter(tasted);const late=Date.now()>atTime(bizDate(),openAt(l)).getTime();
@@ -1291,12 +1291,27 @@ function batRow(b,opts={}){const s=batState(b);const left=Date.parse(b.expAt)-Da
     ${tasteDue(b)&&s!=='exp'?(tasted(b)?`<div class="tiny" style="flex:1 1 100%;color:${tasted(b).ok?'var(--ok)':'var(--bad)'}">${tasted(b).ok?'👍':'👎'} ${L('Tasted today','今天已尝')} · ${esc(tasted(b).by)} ${fmtT(hm(new Date(tasted(b).at)))}</div>`
       :opts.ro?'':`<div class="row" style="gap:6px;flex:1 1 100%;align-items:center"><span class="tiny grow" style="color:var(--warn);font-weight:600">${L('Taste it today:','今天要尝：')}</span><button class="btn sm" data-act="batTaste" data-id="${esc(b.id)}" data-k="1">👍 ${L('Tastes right','味道对')}</button><button class="btn sm bad" data-act="batTaste" data-id="${esc(b.id)}" data-k="0">👎 ${L('Off','不对')}</button></div>`):''}
     ${opts.ro?'':`<div class="row" style="gap:6px;flex:1 1 100%;justify-content:flex-end">${s!=='exp'?`<button class="btn sm" data-act="batUsed" data-id="${esc(b.id)}">${L('Used up','用完了')}</button>`:''}<label class="btn sm ${s==='exp'||tasted(b)?.ok===false?'bad':''}" style="cursor:pointer">${ic('cam')} ${L('Thrown out','已丢弃')}<input type="file" accept="image/*" capture="environment" data-up="bdisc" data-id="${esc(b.id)}" hidden></label></div>`}</div>`}
-function prepCard(){const l=curLoc();if(isPre(l))return'';const act=batActive(l);if(!PREP().length&&!isMgr)return'';const nExp=act.filter(b=>batState(b)==='exp').length;
-  return `<div class="row"><h3 class="grow">${L('Prep & expiry','备料和保质期')}${nExp?` ${chip('bad',L(`${nExp} to throw out`,`${nExp} 个要扔`))}`:''}</h3>${PREP().length?`<button class="btn sm pri" data-act="batNew">${ic('plus')} ${L('Made a batch','做了一批')}</button>`:''}</div>
+function qcBody(){const l=curLoc();if(isPre(l))return'';const act=batActive(l);if(!PREP().length&&!isMgr)return'';const nExp=act.filter(b=>batState(b)==='exp').length;
+  return `<div class="row"><h3 class="grow">${L('Batches & expiry','备料和保质期')}${nExp?` ${chip('bad',L(`${nExp} to throw out`,`${nExp} 个要扔`))}`:''}</h3>${PREP().length?`<button class="btn sm pri" data-act="batNew">${ic('plus')} ${L('Made a batch','做了一批')}</button>`:''}</div>
   ${!PREP().length?`<div class="card stack" style="gap:8px"><div class="small">${L('List what you make in-store (e.g. Black Sesame, boba, cream foam) and how long each lasts. Staff log each batch, the app counts down and reminds them to throw it out.','列出店里自己做的东西（比如 Black Sesame、珍珠、奶盖）和能放多久。员工每做一批就记一下，app 会倒计时并提醒扔掉。')}</div><button class="btn" data-act="prepCfg">${L('Set up prep items','设置备料')}</button></div>`
    :`${(()=>{const t=tasteState(l);if(!t.due.length)return'';return t.left?`<div class="card row" style="gap:10px;border-left:4px solid ${t.late?'var(--bad)':'var(--warn)'}"><span style="font-size:22px">👅</span><div class="grow"><div class="t">${L('Morning taste check','早上试味')} · ${t.done.length}/${t.due.length}</div><div class="small muted">${L(`Taste each one below before opening (${fmtT(openAt(l))}). If it's off, throw it out.`,`开店前（${fmtT(openAt(l))}）把下面每样尝一下。不对就扔掉。`)}</div></div>${t.late?chip('bad',L('Late','晚了')):''}</div>`
      :`<div class="small" style="color:var(--ok)">👅 ${L('Taste check done today','今天已试味')}${t.last?` · ${esc(t.last.by)} ${fmtT(hm(new Date(t.last.at)))}`:''}</div>`})()}
    <div class="card flush list">${act.map(b=>batRow(b)).join('')||`<div class="empty small">${L('Nothing open. Tap "Made a batch" each time you make something on the list.','目前没有。每做一批就点"做了一批"。')}</div>`}</div>`}`}
+function qcLink(){const l=curLoc();if(isPre(l)||!PREP().length)return'';const act=batActive(l);const t=tasteState(l);const nExp=act.filter(b=>batState(b)==='exp').length;const nSoon=act.filter(b=>batState(b)==='soon').length;
+  if(!t.left&&!nExp&&!nSoon)return'';const bad=nExp||(t.left&&t.late);
+  return `<div class="card row tap" data-act="tab" data-k="${mode()==='emp'?'eqc':'qc'}" tabindex="0" style="gap:10px;border-left:4px solid ${bad?'var(--bad)':'var(--warn)'};cursor:pointer">${ic('qc')}<div class="grow"><div class="t">${L('Quality control','品控')}</div><div class="small">${[nExp?`<b style="color:var(--bad)">🗑️ ${L(`${nExp} to throw out`,`${nExp} 个要扔`)}</b>`:'',t.left?`<span style="color:${t.late?'var(--bad)':'var(--warn)'}">👅 ${L(`taste ${t.left} item${t.left>1?'s':''}`,`${t.left} 样要试味`)}</span>`:'',nSoon?`⏳ ${L(`${nSoon} expiring soon`,`${nSoon} 个快过期`)}`:''].filter(Boolean).join(' · ')}</div></div>${ic('chev')}</div>`}
+function vQC(){const l=curLoc();const since=addDays(bizDate(),-7);
+  if(isPre(l))return `<div class="stack"><div><div class="eyebrow">${esc(locName(l))}</div><h2>${L('Quality control','品控')}</h2></div><div class="card empty">${L('Starts when the store opens.','开业后开始。')}</div></div>`;
+  const disc=BAT().filter(b=>b.loc===l&&['discarded','used'].includes(b.status)&&String(b.discardedAt||b.usedAt||'').slice(0,10)>=since).sort((a,b)=>String(b.discardedAt||b.usedAt).localeCompare(String(a.discardedAt||a.usedAt)));
+  return `<div class="stack"><div><div class="eyebrow">${fmtD(bizDate(),{weekday:'long',month:'long',day:'numeric'})} · ${esc(locName(l))}</div><h2>${L('Quality control','品控')}</h2></div>
+  ${qcBody()}
+  ${PREP().length?`<p class="tiny muted" style="margin:0">${L('Log every batch you make. Write the label the app shows. Taste everything each morning before opening. Throw out anything expired or off, with a photo.','每做一批都记下来，按 app 显示的写标签。每天开店前把每样尝一遍。过期或味道不对的要扔，并拍照。')}</p>`:''}
+  ${disc.length?`<h3>${L('Finished this week','本周用完/丢弃')}</h3><div class="card flush list">${disc.map(b=>`<div class="li" style="gap:8px;flex-wrap:wrap">${b.photo?`<img src="${BLOB}${esc(b.photo)}" alt="" data-act="viewPh" data-pid="${esc(b.photo)}" data-cap="${esc(b.name)}" style="width:44px;height:44px;object-fit:cover;border-radius:8px;cursor:zoom-in">`:''}
+    <div class="grow" style="min-width:50%"><div class="t">${esc(b.name)}</div><div class="tiny muted">${b.status==='used'?`${L('Used up','用完')} ${dtShort(b.usedAt)} · ${esc(b.usedByName||'')}`:`${L('Thrown out','丢弃')} ${dtShort(b.discardedAt)} · ${esc(b.discardedByName||'')}`}</div></div>
+    ${b.status==='discarded'?(b.early?chip('info',L('Early','提前扔')):b.lateMin>0?chip(b.lateMin>60?'bad':'warn',L(`${fmtLeft(b.lateMin*6e4)} late`,`晚了 ${fmtLeft(b.lateMin*6e4)}`)):chip('ok',L('On time','准时'))):chip('',L('Used up','用完'))}
+    ${b.review?chip(b.review.ok?'ok':'bad',b.review.ok?L('Checked ✓','已检查 ✓'):L('Problem','有问题')):''}</div>`).join('')}</div>`:''}
+  ${isMgr&&PREP().length?`<button class="btn" data-act="prepCfg">${L('Prep items & shelf life','备料和保质期设置')}</button>`:''}
+  </div>`}
 function batNewSheet(){openSheet({title:()=>L('Made a batch','做了一批'),body:()=>UI.batLabel?(()=>{const b=D.batches?.[UI.batLabel];if(!b)return'';
     return `<div class="stack"><div class="hint">${L('Write this on the label and stick it on the container:','把这个写在标签上，贴在容器上：')}</div>
       <div class="card" style="font-family:ui-monospace,monospace;font-size:18px;line-height:1.5;border:2px dashed var(--ink);text-align:center"><b style="font-size:22px">${esc(b.name)}</b><br>${L('Made','制作')} ${dtShort(b.madeAt)}${b.madeByName?` · ${esc(b.madeByName.split(' ')[0])}`:''}<br><b style="font-size:22px">${L('USE BY','用到')} ${dtShort(b.expAt)}</b></div>
@@ -1317,7 +1332,7 @@ function prepCfgSheet(){UI.prepE=UI.prepE||PREP().map(x=>({...x}));openSheet({li
 function ppGrab(){UI.prepE=UI.prepE.map((x,i)=>{const v=+($('#pp_v'+i)?.value||0);const u=$('#pp_u'+i)?.value||'h';return{...x,name:$('#pp_n'+i)?.value.trim()??x.name,h:v>0?(u==='d'?v*24:v):x.h,store:$('#pp_s'+i)?.value||x.store}})}
 // Region tab: per store — open batches, expired and not thrown out, and the throw-out photos to review
 function regionPrep(){const since=addDays(bizDate(),-7);const S=LOCS().filter(l=>!isPre(l.id));if(!PREP().length)return'';
-  return `<h3>${L('Prep & expiry','备料和保质期')}</h3>${S.map(l=>{const act=batActive(l.id);const exp=act.filter(b=>batState(b)==='exp');
+  return `<h3>${L('Quality control','品控')}</h3>${S.map(l=>{const act=batActive(l.id);const exp=act.filter(b=>batState(b)==='exp');
     const disc=BAT().filter(b=>b.loc===l.id&&b.status==='discarded'&&String(b.discardedAt||'').slice(0,10)>=since).sort((a,b)=>String(b.discardedAt).localeCompare(String(a.discardedAt)));const todo=disc.filter(b=>!b.review);
     return `<div class="card stack" style="gap:8px"><div class="row"><b class="grow">${esc(l.name)}</b>${exp.length?chip('bad',L(`${exp.length} expired, not thrown out`,`${exp.length} 个过期未扔`)):chip('ok',L('Nothing expired','没有过期'))}</div>
       ${exp.length?`<div class="list">${exp.map(b=>batRow(b,{ro:true})).join('')}</div>`:''}
