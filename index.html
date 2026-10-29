@@ -242,7 +242,7 @@ const num=v=>{const n=parseFloat(v);return isFinite(n)?n:null};
 const slug=s=>String(s).toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)||('x'+Math.random().toString(36).slice(2,7));
 const uidGen=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,7);
 const WD=()=>curLang()==='zh'?['日','一','二','三','四','五','六']:['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
-const ICON={
+const ICON={map:'<path d="M9 4 3 6v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14M15 6v14"/>',
  home:'<path d="M3 11l9-7 9 7"/><path d="M5 10v10h14V10"/>',
  box:'<path d="M3 7l9-4 9 4-9 4-9-4z"/><path d="M3 7v10l9 4 9-4V7"/><path d="M12 11v10"/>',
  cam:'<path d="M4 8h3l2-3h6l2 3h3v11H4z"/><circle cx="12" cy="13" r="3.5"/>',
@@ -272,7 +272,7 @@ const D={employees:{},items:[],settings:{...DEF_SET},slots:{close:[],prep:[]},tr
   schedCfg:{},fixed:[],sales:{},ownerSet:{},wages:{},cashRates:{},payCaps:{},cashCaps:{},mgrSet:{pins:{}},evals:{},hourly:{},ready:false};
 const A={db:null,user:null,assets:null,sample:null,downloads:null};
 let uid=null,isMgr=false,isOwner=false,LOC_OVR=null;
-const ownerView=()=>isOwner&&UI.pv!=='mgr';
+const ownerView=()=>isOwner&&!['mgr','rm'].includes(UI.pv);
 const withLoc=(l,f)=>{const o=LOC_OVR;LOC_OVR=l;try{return f()}finally{LOC_OVR=o}};
 const UI={loc:ls.get('loc')||'wh',ewView:ls.get('ewView')||'list',tab:null,sub:{},kiosk:ls.get('kiosk')==='1',kActor:null,mgrUnlocked:false,
   day:null,week:null,pDate:null,ps:null,pl:7,openGrp:{}};
@@ -302,6 +302,7 @@ const isPre=l=>LOCS().find(x=>x.id===l)?.stage==='preopen';
 // Regional manager = a Manager the owner marked "regional": works at every store.
 const isRegional=e=>!!(e&&D.employees[e]?.role==='Manager'&&D.employees[e]?.regional);
 const amRegional=()=>isMgr&&!isOwner&&isRegional(D.links[uid]?.empId);
+const pvRM=()=>isOwner&&UI.pv==='rm';
 const empStores=e=>{const h=locOf(e);if(isRegional(e))return [h,...LOCS().map(l=>l.id).filter(l=>l!==h)];return [h,...(D.employees[e]?.locs||[]).filter(l=>l!==h&&LOCS().some(x=>x.id===l))]};
 const worksAt=(e,l)=>empStores(e).includes(l);
 const shLoc=s=>s.loc||locOf(s.empId);
@@ -315,7 +316,7 @@ const ORD=()=>Object.values(D.orders).filter(o=>(o.loc||'wh')===curLoc()&&o.stat
 const TAXDEF={fica:7.65,futa:0.6,suta:2.2};
 const taxRates=()=>({...TAXDEF,...(D.mgrSet.taxes||{})});
 // Pay rates and pay totals are for owners only (managers see hours, not money).
-const seePay=()=>isOwner&&UI.pv!=='mgr'&&UI.pv!=='emp';
+const seePay=()=>isOwner&&!UI.pv;
 const wageOf=e=>({pay:num(D.wages[e])||0,cash:num(D.cashRates?.[e])||0,cap:num(D.payCaps?.[e]),ccap:null});
 // Training pay: its own rate while someone is training (until the end date, or while their role is Trainee if no date).
 const trainOf=e=>({rate:num(D.trainRates?.[e])||0,via:D.trainVia?.[e]==='cash'?'cash':'payroll',until:D.trainUntil?.[e]||''});
@@ -379,7 +380,7 @@ const EMP_TABS=[['etoday','home',()=>L('Today','今天')],['eshift','cal',()=>L(
 function render(force){if(DRAGGING){setTimeout(()=>render(force),300);return}
   if(!force&&typing($('#view'))){pendingMain=true;return}
   const m=mode();
-  const tabs=m==='mgr'?(ownerView()?[['owner','star',()=>'Owner'],...MGR_TABS]:MGR_TABS):m==='emp'?(D.employees[actor()]?.role==='Trainee'?EMP_TABS:EMP_TABS.filter(t=>t[0]!=='etrain')):null;
+  const RT=['region','map',()=>L('Region','区域')];const tabs=m==='mgr'?(ownerView()?[['owner','star',()=>'Owner'],RT,...MGR_TABS]:canRM()?[...MGR_TABS.slice(0,1),RT,...MGR_TABS.slice(1)]:MGR_TABS):m==='emp'?(D.employees[actor()]?.role==='Trainee'?EMP_TABS:EMP_TABS.filter(t=>t[0]!=='etrain')):null;
   const nav=$('#nav');
   if(tabs&&!tabs.some(t=>t[0]===UI.tab))UI.tab=tabs[0][0];drawHeader(m);
   if(tabs){nav.hidden=false;
@@ -387,7 +388,7 @@ function render(force){if(DRAGGING){setTimeout(()=>render(force),300);return}
   else nav.hidden=true;
   const v=$('#view');let h='';
   try{h=m==='loading'?`<div class="empty"><b>${L('Loading…','加载中…')}</b></div>`:m==='nodb'?vNoDb():m==='pick'?vPick():m==='unlinked'?vUnlinked():(VIEWS[UI.tab]||(()=>''))()}catch(e){console.error(e);h=`<div class="hint warn">${esc(e.message)}</div>`}
-  if(UI.pv&&isMgr)h=`<div class="hint" style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span class="grow"><b>Preview:</b> you are seeing what ${UI.pv==='mgr'?'a store manager':(UI.kActor?esc(empName(UI.kActor))+' (staff)':'staff')} sees${UI.pv==='mgr'?' at '+esc(locName(curLoc())):''}.</span><button class="btn sm" data-act="pvExit">Exit preview</button></div>`+h;
+  if(UI.pv&&isMgr)h=`<div class="hint" style="display:flex;align-items:center;gap:10px;margin-bottom:14px"><span class="grow"><b>Preview:</b> you are seeing what ${UI.pv==='rm'?'a regional manager':UI.pv==='mgr'?'a store manager':(UI.kActor?esc(empName(UI.kActor))+' (staff)':'staff')} sees${UI.pv==='mgr'||UI.pv==='rm'?' at '+esc(locName(curLoc())):''}.</span><button class="btn sm" data-act="pvExit">Exit preview</button></div>`+h;
   v.innerHTML=h;mountView()}
 // clock-in selfie as a small photo on the right (tap = full size); yellow ring when AI found no BLISS logo
 const selfieImg=(p,emp,o)=>{const ph=o?p?.selfieOut:p?.selfie,ai=o?p?.selfieOutAi:p?.selfieAi,t=o?p?.out:p?.in,w=o?'Clock-out':'Clock-in';return ph?`<img src="${BLOB}${esc(ph)}" alt="${w} selfie" title="${w} selfie${ai?.ok===false?' — no BLISS logo':''}" data-act="viewPh" data-pid="${esc(ph)}" data-cap="${esc(empName(emp||p.empId))} · ${w.toLowerCase()} ${t?esc(fmtT(hm(new Date(t)))):''}${ai?.ok===false?' · BLISS logo not visible':''}" style="width:40px;height:40px;flex:none;border-radius:10px;object-fit:cover;cursor:zoom-in;${ai?.ok===false?'outline:2px solid var(--warn);outline-offset:1px':'border:1px solid var(--line)'}">`:''};
@@ -581,7 +582,7 @@ const uidName=u=>{if(!u)return'';if(u===uid)return myName();const e=D.links?.[u]
 // Reviewer name: saved name, else the reviewer id, else (older reviews) whoever last changed the record.
 const whoName=(r,doc)=>r?.byName||(r?.by&&D.employees[r.by]?empName(r.by):uidName(r?.by))||(doc&&!r?.by?uidName(doc.__by):'');
 function reviewIssues(){const t=bizDate();const r=[];for(let i=0;i<14;i++){const d=addDays(t,-i);tasksOn(d).forEach(T=>{const doc=photoDoc(d,T.type);if(doc?.review?.status==='issue'&&!doc.review.ownerSeen)r.push({k:'revIssue',d,type:T.type,doc,loc:curLoc()})})}return r}
-function attention(){const a=[];const t=bizDate();if(isOwner&&UI.pv!=='mgr'&&UI.pv!=='emp')a.push(...reviewIssues());
+function attention(){const a=[];const t=bizDate();if(isOwner&&!UI.pv)a.push(...reviewIssues());
   ORD().forEach(o=>{if(o.status==='issue'&&!o.issueSeen)a.push({k:'order',o});if(o.status==='ordered'&&o.expected&&o.expected<t)a.push({k:'late',o})});
   const seen=+(ls.get('availSeen')||0);Object.entries(D.avail).forEach(([e,v])=>{if(v.updatedAt&&new Date(v.updatedAt).getTime()>seen&&D.employees[e]&&worksAt(e,curLoc()))a.push({k:'avail',e})});
   if(t>availDue(t)){const nw=nextWk(t);emps().forEach(e=>{if(!D.avail[e.id]?.weeks?.[nw])a.push({k:'availMiss',e:e.id})})}
@@ -916,7 +917,7 @@ function spark(v){if(v.length<2)return'';const w=90,h=28,mn=Math.min(...v,60),mx
   return `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" aria-label="trend"><polyline points="${pts.join(' ')}" fill="none" stroke="var(--brand)" stroke-width="2"/><circle cx="${pts.at(-1).split(',')[0]}" cy="${pts.at(-1).split(',')[1]}" r="3" fill="var(--brand)"/></svg>`}
 function teamSet(){const s=D.settings;const cfg=coverCfg();
   const G=[
-   ['account','users','Account & business',[esc(window.blissAccount?.email||''),isOwner?'stores, owners, preview':''].filter(Boolean).join(' · '),()=>`${isOwner?`<div class="card stack"><h3>Preview other views</h3><p class="small muted">See the app the way a store manager or a staff member sees it. Nothing changes for anyone else. Tap "Exit preview" to come back.</p><div class="g2"><button class="btn" data-act="pvStart" data-k="mgr">${ic('users')} Preview as manager</button><button class="btn" data-act="pvStart" data-k="emp">${ic('clock')} Preview as staff</button></div></div>`:''}
+   ['account','users','Account & business',[esc(window.blissAccount?.email||''),isOwner?'stores, owners, preview':''].filter(Boolean).join(' · '),()=>`${isOwner?`<div class="card stack"><h3>Preview other views</h3><p class="small muted">See the app the way a store manager or a staff member sees it. Nothing changes for anyone else. Tap "Exit preview" to come back.</p><div class="g2"><button class="btn" data-act="pvStart" data-k="mgr">${ic('users')} Preview as manager</button><button class="btn" data-act="pvStart" data-k="emp">${ic('clock')} Preview as staff</button><button class="btn" data-act="pvStart" data-k="rm">🗺️ ${L('Preview as regional manager','预览区域经理')}</button></div></div>`:''}
   ${accountCard()}${isOwner&&!UI.pv?businessCard():''}`],
    ['sched','cal','Schedule',[pubOn()?'Owner review on':'Owner review off',backupOn()?'backups on':'backups off',`late after ${s.lateGrace} min`].join(' · '),()=>`${pubSetCard()}${backupSetCard()}
   <div class="card stack"><h3>Late & overtime</h3><div class="g2"><label class="f">${L('Late after (min)','迟到宽限(分)')}<input class="in" type="number" id="st_lg" value="${s.lateGrace}"></label><label class="f">${L('Overtime after (h/week)','加班线(时/周)')}<input class="in" type="number" id="st_ot" value="${s.otWeekly}"></label></div>
@@ -1058,7 +1059,7 @@ function businessCard(){const a=window.blissAccount;if(!a?.renameOrg)return'';
    ${UI.ownErr?`<div class="hint warn">${esc(UI.ownErr)}</div>`:''}
    <div class="row"><input class="in grow" id="bz_own" type="email" inputmode="email" autocomplete="off" placeholder="email@example.com"><button class="btn pri" data-act="bzOwnAdd">Add owner</button></div></div>`}
 function accountCard(){const a=window.blissAccount;if(!a)return'';return `<div class="card row wrapr"><div class="grow"><div class="eyebrow">Signed in</div><div class="t" style="font-weight:600">${esc(a.email||'')}</div><div class="small muted">${esc(a.org||'')} · ${esc(a.role||'')}</div></div>${(a.orgs||[]).length>1?`<button class="btn sm" data-act="switchOrg">Switch business</button>`:''}<button class="btn sm" data-act="signOut">Sign out</button></div>`}
-const VIEWS={owner:vOwner,home:vHome,stock:vStock,photos:vPhotos,sched:vSched,team:vTeam,etoday:vEToday,eshift:vEShift,etrain:vETrain,efiles:vEFiles};
+const VIEWS={region:vRegion,owner:vOwner,home:vHome,stock:vStock,photos:vPhotos,sched:vSched,team:vTeam,etoday:vEToday,eshift:vEShift,etrain:vETrain,efiles:vEFiles};
 function level(t){if(t>=90)return['ok','Excellent'];if(t>=80)return['info','Good'];if(t>=70)return['warn','Needs Improvement'];return['bad','Unsatisfactory']}
 
 /* ---------- Regional manager weekly checklist ----------
@@ -1084,28 +1085,49 @@ const rmLog=k=>D.rmLog?.[k]||{};
 const rmStores=()=>LOCS().filter(l=>!isPre(l.id));
 const rmSlots=x=>x.perStore?rmStores().map(l=>`${x.id}@${l.id}`):[x.id];
 const meName=()=>actor()?empName(actor()):isOwner?'Owner':(window.blissAccount?.email||'Manager').split('@')[0];
-function rmProgress(d){d=d||bizDate();let n=0,t=0;rmList().forEach(x=>{const c=rmLog(rmKey(x,d)).checks||{};rmSlots(x).forEach(k=>{t++;if(c[k])n++})});return{n,t}}
-const canRM=()=>isOwner||amRegional();
-function rmCard(){if(!canRM())return'';const d=bizDate();const{n,t}=rmProgress(d);const pct=t?Math.round(n/t*100):0;
-  return `<div class="card stack tap" data-act="rmOpen" tabindex="0" style="border-left:4px solid var(--brand);gap:6px"><div class="row"><span style="font-size:20px">🗺️</span><div class="grow"><div class="t">${L('Regional checklist','区域经理清单')} · ${L('week of','本周')} ${fmtD(wkStart(d),{month:'short',day:'numeric'})}</div><div class="small muted">${n}/${t} ${L('done','已完成')}${isOwner&&!amRegional()?' · '+L('what the regional manager does each week','区域经理每周要做的事'):''}</div></div>${ic('chev')}</div>
-    <div class="bar"><i style="width:${pct}%;background:var(--ok)"></i></div></div>`}
-function rmSheet(){openSheet({live:true,title:()=>L('Regional checklist','区域经理清单'),body:()=>{const d=UI.rmDay||bizDate();const wk=wkStart(d);const mo=d.slice(0,7);
-    if(UI.rmEdit)return rmEditBody();
+// Everyone who runs the checklist keeps their own copy: owners share "owner", each regional manager has their own.
+const rmPeople=()=>Object.entries(D.employees).filter(([id,e])=>e.active!==false&&isRegional(id)).map(([id])=>id);
+const rmMe=()=>amRegional()?D.links[uid]?.empId:isOwner&&!UI.pv?'owner':null;
+const rmWho=()=>{const ok=[...(isOwner?['owner']:[]),...(isOwner?rmPeople():[rmMe()].filter(Boolean))];if(pvRM())return rmPeople()[0]||'owner';return ok.includes(UI.rmWho)?UI.rmWho:(rmMe()||ok[0]||'owner')};
+const rmWhoName=w=>w==='owner'?L('You (owner)','你（老板）'):empName(w);
+const rmChecks=(k,w)=>rmLog(k).checks?.[w]||{};
+function rmProgress(d,w){d=d||bizDate();let n=0,t=0;rmList().forEach(x=>{const c=rmChecks(rmKey(x,d),w);rmSlots(x).forEach(k=>{t++;if(c[k])n++})});return{n,t}}
+const canRM=()=>(isOwner&&!UI.pv)||pvRM()||amRegional();
+function rmCard(){if(!canRM())return'';const d=bizDate();
+  const who=pvRM()?[rmWho()]:isOwner?['owner',...rmPeople()]:[rmMe()];
+  const line=w=>{const{n,t}=rmProgress(d,w);const pct=t?Math.round(n/t*100):0;return `<div class="row" style="gap:8px"><span class="small" style="width:110px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rmWhoName(w))}</span><div class="bar grow"><i style="width:${pct}%;background:var(--ok)"></i></div><span class="small muted" style="width:44px;text-align:right">${n}/${t}</span></div>`};
+  return `<div class="card stack tap" data-act="tab" data-k="region" tabindex="0" style="border-left:4px solid var(--brand);gap:8px"><div class="row"><span style="font-size:20px">🗺️</span><div class="grow"><div class="t">${L('Regional checklist','区域经理清单')} · ${L('week of','本周')} ${fmtD(wkStart(d),{month:'short',day:'numeric'})}</div>${isOwner&&!UI.pv&&!rmPeople().length?`<div class="tiny muted">${L('No regional manager yet: Team → person → "Regional manager"','还没有区域经理：团队 → 员工 → 勾选"区域经理"')}</div>`:''}</div>${ic('chev')}</div>
+    ${who.map(line).join('')}</div>`}
+function rmBody(){{const d=UI.rmDay||bizDate();const wk=wkStart(d);const mo=d.slice(0,7);
+    const w=rmWho();const mine=w===rmMe();const ro=!mine;
     const grp=r=>rmList().filter(x=>(x.rep||'weekly')===r);
-    const row=x=>{const k=rmKey(x,d);const c=rmLog(k).checks||{};const sl=rmSlots(x);const all=sl.every(s=>c[s]);
+    const row=x=>{const k=rmKey(x,d);const c=rmChecks(k,w);const sl=rmSlots(x);const all=sl.every(s=>c[s]);
       return `<div class="li" style="flex-wrap:wrap;gap:6px"><div class="grow" style="min-width:60%"><div class="t">${all?'✅ ':''}${esc(x.name)}</div>${x.how?`<div class="tiny muted">${esc(x.how)}</div>`:''}</div>
         <div class="row wrapr" style="gap:6px">${sl.map(s=>{const v=c[s];const l=s.includes('@')?s.split('@')[1]:null;
-          return `<button class="btn sm ${v?'pri':''}" data-act="rmCheck" data-k="${esc(k)}" data-s="${esc(s)}" aria-pressed="${v?'true':'false'}" title="${v?esc(v.by+' · '+fmtD(v.at.slice(0,10),{month:'short',day:'numeric'})):''}">${v?'✓':'☐'} ${l?esc(locName(l)):L('Done','完成')}</button>`}).join('')}</div></div>`};
-    const note=rmLog(wk).note||'';
-    return `<div class="row"><button class="btn sm" data-act="rmWk" data-n="-7">‹</button><div class="grow" style="text-align:center"><b>${L('Week of','周')} ${fmtD(wk,{month:'short',day:'numeric'})}</b>${wk===wkStart(bizDate())?'':` · <a href="#" data-act="rmWk" data-n="0">${L('this week','回到本周')}</a>`}</div><button class="btn sm" data-act="rmWk" data-n="7">›</button></div>
-      <p class="small muted">${L('Tap a store when it\'s done for this week. Your name and the time are saved.','每家店做完就点一下，会记下你的名字和时间。')}</p>
+          return `<button class="btn sm ${v?'pri':''}" ${ro?'disabled':''} data-act="rmCheck" data-k="${esc(k)}" data-s="${esc(s)}" aria-pressed="${v?'true':'false'}" title="${v?esc(fmtD(v.at.slice(0,10),{month:'short',day:'numeric'})):''}">${v?'✓':'☐'} ${l?esc(locName(l)):L('Done','完成')}</button>`}).join('')}</div></div>`};
+    const nt=rmLog(wk).notes?.[w]||{};
+    const tabs=isOwner&&!UI.pv?['owner',...rmPeople()]:[];
+    return `${tabs.length>1?`<div class="row wrapr" style="gap:6px">${tabs.map(x=>`<button class="btn sm ${x===w?'pri':''}" data-act="rmWho" data-k="${esc(x)}">${esc(rmWhoName(x))} · ${rmProgress(d,x).n}/${rmProgress(d,x).t}</button>`).join('')}</div>`:''}
+      ${pvRM()?`<div class="hint">${L(`Preview: this is ${rmWhoName(w)}'s checklist, view only.`,`预览：这是 ${rmWhoName(w)} 的清单，只能看。`)}</div>`:ro?`<div class="hint">${L(`${rmWhoName(w)}'s checklist (view only). Tap "You" to tick your own.`,`${rmWhoName(w)} 的清单（只能看）。点"你"打自己的勾。`)}</div>`:''}
+      <div class="row"><button class="btn sm" data-act="rmWk" data-n="-7">‹</button><div class="grow" style="text-align:center"><b>${L('Week of','周')} ${fmtD(wk,{month:'short',day:'numeric'})}</b>${wk===wkStart(bizDate())?'':` · <a href="#" data-act="rmWk" data-n="0">${L('this week','回到本周')}</a>`}</div><button class="btn sm" data-act="rmWk" data-n="7">›</button></div>
+      ${mine?`<p class="small muted">${L('Tap a store when it\'s done for this week.','每家店做完就点一下。')}</p>`:''}
       <h3>${L('Every week','每周')}</h3><div class="card flush list">${grp('weekly').map(row).join('')||'<div class="empty">—</div>'}</div>
       ${grp('monthly').length?`<h3>${L('This month','本月')} · ${fmtD(mo+'-01',{month:'long'})}</h3><div class="card flush list">${grp('monthly').map(row).join('')}</div>`:''}
-      <label class="f">${L('Notes for the owner this week','本周给老板的备注')}<textarea class="in" id="rm_note" rows="3" placeholder="${L('e.g. West Hartford ice machine leaking, technician Thursday. NH Olive short one closer on weekends.','例如：West Hartford 制冰机漏水，周四修。')}">${esc(note)}</textarea></label>
-      <button class="btn" data-act="rmNote" data-k="${wk}">${L('Save notes','保存备注')}</button>
-      ${rmLog(wk).noteBy?`<div class="tiny muted">${esc(rmLog(wk).noteBy)} · ${fmtD(String(rmLog(wk).noteAt).slice(0,10),{month:'short',day:'numeric'})}</div>`:''}`},
-  foot:()=>UI.rmEdit?`<button class="btn" data-act="rmEditX">${L('Cancel','取消')}</button><button class="btn pri" data-act="rmSave">${L('Save list','保存清单')}</button>`
-    :`<button class="btn" data-act="rmEdit">${L('Edit list','编辑清单')}</button><button class="btn pri" data-act="closeSheet">${L('Done','完成')}</button>`})}
+      ${mine?`<label class="f">${isOwner?L('Notes this week','本周备注'):L('Notes for the owner this week','本周给老板的备注')}<textarea class="in" id="rm_note" rows="3" placeholder="${L('e.g. West Hartford ice machine leaking, technician Thursday.','例如：West Hartford 制冰机漏水，周四修。')}">${esc(nt.text||'')}</textarea></label>
+      <button class="btn" data-act="rmNote" data-k="${wk}">${L('Save notes','保存备注')}</button>`:nt.text?`<div class="card"><div class="eyebrow">${L('Notes','备注')}</div><div style="white-space:pre-wrap">${esc(nt.text)}</div></div>`:''}
+      ${nt.at?`<div class="tiny muted">${L('Saved','保存于')} ${fmtD(String(nt.at).slice(0,10),{month:'short',day:'numeric'})}</div>`:''}`}}
+function vRegion(){const d=bizDate();
+  const stores=LOCS().map(l=>{if(isPre(l.id)){const p=preProg(l.id);const od=preOpenDate(l.id);return `<div class="card stack tap" data-act="regGo" data-l="${l.id}" style="cursor:pointer;min-width:0;border:2px dashed var(--line)" tabindex="0"><div class="row"><b class="grow">${esc(l.name)}</b>${chip('info',L('Opening soon','即将开业'))}</div><div class="small"><b>${p.pct}%</b> ${L('ready','准备好')}${od?` · ${L('opens','开业')} ${fmtD(od,{month:'short',day:'numeric'})}`:''}</div><div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div></div>`}
+    const t=storeToday(l.id);return `<div class="card stack tap" data-act="regGo" data-l="${l.id}" style="cursor:pointer;min-width:0;gap:6px" tabindex="0"><div class="row"><b class="grow">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
+      <div class="small"><b>${t.on}</b> ${L('clocked in','在班')} · <b>${t.sh.length}</b> ${L('shifts','班次')}${t.late?` · <span style="color:var(--warn)">${t.late} ${L('late','迟到')}</span>`:''}</div>
+      <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${s.filled}/${s.total}`)).join('')}</div>
+      <div class="small muted">${t.low==null?L('No count yet','还没盘点'):`${t.low} ${L('low / out','偏低')}`} · ${t.arriving} ${L('deliveries','到货')}</div></div>`}).join('');
+  return `<div class="stack"><div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})}</div><h2>${L('Region','区域')}</h2></div>
+  <h3>${L('Stores today','各店今天')}</h3><div class="g2">${stores}</div><p class="tiny muted" style="margin-top:-6px">${L('Tap a store to open it.','点门店进入。')}</p>
+  <div class="row"><h3 class="grow">${L('Weekly checklist','每周清单')}</h3>${pvRM()?'':`<button class="btn sm" data-act="rmEdit">${L('Edit list','编辑清单')}</button>`}</div>
+  ${rmBody()}</div>`}
+function rmEditSheet(){openSheet({live:true,title:()=>L('Edit regional checklist','编辑区域清单'),body:()=>rmEditBody(),
+  foot:()=>`<button class="btn" data-act="closeSheet">${L('Cancel','取消')}</button><button class="btn pri" data-act="rmSave">${L('Save list','保存清单')}</button>`})}
 function rmEditBody(){const l=UI.rmE;
   return `<p class="small muted">${L('What the regional manager should do. "Each store" gives one check per open store.','区域经理要做的事。"每家店" = 每家营业中的店各打一次勾。')}</p>
   <div class="card flush list">${l.map((x,i)=>`<div class="li" style="flex-wrap:wrap;gap:6px">
@@ -1117,19 +1139,19 @@ function rmEditBody(){const l=UI.rmE;
   <div class="row"><input class="in grow" id="rme_new" placeholder="${L('Add an item, e.g. Check the tip jar count','添加一项')}"><button class="btn" data-act="rmAdd">${ic('plus')} ${L('Add','添加')}</button></div>`}
 function rmGrab(){UI.rmE=UI.rmE.map((x,i)=>({...x,name:$('#rme_'+i)?.value.trim()??x.name,rep:$('#rmr_'+i)?.value||x.rep||'weekly',perStore:$('#rmp_'+i)?$('#rmp_'+i).checked:!!x.perStore,how:$('#rmh_'+i)?.value.trim()??x.how}))}
 const RM_ACT={
-  rmOpen:()=>{UI.rmDay=bizDate();UI.rmEdit=false;rmSheet()},
-  rmWk:d=>{UI.rmDay=+d.n?addDays(UI.rmDay||bizDate(),+d.n):bizDate();drawSheet()},
-  rmCheck:async d=>{const cur=rmLog(d.k).checks?.[d.s];const v=cur?null:{by:meName(),emp:actor()||null,at:new Date().toISOString()};
-    D.rmLog={...(D.rmLog||{}),[d.k]:{...rmLog(d.k),checks:{...(rmLog(d.k).checks||{}),[d.s]:v}}};drawSheet();render();
-    await W(A.db.doc('mgr/rmlog_'+d.k).update({checks:{[d.s]:v}}))},
-  rmNote:async d=>{const note=$('#rm_note').value.trim();const p={note,noteBy:meName(),noteAt:new Date().toISOString()};
-    if(await W(A.db.doc('mgr/rmlog_'+d.k).update(p))){D.rmLog={...(D.rmLog||{}),[d.k]:{...rmLog(d.k),...p}};toast(L('Saved','已保存'));drawSheet()}},
-  rmEdit:()=>{UI.rmE=rmList().length||D.rmList?.length?(D.rmList?.length?D.rmList:RM_DEF).map(x=>({...x})):RM_DEF.map(x=>({...x}));UI.rmEdit=true;drawSheet()},
-  rmEditX:()=>{UI.rmEdit=false;drawSheet()},
+  rmWk:d=>{UI.rmDay=+d.n?addDays(UI.rmDay||bizDate(),+d.n):bizDate();render()},
+  rmWho:d=>{UI.rmWho=d.k;render()},
+  rmCheck:async d=>{const w=rmMe();if(!w||rmWho()!==w)return;const cur=rmChecks(d.k,w)[d.s];const v=cur?null:{by:meName(),at:new Date().toISOString()};
+    const lg=rmLog(d.k);D.rmLog={...(D.rmLog||{}),[d.k]:{...lg,checks:{...(lg.checks||{}),[w]:{...rmChecks(d.k,w),[d.s]:v}}}};drawSheet();render();
+    await W(A.db.doc('mgr/rmlog_'+d.k).update({checks:{[w]:{[d.s]:v}}}))},
+  rmNote:async d=>{const w=rmMe();if(!w)return;const p={text:$('#rm_note').value.trim(),by:meName(),at:new Date().toISOString()};
+    if(await W(A.db.doc('mgr/rmlog_'+d.k).update({notes:{[w]:p}}))){const lg=rmLog(d.k);D.rmLog={...(D.rmLog||{}),[d.k]:{...lg,notes:{...(lg.notes||{}),[w]:p}}};toast(L('Saved','已保存'));drawSheet()}},
+  rmEdit:()=>{UI.rmE=(D.rmList?.length?D.rmList:RM_DEF).map(x=>({...x}));rmEditSheet()},
+  regGo:d=>{UI.loc=d.l;ls.set('loc',d.l);UI.tab='home';window.scrollTo(0,0);render()},
   rmDel:d=>{rmGrab();UI.rmE.splice(+d.i,1);drawSheet()},
   rmAdd:()=>{rmGrab();const v=$('#rme_new').value.trim();if(!v)return;UI.rmE.push({id:slug(v)+'-'+uidGen().slice(-3),name:v,rep:'weekly',perStore:false});drawSheet()},
   rmSave:async()=>{rmGrab();const list=UI.rmE.filter(x=>x.name).map(x=>({id:x.id,name:x.name,rep:x.rep==='monthly'?'monthly':'weekly',...(x.perStore?{perStore:true}:{}),...(x.how?{how:x.how}:{}),...(x.pre?{pre:true}:{})}));
-    if(await W(A.db.doc('mgr/rmlist').set({list}))){D.rmList=list;UI.rmEdit=false;toast(L('List saved','清单已保存'));drawSheet();render()}},
+    if(await W(A.db.doc('mgr/rmlist').set({list}))){D.rmList=list;toast(L('List saved','清单已保存'));closeSheet();render()}},
 };
 
 /* ---------- Store opening soon (pre-opening) ----------
