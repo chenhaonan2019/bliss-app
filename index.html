@@ -1166,10 +1166,10 @@ const PRE_DEF=[
   ['Marketing & opening',['Google Maps / Yelp listing','Social media announcement','Soft opening (friends and family)','Grand opening']]];
 const preDoc=l=>D.preopen?.[l]||null;
 const preItems=l=>preDoc(l)?.items||PRE_DEF.flatMap(([ph,ns],pi)=>ns.map((n,i)=>({id:`p${pi}-${i}`,phase:ph,name:n})));
-const prePhases=l=>{const ph=[];preItems(l).forEach(x=>{if(!ph.includes(x.phase))ph.push(x.phase)});PRE_DEF.forEach(([p])=>{if(!ph.includes(p))ph.push(p)});return ph};
+const prePhases=l=>{const ph=[...(preDoc(l)?.phases||PRE_DEF.map(([p])=>p))];preItems(l).forEach(x=>{if(!ph.includes(x.phase))ph.push(x.phase)});return ph};
 const preOpenDate=l=>preDoc(l)?.openDate||LOCS().find(x=>x.id===l)?.openDate||'';
 function preProg(l){const it=preItems(l);const n=it.filter(x=>x.done).length;return{n,t:it.length,pct:it.length?Math.round(n/it.length*100):0}}
-async function preWrite(l,patch){const cur=preDoc(l)||{};const next={...cur,items:preItems(l),...patch};D.preopen={...(D.preopen||{}),[l]:next};render();drawSheet();return W(A.db.doc('mgr/preopen_'+l).set(next))}
+async function preWrite(l,patch){const cur=preDoc(l)||{};const next={...cur,items:preItems(l),phases:prePhases(l),...patch};D.preopen={...(D.preopen||{}),[l]:next};render();drawSheet();return W(A.db.doc('mgr/preopen_'+l).set(next))}
 function vPreopen(){const l=curLoc();const d=bizDate();const od=preOpenDate(l);const days=od?Math.round((parseYmd(od)-parseYmd(d))/864e5):null;const p=preProg(l);
   const team=Object.entries(D.employees).filter(([id,e])=>e.active!==false&&worksAt(id,l));
   if(!isMgr)return `<div class="stack"><div><div class="eyebrow">${esc(locName(l))}</div><h2>${L('Opening soon','即将开业')}</h2></div><div class="card empty">${L('This store isn\'t open yet. Your manager will share your training schedule.','这家店还没开业，经理会告诉你培训安排。')}</div></div>`;
@@ -1182,11 +1182,12 @@ function vPreopen(){const l=curLoc();const d=bizDate();const od=preOpenDate(l);c
   <div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div>
   <div class="card row" style="gap:8px;flex-wrap:wrap"><label class="f grow" style="min-width:160px">${L('Target opening date','目标开业日')}<input class="in" type="date" id="pre_open" value="${esc(od)}"></label><button class="btn" data-act="preDate">${L('Save date','保存日期')}</button></div>
   ${prePhases(l).map(ph=>{const it=preItems(l).map((x,i)=>({x,i})).filter(({x})=>x.phase===ph);const dn=it.filter(({x})=>x.done).length;
-    return `<div><div class="row"><h3 class="grow">${esc(ph)}</h3><span class="small muted">${dn}/${it.length}</span></div><div class="card flush list">${it.map(({x,i})=>`<div class="li" style="gap:8px">
+    return `<div><div class="row" style="gap:6px"><h3 class="grow">${esc(ph)}</h3><span class="small muted">${dn}/${it.length}</span><button class="btn sm" data-act="prePh" data-ph="${esc(ph)}" aria-label="${L('Edit section','编辑分类')} ${esc(ph)}">✎</button></div><div class="card flush list">${it.map(({x,i})=>`<div class="li" style="gap:8px">
       <button class="btn sm ${x.done?'pri':''}" data-act="preTog" data-i="${i}" aria-pressed="${x.done?'true':'false'}" aria-label="${esc(x.name)}" style="min-width:40px">${x.done?'✓':'☐'}</button>
       <div class="grow tap" data-act="preItem" data-i="${i}" tabindex="0" style="cursor:pointer"><div class="t" style="${x.done?'text-decoration:line-through;opacity:.6':''}">${esc(x.name)}</div><div class="tiny muted">${x.done?`${esc(x.done.by)} · ${fmtD(x.done.at.slice(0,10),{month:'short',day:'numeric'})}`:''}${x.who?`${x.done?' · ':''}${esc(x.who)}`:''}${x.note?` · ${esc(x.note)}`:''}</div></div>
-      ${!x.done&&x.due?chip(x.due<d?'bad':x.due<=addDays(d,7)?'warn':'',fmtD(x.due,{month:'short',day:'numeric'})):''}</div>`).join('')||'<div class="empty small">—</div>'}
+      ${!x.done&&x.due?chip(x.due<d?'bad':x.due<=addDays(d,7)?'warn':'',fmtD(x.due,{month:'short',day:'numeric'})):''}<button class="btn sm" data-act="preItem" data-i="${i}" aria-label="${L('Edit','编辑')} ${esc(x.name)}">✎</button></div>`).join('')||'<div class="empty small">—</div>'}
       <button class="li tap" data-act="preItem" data-ph="${esc(ph)}" style="width:100%;border:0;background:none;color:var(--brand);font-weight:600;text-align:left;cursor:pointer">${ic('plus')} ${L('Add','添加')}</button></div></div>`}).join('')}
+  <button class="btn" data-act="prePh">${ic('plus')} ${L('Add a section','添加分类')}</button>
   <div class="card stack" style="gap:6px"><b>${L('Team for this store','这家店的员工')}</b>${team.length?`<div class="small">${team.map(([id])=>esc(empName(id))).join(', ')}</div>`:`<div class="small muted">${L('Nobody yet. In Team → People, set someone\'s main store or "Can also work at" to this store.','还没有。去 团队 → 员工，把人的门店设成这家店。')}</div>`}</div>
   <p class="tiny muted">${L('When the store opens, go to Settings → Stores and switch it to "Open". Then the daily checklists, schedule and counts start like the other stores.','开业后，去 设置 → 门店 改成"营业中"，就会和其他店一样开始每日清单、排班和盘点。')}</p>
   </div>`}
@@ -1195,9 +1196,24 @@ function preItemSheet(i,ph){const l=curLoc();const x=i!=null?preItems(l)[i]:{nam
     <label class="f">${L('What needs to happen','要做的事')}<input class="in" id="pi_name" value="${esc(x.name)}" maxlength="120"></label>
     <div class="g2"><label class="f">${L('Due','截止')}<input class="in" type="date" id="pi_due" value="${esc(x.due||'')}"></label><label class="f">${L('Who','负责人')}<input class="in" id="pi_who" value="${esc(x.who||'')}" maxlength="40" placeholder="e.g. Ashley"></label></div>
     <label class="f">${L('Phase','阶段')}<select class="in" id="pi_ph">${prePhases(l).map(p=>`<option ${p===x.phase?'selected':''}>${esc(p)}</option>`).join('')}</select></label>
-    <label class="f">${L('Note','备注')}<input class="in" id="pi_note" value="${esc(x.note||'')}" maxlength="160"></label></div>`,
+    <label class="f">${L('Note','备注')}<input class="in" id="pi_note" value="${esc(x.note||'')}" maxlength="160"></label>
+    ${i!=null?`<div class="row" style="gap:6px"><span class="small muted grow">${L('Order','顺序')}</span><button class="btn sm" data-act="preMv" data-i="${i}" data-n="-1">↑ ${L('Up','上移')}</button><button class="btn sm" data-act="preMv" data-i="${i}" data-n="1">↓ ${L('Down','下移')}</button></div>`:''}</div>`,
    foot:()=>`${i!=null?`<button class="btn bad" data-act="preDel" data-i="${i}">${SH?.confirmDel===i?L('Tap again','再点一次'):L('Delete','删除')}</button>`:''}<button class="btn pri" data-act="preSave" data-i="${i??''}">${L('Save','保存')}</button>`})}
+function prePhSheet(ph){const l=curLoc();const n=ph?preItems(l).filter(x=>x.phase===ph).length:0;
+  openSheet({title:()=>ph?L('Edit section','编辑分类'):L('Add a section','添加分类'),body:()=>`<div class="stack"><label class="f">${L('Section name','分类名称')}<input class="in" id="ph_name" value="${esc(ph||'')}" maxlength="60" placeholder="${L('e.g. Grand opening events','例如：开业活动')}"></label>
+    ${ph?`<div class="row" style="gap:6px"><span class="small muted grow">${L('Order','顺序')}</span><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="-1">↑ ${L('Up','上移')}</button><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="1">↓ ${L('Down','下移')}</button></div>`:''}</div>`,
+   foot:()=>`${ph?`<button class="btn bad" data-act="prePhDel" data-ph="${esc(ph)}">${SH?.confirmDel===ph?L(`Tap again: deletes ${n} item${n===1?'':'s'}`,`再点一次：删除 ${n} 项`):L('Delete section','删除分类')}</button>`:''}<button class="btn pri" data-act="prePhSave" data-ph="${esc(ph||'')}">${L('Save','保存')}</button>`})}
 const PRE_ACT={
+  prePh:d=>prePhSheet(d.ph||null),
+  prePhSave:async d=>{const l=curLoc();const v=$('#ph_name').value.trim();if(!v){$('#ph_name').focus();return}const ph=prePhases(l);
+    if(v!==d.ph&&ph.includes(v)){toast(L('That section already exists','已经有这个分类'));return}
+    const phases=d.ph?ph.map(p=>p===d.ph?v:p):[...ph,v];const items=preItems(l).map(x=>x.phase===d.ph&&d.ph?{...x,phase:v}:{...x});
+    if(await preWrite(l,{phases,items})){closeSheet();toast(L('Saved','已保存'))}},
+  prePhDel:async d=>{if(SH.confirmDel!==d.ph){SH.confirmDel=d.ph;drawSheet();return}const l=curLoc();
+    if(await preWrite(l,{phases:prePhases(l).filter(p=>p!==d.ph),items:preItems(l).filter(x=>x.phase!==d.ph)})){closeSheet();toast(L('Deleted','已删除'))}},
+  prePhMv:async d=>{const l=curLoc();const ph=prePhases(l);const i=ph.indexOf(d.ph),j=i+(+d.n);if(i<0||j<0||j>=ph.length)return;[ph[i],ph[j]]=[ph[j],ph[i]];await preWrite(l,{phases:ph})},
+  preMv:async d=>{const l=curLoc();const it=preItems(l).map(x=>({...x}));const i=+d.i;const ph=it[i]?.phase;let j=i+(+d.n);while(j>=0&&j<it.length&&it[j].phase!==ph)j+=(+d.n);if(j<0||j>=it.length)return;
+    [it[i],it[j]]=[it[j],it[i]];if(await preWrite(l,{items:it})){closeSheet();preItemSheet(j)}},
   preDate:async()=>{const v=$('#pre_open').value;if(await preWrite(curLoc(),{openDate:v}))toast(L('Saved','已保存'))},
   preTog:async d=>{const l=curLoc();const it=preItems(l).map(x=>({...x}));const x=it[+d.i];if(!x)return;x.done=x.done?null:{by:meName(),at:new Date().toISOString()};if(!x.done)delete x.done;await preWrite(l,{items:it})},
   preItem:d=>preItemSheet(d.i!=null&&d.i!==''?+d.i:null,d.ph),
