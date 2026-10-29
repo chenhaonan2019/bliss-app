@@ -387,21 +387,46 @@ export function ruleParse(m: Json) {
   const vendor = /bjs|bj's/i.test(m.from + s) ? "BJ's" : /walmart/i.test(m.from + s) ? "Walmart" : "Other";
   const no = (all.match(/order\s*(?:number)?\s*:?\s*#?\s*(\d{4,}(?:-\d+)?)/i) || [])[1] || null;
   // the subject line says the stage unambiguously (bodies mention later steps, e.g. "we'll tell you when it's out for delivery")
-  const stage = /has been delivered|^delivered\b/i.test(s) ? "delivered" : /should arrive by|out for delivery/i.test(s) ? "out_for_delivery"
+  // Returns and refunds ("Return reminder for order #…", "Your return has been canceled…", "You're getting a $8.86 refund")
+  // are about something already delivered: never an order, a cancel or a reminder.
+  const stage = RETURN_SUBJ.test(s) ? "return"
+    : /unavailable/i.test(s) || /^review your order updates/i.test(s) && /unavailable/i.test(t.slice(0, 600)) ? "items_canceled"
+    : /has been delivered|^delivered\b/i.test(s) ? "delivered" : /should arrive by|out for delivery/i.test(s) ? "out_for_delivery"
     : /is on the way\b(?! soon)/i.test(s) ? "picked_up" : /canceled/i.test(s) && /order\s*#/i.test(s) && !/item/i.test(s) ? "canceled" : /canceled/i.test(s) ? "items_canceled"
     : /order confirmation|thanks for your (delivery )?order/i.test(s) ? "ordered" : /reminder for your upcoming order/i.test(s) ? "reminder"
     : /on the way soon|passcode/i.test(s) ? "otp" : "other";
   const eta = (s.match(/arrive by (\d{1,2}):(\d\d)\s*([ap])m/i) || []);
   const etaHm = eta.length ? `${String((+eta[1] % 12) + (/p/i.test(eta[3]) ? 12 : 0)).padStart(2, "0")}:${eta[2]}` : null;
-  return { vendor, orderNo: no, stage, eta: etaHm, address: null, windowDate: null, windowStart: null, windowEnd: null, itemCount: null, items: [], canceledItems: [], total: null, driver: null, note: "" };
+  return { vendor, orderNo: no, stage, eta: etaHm, address: null, windowDate: null, windowStart: null, windowEnd: null, itemCount: null, items: [], canceledItems: stage === "return" ? [] : unavailableItems(t), total: null, driver: null, note: "" };
+}
+export const RETURN_SUBJ = /\breturns?\b|\brefund/i;
+// Walmart lists out-of-stock items under a "4 items unavailable" heading, each name followed by a price line and "Qty: 4".
+// Read them straight from the email so they're caught even when Claude can't be reached (also on "delivered" emails).
+export function unavailableItems(text: string) {
+  const L = String(text || "").split("\n").map((x) => x.replace(/[|#*]/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean);
+  const out: string[] = []; let on = false;
+  for (let i = 0; i < L.length; i++) {
+    if (/^\d+ (?:items? (?:is |are )?unavailable|unavailable items?)\b/i.test(L[i]) && !/ in your order$/i.test(L[i])) { on = true; continue; }
+    if (!on) continue;
+    if (/^(payment method|summary|subtotal|\d+ items? (?:delivered|shipped|arriving)|delivery from store|shipped|arriving)/i.test(L[i]) && !/unavailable/i.test(L[i])) { on = /^delivery from store/i.test(L[i]) ? on : false; continue; }
+    if (!/^qty:?\s*\d+/i.test(L[i])) continue;
+    for (let j = i - 1; j >= 0 && j >= i - 4; j--) {
+      if (/^\$|\/(?:oz|foz|lb|ct|ea|each)\b|^qty|unavailable/i.test(L[j]) || L[j].length < 4) continue;
+      const qty = (L[i].match(/\d+/) || [])[0];
+      out.push(`${L[j].slice(0, 52).replace(/[\s,;-]+$/, "")}${qty && qty !== "1" ? ` ×${qty}` : ""}`); break;
+    }
+  }
+  return [...new Set(out)].slice(0, 20);
 }
 async function claudeParse(m: Json) {
   const key = env("ANTHROPIC_API_KEY"); if (!key) return null;
   const prompt = `This is a grocery delivery email sent to a cafe owner (sent ${m.date}, New York time zone). Read it and reply with JSON only:
-{"vendor":"BJ's"|"Walmart"|"Other","orderNo":string|null,"stage":"ordered"|"reminder"|"items_canceled"|"picked_up"|"out_for_delivery"|"delivered"|"canceled"|"otp"|"other",
+{"vendor":"BJ's"|"Walmart"|"Other","orderNo":string|null,"stage":"ordered"|"reminder"|"items_canceled"|"picked_up"|"out_for_delivery"|"delivered"|"canceled"|"return"|"otp"|"other",
 "windowDate":"YYYY-MM-DD"|null,"windowStart":"HH:MM"|null,"windowEnd":"HH:MM"|null,"eta":"HH:MM"|null,"driver":string|null,"address":string|null,
 "itemCount":number|null,"items":[up to 8 item names],"canceledItems":[names of canceled / out-of-stock items],"total":number|null,"signature":boolean,"editUntil":string|null,"note":"one short plain sentence for the store staff"}
 Rules: stage "ordered" = order confirmation; "picked_up" = driver picked it up / on the way with no time; "out_for_delivery" = has an arrival time; "canceled" only if the whole order is canceled; "otp" = passcode email.
+"items_canceled" = some items won't come (canceled, out of stock, or Walmart "unavailable") — list them in canceledItems; items listed as unavailable on any email (even "delivered") also go in canceledItems.
+"return" = anything about a return or refund (return started / reminder / update / canceled, refund issued) — these are never a new order or an order cancellation.
 Times are 24h New York time. orderNo without "#". address = delivery address. Use null when the email doesn't say.
 
 Subject: ${m.subject}
@@ -420,6 +445,10 @@ export async function parseMail(m: Json, ai = claudeParse) {
   const c = await ai(m); if (!c) return { ...base, by: "rules" };
   const out: Json = { ...base, ...Object.fromEntries(Object.entries(c).filter(([, v]) => v !== null && v !== undefined && v !== "")) };
   if (base.stage !== "other" && base.stage !== out.stage && !["canceled", "items_canceled"].includes(out.stage) && ["delivered", "out_for_delivery", "picked_up"].includes(base.stage)) out.stage = base.stage; // subject lines are unambiguous
+  if (base.stage === "return") { out.stage = "return"; out.canceledItems = []; } // subject says return / refund: Claude can't turn it into an order
+  else if (out.stage === "return") out.stage = "other";
+  if (base.stage === "items_canceled" && !["canceled", "items_canceled"].includes(out.stage) && !["delivered", "out_for_delivery", "picked_up"].includes(out.stage)) out.stage = "items_canceled";
+  if (!(out.canceledItems || []).length && base.canceledItems.length) out.canceledItems = base.canceledItems;
   if (base.orderNo && !out.orderNo) out.orderNo = base.orderNo;
   out.orderNo = out.orderNo ? String(out.orderNo).replace(/^#/, "").trim() : null; out.by = "claude"; out.self = base.self; return out;
 }
@@ -440,7 +469,7 @@ export function etaText(o: Json) {
 
 // Apply one parsed email to the orders list. Returns {id, data, isNew, event} or null. Pure (no I/O) so it can be tested.
 export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json, locs: Json[], now = new Date()) {
-  if (["otp", "other"].includes(p.stage) || p.vendor === "Other") return null;
+  if (["otp", "other", "return"].includes(p.stage) || p.vendor === "Other") return null;
   const store = p.vendor; const ref = p.orderNo ? `${store === "BJ's" ? "BJ" : "WM"}:${p.orderNo}` : null;
   const at = m.date ? new Date(m.date).toISOString() : now.toISOString(); const day = etParts(new Date(at)).ymd;
   let row = ref ? (orders.find((o) => o.data.ref === ref && o.data.status !== "merged") || orders.find((o) => o.data.ref === ref)) : undefined;
@@ -492,6 +521,8 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
     if (repl) { t.stage = "canceled"; t.replacedBy = repl.data.track?.no || repl.data.ref; if (d.status === "ordered") d.status = "canceled"; }
     p = { ...p, canceledItems: [] };
   }
+  const had = new Set((t.canceled || []).map((x: string) => x.toLowerCase()));
+  const newCanceled = ((p.canceledItems || []) as string[]).map((x) => String(x).slice(0, 60)).filter((x) => !had.has(x.toLowerCase()));
   if ((p.canceledItems || []).length) t.canceled = [...new Set([...(t.canceled || []), ...(p.canceledItems as string[]).map((x) => String(x).slice(0, 60))])].slice(0, 20);
   if (t.wStart && !d.window) d.window = `${fmtHm(t.wStart)}–${fmtHm(t.wEnd || t.wStart)}`;
   if (p.orderNo) t.no = p.orderNo;
@@ -501,7 +532,7 @@ export function applyMail(orders: { id: string; data: Json }[], p: Json, m: Json
   // first run: an order that was already delivered hours ago isn't waiting for anyone any more
   if (p.stage === "delivered" && d.status === "ordered" && now.getTime() - Date.parse(at) > 3600e3) Object.assign(d, { status: "received", receivedAt: at, receivedDate: etParts(new Date(at)).ymd, receivedBy: "email", recvNote: "Delivered before tracking started (from the store email)", issueSeen: true });
   const advanced = !p.self && (rank(t.stage) > rank(prev) || p.stage === "items_canceled" || p.stage === "canceled" || isNew);
-  return { id: row?.id || (ref ? "em_" + ref.replace(/[^A-Za-z0-9]+/g, "_") : `em${Date.parse(at).toString(36)}${Math.random().toString(36).slice(2, 6)}`), data: d, isNew, event: advanced ? p.stage : null, prevStage: prev };
+  return { id: row?.id || (ref ? "em_" + ref.replace(/[^A-Za-z0-9]+/g, "_") : `em${Date.parse(at).toString(36)}${Math.random().toString(36).slice(2, 6)}`), data: d, isNew, event: advanced ? p.stage : null, prevStage: prev, newCanceled };
 }
 
 // Alert text for a stage change.
@@ -672,11 +703,40 @@ Items: ${JSON.stringify(items.map((it: Json) => ({ id: it.id, name: it.name, uni
 // keep working after the reply is sent (Supabase Edge Runtime); elsewhere just let it run
 const later = (p: Promise<unknown>) => { const er = (globalThis as any).EdgeRuntime; p.catch((e) => console.warn("later", e)); if (er?.waitUntil) er.waitUntil(p); };
 
+// Before return / refund emails were recognized they could become orders ("Return reminder for order #…") or cancel one
+// ("Your return has been canceled…"). Pure: says which orders to delete and which to rewrite without those emails.
+export function returnCleanup(orders: { id: string; data: Json }[], subjects: Record<string, string>) {
+  const isRet = (e: Json) => RETURN_SUBJ.test(String(e.text || "")) || RETURN_SUBJ.test(subjects[e.mid] || "");
+  const del: string[] = [], fix: { id: string; data: Json }[] = [];
+  for (const o of orders) {
+    const t = o.data.track; const ev: Json[] = t?.events || []; const bad = ev.filter(isRet);
+    if (!bad.length) continue;
+    const keep = ev.filter((e) => !isRet(e));
+    if (!keep.length && o.data.src === "email" && !(o.data.lines || []).length && !(o.data.screenshots || []).length) { del.push(o.id); continue; }
+    const d = JSON.parse(JSON.stringify(o.data)); const nt = d.track;
+    nt.events = keep;
+    const wasCanceled = keep.some((e) => e.stage === "canceled");
+    nt.stage = wasCanceled ? "canceled" : keep.reduce((a: string, e: Json) => rank(e.stage) > rank(a) ? e.stage : a, "ordered");
+    if (d.status === "canceled" && !wasCanceled) d.status = nt.deliveredAt ? "received" : "ordered";
+    fix.push({ id: o.id, data: d });
+  }
+  return { del, fix };
+}
+
 export async function onMail(org: string, msgs: Json[]) {
   const seenDoc = (await docOf(org, "owner/mail_seen")) || {}; const seen = new Set<string>(seenDoc.ids || []);
   const fresh = msgs.filter((m) => m && m.id && !seen.has(String(m.id))).slice(0, 25);
   const ctx = await deliveryCtx(org); const out: Json[] = [];
-  const orders = (await docsOf(org, "orders")).map((r) => ({ id: r.doc_id, data: r.data }));
+  let orders = (await docsOf(org, "orders")).map((r) => ({ id: r.doc_id, data: r.data }));
+  if (!(await docOf(org, "owner/return_cleanup"))) { // once
+    const subj: Record<string, string> = {}; for (const x of seenDoc.last || []) if (x?.id) subj[x.id] = String(x.subject || "");
+    const { del, fix } = returnCleanup(orders, subj);
+    for (const id of del) await q(`docs?org_id=eq.${org}&path=eq.${encodeURIComponent("orders/" + id)}`, { method: "DELETE" });
+    for (const f of fix) await q(`docs?org_id=eq.${org}&path=eq.${encodeURIComponent("orders/" + f.id)}`, { method: "PATCH", body: JSON.stringify({ data: f.data, updated_at: new Date().toISOString() }) });
+    orders = orders.filter((o) => !del.includes(o.id)).map((o) => fix.find((f) => f.id === o.id) || o);
+    await q("docs", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ org_id: org, path: "owner/return_cleanup", coll: "owner", doc_id: "return_cleanup", data: { at: new Date().toISOString(), deleted: del, fixed: fix.map((f) => f.id) } }) });
+    out.push({ cleanup: { deleted: del.length, fixed: fix.length } });
+  }
   fresh.sort((a, b) => String(a.date).localeCompare(String(b.date)));
   for (const m of fresh) {
     m.text = m.text || htmlToText(m.html || ""); const p = await parseMail(m);
@@ -688,7 +748,7 @@ export async function onMail(org: string, msgs: Json[]) {
     else { await q(`docs?org_id=eq.${org}&path=eq.${encodeURIComponent("orders/" + r.id)}`, { method: "PATCH", body: JSON.stringify({ data: r.data, updated_at: new Date().toISOString() }) }); const i = orders.findIndex((o) => o.id === r.id); orders[i] = { id: r.id, data: r.data }; }
     // Don't alert for old emails (first run, or the script was off for a while)
     const recent = Date.now() - Date.parse(m.date || "") < 3 * 3600e3;
-    if (r.event === "items_canceled" && recent) {
+    const outOfStock = async () => {
       // researching alternatives takes a minute: send the plain alert now, the full picture when it's ready
       await alertOrder(org, ctx, r.id, r.data, "items_canceled");
       const id = r.id, snap = JSON.parse(JSON.stringify(r.data)), all = orders.slice();
@@ -697,9 +757,11 @@ export async function onMail(org: string, msgs: Json[]) {
         await merge(org, `orders/${id}`, { track: { ask } });
         if (ctx.push) { const url = orderUrl(id); await sendPush(ctx.owners, ask.zh.title, ask.zh.body, url); await sendPush(ctx.recipients(snap.loc, "plan").filter((u: string) => !ctx.owners.includes(u)), ask.en.title, ask.en.body, url); }
       })());
-      continue;
-    }
+    };
+    if (r.event === "items_canceled" && recent) { await outOfStock(); continue; }
     if (r.event && recent && (r.data.status === "ordered" || r.event === "canceled")) await alertOrder(org, ctx, r.id, r.data, r.event!);
+    // Walmart's "delivered" email can also list items that were unavailable: alert for those too
+    if (recent && r.newCanceled?.length && !p.self && r.event !== "canceled") await outOfStock();
   }
   const ids = [...seen].slice(-600);
   await q("docs", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ org_id: org, path: "owner/mail_seen", coll: "owner", doc_id: "mail_seen", data: { ids, at: new Date().toISOString(), last: [...out, ...(seenDoc.last || [])].slice(0, 40) } }) });
