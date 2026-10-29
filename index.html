@@ -1325,7 +1325,7 @@ function batNewSheet(){openSheet({title:()=>L('Made a batch','做了一批'),bod
       <div class="g2">${PREP().map(x=>`<button class="btn" style="flex-direction:column;align-items:flex-start;text-align:left;min-height:64px" data-act="batMake" data-id="${esc(x.id)}"><b>${esc(x.name)}</b><span class="tiny muted">${lifeTxt(x.h)}${x.store?' · '+esc(x.store):''}</span></button>`).join('')}</div>
       ${isMgr?`<button class="btn sm" data-act="prepCfg">${L('Edit prep items','编辑备料')}</button>`:''}</div>`,
   foot:()=>`<button class="btn pri" data-act="batDone">${L('Done','完成')}</button>`})}
-function prepCfgSheet(){UI.prepE=UI.prepE||PREP().map(x=>({...x}));openSheet({live:true,title:()=>L('Prep items & shelf life','备料和保质期'),body:()=>`<div class="stack">
+function prepCfgSheet(){if(!UI.prepE){UI.prepE=PREP().map(x=>({...x}));UI.prepOrig=PREP().map(x=>({...x}))}openSheet({live:true,title:()=>L('Prep items & shelf life','备料和保质期'),body:()=>`<div class="stack">
    <p class="small muted">${L('How long each one is good for after it\'s made. Same for every store.','做好后能放多久。所有门店通用。')}</p>
    <div class="card flush list">${UI.prepE.map((x,i)=>`<div class="li" style="flex-wrap:wrap;gap:6px"><input class="in grow" id="pp_n${i}" value="${esc(x.name)}" style="min-width:55%" aria-label="Name">
      <input class="in" type="number" min="1" step="1" id="pp_v${i}" value="${x.h>=24&&x.h%24===0?x.h/24:x.h}" style="width:70px" aria-label="How long">
@@ -1369,7 +1369,12 @@ const PREP_ACT={
   ppAdd:()=>{ppGrab();const v=$('#pp_new').value.trim();if(!v)return;UI.prepE.push({id:slug(v)+'-'+uidGen().slice(-3),name:v,h:24,store:'Fridge'});drawSheet()},
   ppDel:d=>{ppGrab();UI.prepE.splice(+d.i,1);drawSheet()},
   ppX:()=>{UI.prepE=null;closeSheet()},
-  ppSave:async()=>{ppGrab();const list=UI.prepE.filter(x=>x.name&&x.h>0).map(x=>({id:x.id,name:x.name,h:x.h,store:x.store||''}));
+  // Merge with the latest saved list, so someone else's changes made meanwhile aren't lost: apply only what this
+  // person added, changed or removed since they opened the editor.
+  ppSave:async()=>{ppGrab();const mine=UI.prepE.filter(x=>x.name&&x.h>0).map(x=>({id:x.id,name:x.name,h:x.h,store:x.store||''}));const orig=UI.prepOrig||[];
+    const removed=new Set(orig.filter(o=>!mine.some(x=>x.id===o.id)).map(o=>o.id));const latest=(await A.db.doc('config/prep').get().then(r=>r.exists?r.data().list||[]:[]).catch(()=>PREP()));
+    const changed=x=>{const o=orig.find(y=>y.id===x.id);return !o||o.name!==x.name||o.h!==x.h||(o.store||'')!==x.store};
+    const list=[...latest.filter(x=>!removed.has(x.id)).map(x=>{const m=mine.find(y=>y.id===x.id);return m&&changed(m)?m:x}),...mine.filter(x=>!latest.some(y=>y.id===x.id)&&!orig.some(y=>y.id===x.id))];
     if(await W(A.db.doc('config/prep').set({list}))){D.prepCfg=list;UI.prepE=null;toast(L('Saved','已保存'));closeSheet();render()}},
 };
 async function onBatchDiscard(t){const f=t.files?.[0];const id=t.dataset.id;const b=D.batches?.[id];if(!f||!b)return;toast(L('Uploading photo…','正在上传照片…'));
