@@ -605,6 +605,16 @@ export function batchAlert(b: Json, now = Date.now()) {
   if (now >= e - warn && !a.soon) return "soon";
   return null;
 }
+// Morning taste check: batches made before today must be tasted before opening. Push whoever is on shift from
+// 1 h before opening; if not all tasted 30 min after opening, push the managers + regional manager. Pure, for tests.
+const HOURS_DEF: Json = { wh: { 0: ["11:00", "21:00"], 1: ["11:30", "21:00"], 2: ["11:30", "21:00"], 3: ["11:30", "21:00"], 4: ["11:30", "21:00"], 5: ["11:00", "22:00"], 6: ["11:00", "22:00"] } };
+export function tasteAlert(open: string, nowHm: string, pending: number, sent: Json = {}) {
+  if (!pending) return null;
+  const n = toMin(nowHm), o = toMin(open);
+  if (n >= o + 30 && !sent.esc) return "esc";
+  if (n >= o - 60 && n < o + 30 && !sent.ask) return "ask";
+  return null;
+}
 const hmOf = (iso: string) => { const p = etParts(new Date(iso)); return fmtT(p.hm); };
 async function batchDuty(org: string, ctx: Json) {
   const out: Json[] = []; if (!ctx.push) return out;
@@ -620,6 +630,23 @@ async function batchDuty(org: string, ctx: Json) {
     await sendPush(to, title, body, `${(env("APP_URL") || "").replace(/\/$/, "")}/`);
     await merge(org, `batches/${r.doc_id}`, { alerts: { [kind]: new Date().toISOString() } });
     out.push({ batch: r.doc_id, kind, to: to.length });
+  }
+  // morning taste check, per store
+  const now = etParts(); const dow = new Date(now.ymd + "T12:00:00Z").getUTCDay();
+  const sentDoc = (await docOf(org, "mgr/taste_alerts")) || {}; const sent = sentDoc[now.ymd] || {};
+  for (const l of ctx.locs as Json[]) {
+    if (l.stage === "preopen") continue;
+    const pending = rows.filter((r) => (r.data.loc || ctx.locs[0]?.id) === l.id && r.data.madeDate < now.ymd && !(r.data.tastes || {})[now.ymd] && Date.parse(r.data.expAt) > Date.now());
+    const hrs = (ctx.settings.hours || HOURS_DEF)[l.id]?.[dow]; const open = (Array.isArray(hrs) && hrs[0]) || ctx.settings.prep1 || "11:30";
+    const kind = tasteAlert(open, now.hm, pending.length, sent[l.id] || {}); if (!kind) continue;
+    const to: string[] = kind === "esc" ? ctx.managers(l.id) : ctx.onShift(l.id); if (!to.length) continue;
+    const at = ctx.locs.length > 1 ? ` · ${ctx.locName(l.id)}` : ""; const names = [...new Set(pending.map((r) => r.data.name))].slice(0, 5).join(", ");
+    await sendPush(to, kind === "ask" ? `👅 Morning taste check${at}` : `⚠️ Taste check not done${at}`,
+      kind === "ask" ? `Taste before opening (${fmtT(open)}): ${names}. Tap 👍 or 👎 in the app, throw out anything that's off.` : `${pending.length} item${pending.length === 1 ? "" : "s"} not tasted yet (${names}). The store opened at ${fmtT(open)}.`,
+      `${(env("APP_URL") || "").replace(/\/$/, "")}/`);
+    sent[l.id] = { ...(sent[l.id] || {}), [kind]: new Date().toISOString() };
+    await q("docs", { method: "POST", headers: { Prefer: "resolution=merge-duplicates" }, body: JSON.stringify({ org_id: org, path: "mgr/taste_alerts", coll: "mgr", doc_id: "taste_alerts", data: { [now.ymd]: sent } }) });
+    out.push({ batch: "taste " + l.id, kind, to: to.length });
   }
   return out;
 }
