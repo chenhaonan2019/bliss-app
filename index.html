@@ -958,7 +958,7 @@ function vOwner(){const sub=UI.osub||'today';const PER=ownerPeriod(UI.oa||today(
   let body='';
   if(sub==='fc'){if(L2.some(l=>fcHas(l.id)&&!wxNow(l.id))&&!ofcBody.p)ofcBody.p=wxAll().then(()=>{ofcBody.p=null;rerender()});body=L2.some(l=>fcHas(l.id))?ofcBody(L2):`<div class="empty"><b>No sales history yet</b>The forecast starts once hourly sales are synced from Menusifu.</div>`}
   else if(sub==='today'){const L3=L2.filter(l=>!isPre(l.id));const iss=L3.flatMap(l=>withLoc(l.id,()=>reviewIssues()));
-    body=`${rmCard()}${ofcTodayCard(L3)}${iss.length?attnList(iss):''}<div class="g2">${L2.map(l=>{if(isPre(l.id)){const p=preProg(l.id);const od=preOpenDate(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0;border:2px dashed var(--line)" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${chip('info',L('Opening soon','即将开业'))}</div><div class="small"><b>${p.pct}%</b> ${L('ready','准备好')} (${p.n}/${p.t})${od?` · ${L('opens','开业')} ${fmtD(od,{month:'short',day:'numeric'})}`:''}</div><div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div></div>`}const t=storeToday(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
+    body=`${rmCard()}${ofcTodayCard(L3)}${iss.length?attnList(iss):''}<div class="g2">${L2.map(l=>{if(isPre(l.id)){const p=preProg(l.id);const od=preOpenDate(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0;border:2px dashed var(--line)" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${chip('info',L('Opening soon','即将开业'))}</div><div class="small"><b>${p.pct}%</b> ${L('done','完成')} (${p.n}/${p.t})${p.fu?` · <span style="color:var(--bad);font-weight:600">🔔 ${p.fu} ${L('to follow up','需跟进')}</span>`:''}${p.late?` · <span style="color:var(--bad)">${p.late} ${L('overdue','逾期')}</span>`:''}${od?` · ${L('opens','开业')} ${fmtD(od,{month:'short',day:'numeric'})}`:''}</div><div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div></div>`}const t=storeToday(l.id);return `<div class="card stack tap" data-act="ownerGo" data-l="${l.id}" style="cursor:pointer;min-width:0" tabindex="0"><div class="row"><b class="grow" style="font-family:var(--display);font-size:17px">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
       <div class="small"><b>${t.on}</b> clocked in · <b>${t.sh.length}</b> shifts${t.late?` · <span style="color:var(--warn)">${t.late} late</span>`:''}</div>
       <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${fmtT(T.time())} ${s.filled}/${s.total}`)).join('')}${chip(t.counted?'ok':'','Count '+(t.counted?'✓':'—'))}</div>
       <div class="small muted">${t.low==null?'No count yet':`${t.low} low / out`} · ${t.arriving} deliveries due</div></div>`}).join('')}</div>
@@ -1117,7 +1117,7 @@ function rmBody(){{const d=UI.rmDay||bizDate();const wk=wkStart(d);const mo=d.sl
       <button class="btn" data-act="rmNote" data-k="${wk}">${L('Save notes','保存备注')}</button>`:nt.text?`<div class="card"><div class="eyebrow">${L('Notes','备注')}</div><div style="white-space:pre-wrap">${esc(nt.text)}</div></div>`:''}
       ${nt.at?`<div class="tiny muted">${L('Saved','保存于')} ${fmtD(String(nt.at).slice(0,10),{month:'short',day:'numeric'})}</div>`:''}`}}
 function vRegion(){const d=bizDate();
-  const stores=LOCS().map(l=>{if(isPre(l.id)){const p=preProg(l.id);const od=preOpenDate(l.id);return `<div class="card stack tap" data-act="regGo" data-l="${l.id}" style="cursor:pointer;min-width:0;border:2px dashed var(--line)" tabindex="0"><div class="row"><b class="grow">${esc(l.name)}</b>${chip('info',L('Opening soon','即将开业'))}</div><div class="small"><b>${p.pct}%</b> ${L('ready','准备好')}${od?` · ${L('opens','开业')} ${fmtD(od,{month:'short',day:'numeric'})}`:''}</div><div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div></div>`}
+  const stores=LOCS().map(l=>{if(isPre(l.id)){const p=preProg(l.id);const od=preOpenDate(l.id);return `<div class="card stack tap" data-act="regGo" data-l="${l.id}" style="cursor:pointer;min-width:0;border:2px dashed var(--line)" tabindex="0"><div class="row"><b class="grow">${esc(l.name)}</b>${chip('info',L('Opening soon','即将开业'))}</div><div class="small"><b>${p.pct}%</b> ${L('done','完成')} (${p.n}/${p.t})${p.fu?` · <span style="color:var(--bad);font-weight:600">🔔 ${p.fu} ${L('to follow up','需跟进')}</span>`:''}${p.late?` · <span style="color:var(--bad)">${p.late} ${L('overdue','逾期')}</span>`:''}${od?` · ${L('opens','开业')} ${fmtD(od,{month:'short',day:'numeric'})}`:''}</div><div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div></div>`}
     const t=storeToday(l.id);return `<div class="card stack tap" data-act="regGo" data-l="${l.id}" style="cursor:pointer;min-width:0;gap:6px" tabindex="0"><div class="row"><b class="grow">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
       <div class="small"><b>${t.on}</b> ${L('clocked in','在班')} · <b>${t.sh.length}</b> ${L('shifts','班次')}${t.late?` · <span style="color:var(--warn)">${t.late} ${L('late','迟到')}</span>`:''}</div>
       <div class="row wrapr" style="gap:4px">${t.tasks.map(({T,s})=>chip(stChip(s.st)||'',`${esc(T.name().split(' ')[0])} ${s.filled}/${s.total}`)).join('')}</div>
@@ -1168,45 +1168,72 @@ const preDoc=l=>D.preopen?.[l]||null;
 const preItems=l=>preDoc(l)?.items||PRE_DEF.flatMap(([ph,ns],pi)=>ns.map((n,i)=>({id:`p${pi}-${i}`,phase:ph,name:n})));
 const prePhases=l=>{const ph=[...(preDoc(l)?.phases||PRE_DEF.map(([p])=>p))];preItems(l).forEach(x=>{if(!ph.includes(x.phase))ph.push(x.phase)});return ph};
 const preOpenDate=l=>preDoc(l)?.openDate||LOCS().find(x=>x.id===l)?.openDate||'';
-function preProg(l){const it=preItems(l);const n=it.filter(x=>x.done).length;return{n,t:it.length,pct:it.length?Math.round(n/it.length*100):0}}
+// Item status: todo (not started) · doing (in progress) · wait (waiting on someone → follow up) · done
+const PRE_ST=()=>({todo:[L('Not started','未开始'),''],doing:[L('In progress','进行中'),'info'],wait:[L('Waiting / follow up','等待 / 跟进'),'warn'],done:[L('Done','完成'),'ok']});
+const preSt=x=>x.done?'done':['doing','wait'].includes(x.st)?x.st:'todo';
+const preFuDue=(x,d)=>preSt(x)!=='done'&&x.fu&&x.fu<=(d||bizDate());
+const preLate=(x,d)=>preSt(x)!=='done'&&x.due&&x.due<(d||bizDate());
+function preProg(l){const it=preItems(l);const n=it.filter(x=>x.done).length;return{n,t:it.length,pct:it.length?Math.round(n/it.length*100):0,fu:it.filter(x=>preFuDue(x)).length,late:it.filter(x=>preLate(x)).length}}
 async function preWrite(l,patch){const cur=preDoc(l)||{};const next={...cur,items:preItems(l),phases:prePhases(l),...patch};D.preopen={...(D.preopen||{}),[l]:next};render();drawSheet();return W(A.db.doc('mgr/preopen_'+l).set(next))}
+const md=s=>fmtD(s,{month:'short',day:'numeric'});
 function vPreopen(){const l=curLoc();const d=bizDate();const od=preOpenDate(l);const days=od?Math.round((parseYmd(od)-parseYmd(d))/864e5):null;const p=preProg(l);
   const team=Object.entries(D.employees).filter(([id,e])=>e.active!==false&&worksAt(id,l));
   if(!isMgr)return `<div class="stack"><div><div class="eyebrow">${esc(locName(l))}</div><h2>${L('Opening soon','即将开业')}</h2></div><div class="card empty">${L('This store isn\'t open yet. Your manager will share your training schedule.','这家店还没开业，经理会告诉你培训安排。')}</div></div>`;
+  const all=preItems(l);const S=PRE_ST();const f=UI.preF||'all';
+  const cnt={all:all.length,todo:0,doing:0,wait:0,done:0,fu:p.fu,late:p.late};all.forEach(x=>cnt[preSt(x)]++);
+  const show=x=>f==='all'||(f==='fu'?preFuDue(x,d):f==='late'?preLate(x,d):preSt(x)===f);
+  const filt=[['all',L('All','全部')],['fu',L('Follow up now','需跟进')],['late',L('Overdue','逾期')],['doing',S.doing[0]],['wait',S.wait[0]],['todo',S.todo[0]],['done',S.done[0]]];
+  const row=(x,i)=>{const st=preSt(x);const last=(x.log||[]).slice(-1)[0];
+    return `<div class="li" style="gap:8px;padding-left:6px;align-items:flex-start" data-sid="${i}">${DRAG_H}
+      <button class="btn sm ${st==='done'?'pri':''}" data-act="preTog" data-i="${i}" aria-pressed="${st==='done'?'true':'false'}" aria-label="${L('Done','完成')}: ${esc(x.name)}" style="min-width:40px">${st==='done'?'✓':'☐'}</button>
+      <div class="grow tap" data-act="preItem" data-i="${i}" tabindex="0" style="cursor:pointer;min-width:0"><div class="t" style="${st==='done'?'text-decoration:line-through;opacity:.6':''}">${esc(x.name)}</div>
+        <div class="row wrapr" style="gap:4px;margin-top:3px">${st==='todo'?'':chip(S[st][1],S[st][0])}${x.start&&st!=='done'?`<span class="tiny muted">${L('Start','开始')} ${md(x.start)}</span>`:''}${x.due&&st!=='done'?chip(preLate(x,d)?'bad':x.due<=addDays(d,7)?'warn':'',`${L('Due','截止')} ${md(x.due)}`):''}${x.who?`<span class="tiny muted">· ${esc(x.who)}</span>`:''}${st==='done'&&x.done?`<span class="tiny muted">${esc(x.done.by)} · ${md(x.done.at.slice(0,10))}</span>`:''}</div>
+        ${x.fu&&st!=='done'?`<div class="tiny" style="margin-top:3px;color:${preFuDue(x,d)?'var(--bad)':'var(--warn)'};font-weight:600">🔔 ${L('Follow up','跟进')} ${md(x.fu)}${x.fuWith?` · ${esc(x.fuWith)}`:''}</div>`:''}
+        ${last?`<div class="tiny muted" style="margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">💬 ${esc(last.text)} — ${esc(last.by)}, ${md(last.at.slice(0,10))}</div>`:x.note?`<div class="tiny muted" style="margin-top:3px">${esc(x.note)}</div>`:''}</div>
+      <button class="btn sm" data-act="preItem" data-i="${i}" aria-label="${L('Edit','编辑')} ${esc(x.name)}">✎</button></div>`};
   return `<div class="stack">
   <div><div class="eyebrow">${esc(locName(l))} · ${L('Opening soon','即将开业')}</div><h2>${L('Opening plan','开业计划')}</h2></div>
-  <div class="stats"><div class="stat"><b>${p.pct}%</b><span>${L('Ready','准备进度')} (${p.n}/${p.t})</span></div>
+  <div class="stats"><div class="stat"><b>${p.pct}%</b><span>${L('Done','完成')} (${p.n}/${p.t})</span></div>
    <div class="stat"><b style="color:${days!=null&&days<0?'var(--bad)':'inherit'}">${days==null?'—':days<0?L(`${-days}d late`,`晚了${-days}天`):days}</b><span>${days==null?L('Opening date not set','未定开业日'):days<0?L('past target','超过目标'):L('days to opening','天后开业')}</span></div>
-   <div class="stat"><b>${team.length}</b><span>${L('Team','员工')}</span></div>
-   <div class="stat"><b>${preItems(l).filter(x=>!x.done&&x.due&&x.due<d).length}</b><span>${L('Overdue','逾期')}</span></div></div>
+   <div class="stat tap" data-act="preF" data-k="fu" style="cursor:pointer"><b style="color:${p.fu?'var(--bad)':'inherit'}">${p.fu}</b><span>${L('Follow up now','需跟进')}</span></div>
+   <div class="stat tap" data-act="preF" data-k="late" style="cursor:pointer"><b style="color:${p.late?'var(--bad)':'inherit'}">${p.late}</b><span>${L('Overdue','逾期')}</span></div></div>
   <div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div>
   <div class="card row" style="gap:8px;flex-wrap:wrap"><label class="f grow" style="min-width:160px">${L('Target opening date','目标开业日')}<input class="in" type="date" id="pre_open" value="${esc(od)}"></label><button class="btn" data-act="preDate">${L('Save date','保存日期')}</button></div>
-  <p class="tiny muted" style="margin:0">${L('Hold ⋮⋮ and drag to move an item. ↑ ↓ next to a section title moves the whole section.','按住 ⋮⋮ 上下拖动调整项目顺序；分类标题旁的 ↑ ↓ 移动整个分类。')}</p>
-  <div class="stack">${prePhases(l).map((ph,pi)=>{const it=preItems(l).map((x,i)=>({x,i})).filter(({x})=>x.phase===ph);const dn=it.filter(({x})=>x.done).length;
-    return `<div><div class="row" style="gap:6px"><h3 class="grow">${esc(ph)}</h3><span class="small muted">${dn}/${it.length}</span><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="-1" ${pi===0?'disabled':''} aria-label="${L('Move section up','分类上移')}">↑</button><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="1" ${pi===prePhases(l).length-1?'disabled':''} aria-label="${L('Move section down','分类下移')}">↓</button><button class="btn sm" data-act="prePh" data-ph="${esc(ph)}" aria-label="${L('Edit section','编辑分类')} ${esc(ph)}">✎</button></div><div class="card flush list" data-sortable="preitems">${it.map(({x,i})=>`<div class="li" style="gap:8px;padding-left:6px" data-sid="${i}">${DRAG_H}
-      <button class="btn sm ${x.done?'pri':''}" data-act="preTog" data-i="${i}" aria-pressed="${x.done?'true':'false'}" aria-label="${esc(x.name)}" style="min-width:40px">${x.done?'✓':'☐'}</button>
-      <div class="grow tap" data-act="preItem" data-i="${i}" tabindex="0" style="cursor:pointer"><div class="t" style="${x.done?'text-decoration:line-through;opacity:.6':''}">${esc(x.name)}</div><div class="tiny muted">${x.done?`${esc(x.done.by)} · ${fmtD(x.done.at.slice(0,10),{month:'short',day:'numeric'})}`:''}${x.who?`${x.done?' · ':''}${esc(x.who)}`:''}${x.note?` · ${esc(x.note)}`:''}</div></div>
-      ${!x.done&&x.due?chip(x.due<d?'bad':x.due<=addDays(d,7)?'warn':'',fmtD(x.due,{month:'short',day:'numeric'})):''}<button class="btn sm" data-act="preItem" data-i="${i}" aria-label="${L('Edit','编辑')} ${esc(x.name)}">✎</button></div>`).join('')||'<div class="empty small">—</div>'}
-      <button class="li tap" data-act="preItem" data-ph="${esc(ph)}" style="width:100%;border:0;background:none;color:var(--brand);font-weight:600;text-align:left;cursor:pointer">${ic('plus')} ${L('Add','添加')}</button></div></div>`}).join('')}</div>
-  <button class="btn" data-act="prePh">${ic('plus')} ${L('Add a section','添加分类')}</button>
+  <div class="row" style="gap:6px;overflow-x:auto;padding-bottom:2px;flex-wrap:nowrap">${filt.map(([k,n])=>`<button class="btn sm ${f===k?'pri':''}" style="white-space:nowrap;flex:none" data-act="preF" data-k="${k}">${n} ${cnt[k]}</button>`).join('')}</div>
+  ${f==='all'?`<p class="tiny muted" style="margin:0">${L('Tap an item to set its status, start / due dates, follow-up and updates. Hold ⋮⋮ to drag it; ↑ ↓ moves a section.','点项目设置状态、开始/截止日、跟进和进展。按住 ⋮⋮ 拖动排序；↑ ↓ 移动分类。')}</p>`:''}
+  <div class="stack">${prePhases(l).map((ph,pi)=>{const it=all.map((x,i)=>({x,i})).filter(({x})=>x.phase===ph);const vis=it.filter(({x})=>show(x));const dn=it.filter(({x})=>x.done).length;
+    if(f!=='all'&&!vis.length)return'';
+    return `<div><div class="row" style="gap:6px"><h3 class="grow">${esc(ph)}</h3><span class="small muted">${dn}/${it.length}</span>${f==='all'?`<button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="-1" ${pi===0?'disabled':''} aria-label="${L('Move section up','分类上移')}">↑</button><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="1" ${pi===prePhases(l).length-1?'disabled':''} aria-label="${L('Move section down','分类下移')}">↓</button><button class="btn sm" data-act="prePh" data-ph="${esc(ph)}" aria-label="${L('Edit section','编辑分类')} ${esc(ph)}">✎</button>`:''}</div>
+      <div class="card flush list" data-sortable="preitems">${vis.map(({x,i})=>row(x,i)).join('')||'<div class="empty small">—</div>'}
+      ${f==='all'?`<button class="li tap" data-act="preItem" data-ph="${esc(ph)}" style="width:100%;border:0;background:none;color:var(--brand);font-weight:600;text-align:left;cursor:pointer">${ic('plus')} ${L('Add','添加')}</button>`:''}</div></div>`}).join('')||`<div class="card empty">${L('Nothing here.','没有。')}</div>`}</div>
+  ${f==='all'?`<button class="btn" data-act="prePh">${ic('plus')} ${L('Add a section','添加分类')}</button>`:''}
   <div class="card stack" style="gap:6px"><b>${L('Team for this store','这家店的员工')}</b>${team.length?`<div class="small">${team.map(([id])=>esc(empName(id))).join(', ')}</div>`:`<div class="small muted">${L('Nobody yet. In Team → People, set someone\'s main store or "Can also work at" to this store.','还没有。去 团队 → 员工，把人的门店设成这家店。')}</div>`}</div>
   <p class="tiny muted">${L('When the store opens, go to Settings → Stores and switch it to "Open". Then the daily checklists, schedule and counts start like the other stores.','开业后，去 设置 → 门店 改成"营业中"，就会和其他店一样开始每日清单、排班和盘点。')}</p>
   </div>`}
-function preItemSheet(i,ph){const l=curLoc();const x=i!=null?preItems(l)[i]:{name:'',phase:ph||prePhases(l)[0]};
+function preItemSheet(i,ph){const l=curLoc();const x=i!=null?preItems(l)[i]:{name:'',phase:ph||prePhases(l)[0]};const st=preSt(x);const S=PRE_ST();
   openSheet({title:()=>i!=null?L('Edit item','编辑'):L('Add item','添加'),body:()=>`<div class="stack">
     <label class="f">${L('What needs to happen','要做的事')}<input class="in" id="pi_name" value="${esc(x.name)}" maxlength="120"></label>
-    <div class="g2"><label class="f">${L('Due','截止')}<input class="in" type="date" id="pi_due" value="${esc(x.due||'')}"></label><label class="f">${L('Who','负责人')}<input class="in" id="pi_who" value="${esc(x.who||'')}" maxlength="40" placeholder="e.g. Ashley"></label></div>
-    <label class="f">${L('Phase','阶段')}<select class="in" id="pi_ph">${prePhases(l).map(p=>`<option ${p===x.phase?'selected':''}>${esc(p)}</option>`).join('')}</select></label>
-    <label class="f">${L('Note','备注')}<input class="in" id="pi_note" value="${esc(x.note||'')}" maxlength="160"></label>
+    <div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:var(--muted)">${L('Status','状态')}
+      <div class="row wrapr" style="gap:6px">${Object.entries(S).map(([k,[n]])=>`<label class="btn sm" style="cursor:pointer;gap:6px;color:var(--ink)"><input type="radio" name="pi_st" value="${k}" ${st===k?'checked':''}> ${n}</label>`).join('')}</div></div>
+    <div class="g2"><label class="f">${L('Start date','开始日')}<input class="in" type="date" id="pi_start" value="${esc(x.start||'')}"></label><label class="f">${L('Due date','截止日')}<input class="in" type="date" id="pi_due" value="${esc(x.due||'')}"></label></div>
+    <label class="f">${L('Who is responsible','负责人')}<input class="in" id="pi_who" value="${esc(x.who||'')}" maxlength="40" placeholder="e.g. Ashley"></label>
+    <div class="card stack" style="gap:8px;background:var(--sunk)"><div class="eyebrow">🔔 ${L('Follow up','跟进')}</div>
+      <div class="g2"><label class="f">${L('Follow up on','跟进日期')}<input class="in" type="date" id="pi_fu" value="${esc(x.fu||'')}"></label><label class="f">${L('With whom','跟谁')}<input class="in" id="pi_fuw" value="${esc(x.fuWith||'')}" maxlength="60" placeholder="${L('e.g. Health dept, landlord','例如：卫生局、房东')}"></label></div>
+      <p class="tiny muted" style="margin:0">${L('On that day it shows red under "Follow up now". Clear the date when it\'s handled.','到那天会在"需跟进"里变红。处理完把日期清空。')}</p></div>
+    <label class="f">${L('Section','分类')}<select class="in" id="pi_ph">${prePhases(l).map(p=>`<option ${p===x.phase?'selected':''}>${esc(p)}</option>`).join('')}</select></label>
+    <label class="f">${L('Add an update','添加进展')}<textarea class="in" id="pi_upd" rows="2" maxlength="300" placeholder="${L('e.g. Called the health dept, inspection booked Nov 12','例如：打给卫生局，约了11月12日检查')}"></textarea></label>
+    ${(x.log||[]).length?`<div class="card flush list">${[...x.log].reverse().map(u=>`<div class="li" style="flex-direction:column;align-items:flex-start;gap:2px"><div class="small" style="white-space:pre-wrap">${esc(u.text)}</div><div class="tiny muted">${esc(u.by)} · ${md(u.at.slice(0,10))}</div></div>`).join('')}</div>`:''}
+    ${x.note?`<label class="f">${L('Note','备注')}<input class="in" id="pi_note" value="${esc(x.note)}" maxlength="160"></label>`:''}
     ${i!=null?`<div class="row" style="gap:6px"><span class="small muted grow">${L('Order','顺序')}</span><button class="btn sm" data-act="preMv" data-i="${i}" data-n="-1">↑ ${L('Up','上移')}</button><button class="btn sm" data-act="preMv" data-i="${i}" data-n="1">↓ ${L('Down','下移')}</button></div>`:''}</div>`,
    foot:()=>`${i!=null?`<button class="btn bad" data-act="preDel" data-i="${i}">${SH?.confirmDel===i?L('Tap again','再点一次'):L('Delete','删除')}</button>`:''}<button class="btn pri" data-act="preSave" data-i="${i??''}">${L('Save','保存')}</button>`})}
 function prePhSheet(ph){const l=curLoc();const n=ph?preItems(l).filter(x=>x.phase===ph).length:0;
   openSheet({title:()=>ph?L('Edit section','编辑分类'):L('Add a section','添加分类'),body:()=>`<div class="stack"><label class="f">${L('Section name','分类名称')}<input class="in" id="ph_name" value="${esc(ph||'')}" maxlength="60" placeholder="${L('e.g. Grand opening events','例如：开业活动')}"></label>
     ${ph?`<div class="row" style="gap:6px"><span class="small muted grow">${L('Order','顺序')}</span><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="-1">↑ ${L('Up','上移')}</button><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="1">↓ ${L('Down','下移')}</button></div>`:''}</div>`,
    foot:()=>`${ph?`<button class="btn bad" data-act="prePhDel" data-ph="${esc(ph)}">${SH?.confirmDel===ph?L(`Tap again: deletes ${n} item${n===1?'':'s'}`,`再点一次：删除 ${n} 项`):L('Delete section','删除分类')}</button>`:''}<button class="btn pri" data-act="prePhSave" data-ph="${esc(ph||'')}">${L('Save','保存')}</button>`})}
-// drag to reorder: items within a section, and whole sections
+// drag to reorder items (within a section)
 SORT.preitems=async ids=>{const l=curLoc();const it=preItems(l).map(x=>({...x}));const pos=ids.map(Number).slice().sort((a,b)=>a-b);const nx=it.slice();pos.forEach((p,k)=>{nx[p]=it[+ids[k]]});await preWrite(l,{items:nx})};
 const PRE_ACT={
+  preF:d=>{UI.preF=UI.preF===d.k&&d.k!=='all'?'all':d.k;render()},
   prePh:d=>prePhSheet(d.ph||null),
   prePhSave:async d=>{const l=curLoc();const v=$('#ph_name').value.trim();if(!v){$('#ph_name').focus();return}const ph=prePhases(l);
     if(v!==d.ph&&ph.includes(v)){toast(L('That section already exists','已经有这个分类'));return}
@@ -1218,12 +1245,18 @@ const PRE_ACT={
   preMv:async d=>{const l=curLoc();const it=preItems(l).map(x=>({...x}));const i=+d.i;const ph=it[i]?.phase;let j=i+(+d.n);while(j>=0&&j<it.length&&it[j].phase!==ph)j+=(+d.n);if(j<0||j>=it.length)return;
     [it[i],it[j]]=[it[j],it[i]];if(await preWrite(l,{items:it})){closeSheet();preItemSheet(j)}},
   preDate:async()=>{const v=$('#pre_open').value;if(await preWrite(curLoc(),{openDate:v}))toast(L('Saved','已保存'))},
-  preTog:async d=>{const l=curLoc();const it=preItems(l).map(x=>({...x}));const x=it[+d.i];if(!x)return;x.done=x.done?null:{by:meName(),at:new Date().toISOString()};if(!x.done)delete x.done;await preWrite(l,{items:it})},
+  preTog:async d=>{const l=curLoc();const it=preItems(l).map(x=>({...x}));const x=it[+d.i];if(!x)return;
+    if(x.done){delete x.done;if(!['doing','wait'].includes(x.st))x.st=x.start?'doing':'todo'}else{x.done={by:meName(),at:new Date().toISOString()};x.st='done'}
+    await preWrite(l,{items:it})},
   preItem:d=>preItemSheet(d.i!=null&&d.i!==''?+d.i:null,d.ph),
   preSave:async d=>{const l=curLoc();const name=$('#pi_name').value.trim();if(!name){$('#pi_name').focus();return}
-    const it=preItems(l).map(x=>({...x}));const v={name,due:$('#pi_due').value||undefined,who:$('#pi_who').value.trim()||undefined,phase:$('#pi_ph').value,note:$('#pi_note').value.trim()||undefined};
-    Object.keys(v).forEach(k=>v[k]===undefined&&delete v[k]);
-    if(d.i!==''&&it[+d.i]){const o=it[+d.i];['due','who','note'].forEach(k=>delete o[k]);Object.assign(o,v)}else it.push({id:'p'+uidGen(),...v});
+    const it=preItems(l).map(x=>({...x}));const st=document.querySelector('input[name=pi_st]:checked')?.value||'todo';
+    const v={name,start:$('#pi_start').value||undefined,due:$('#pi_due').value||undefined,who:$('#pi_who').value.trim()||undefined,fu:$('#pi_fu').value||undefined,fuWith:$('#pi_fuw').value.trim()||undefined,phase:$('#pi_ph').value,note:$('#pi_note')?($('#pi_note').value.trim()||undefined):undefined};
+    const o=d.i!==''&&it[+d.i]?it[+d.i]:null;const x=o||{id:'p'+uidGen()};
+    ['start','due','who','fu','fuWith','note'].forEach(k=>delete x[k]);Object.keys(v).forEach(k=>{if(v[k]!==undefined)x[k]=v[k]});
+    x.st=st;if(st==='done'){if(!x.done)x.done={by:meName(),at:new Date().toISOString()}}else delete x.done;
+    const upd=$('#pi_upd').value.trim();if(upd)x.log=[...(x.log||[]),{text:upd,by:meName(),at:new Date().toISOString()}].slice(-30);
+    if(!o)it.push(x);
     if(await preWrite(l,{items:it})){closeSheet();toast(L('Saved','已保存'))}},
   preDel:async d=>{if(SH.confirmDel!==+d.i){SH.confirmDel=+d.i;drawSheet();return}const l=curLoc();const it=preItems(l).filter((_,i)=>i!==+d.i);if(await preWrite(l,{items:it}))closeSheet()},
 };
