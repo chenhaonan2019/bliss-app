@@ -1180,47 +1180,110 @@ const preLate=(x,d)=>preSt(x)!=='done'&&x.due&&x.due<(d||bizDate());
 function preProg(l){const it=preItems(l);const n=it.filter(x=>x.done).length;return{n,t:it.length,pct:it.length?Math.round(n/it.length*100):0,fu:it.filter(x=>preFuDue(x)).length,late:it.filter(x=>preLate(x)).length}}
 async function preWrite(l,patch){const cur=preDoc(l)||{};const next={...cur,items:preItems(l),phases:prePhases(l),...patch};D.preopen={...(D.preopen||{}),[l]:next};render();drawSheet();return W(A.db.doc('mgr/preopen_'+l).set(next))}
 const md=s=>fmtD(s,{month:'short',day:'numeric'});
+// ---- Board (monday.com style): groups, status cells, timeline; Table / Kanban / Timeline views ----
+const ST_COL={todo:'#C4C4C4',doing:'#FDAB3D',wait:'#A25DDC',done:'#00C875'};
+const GRP_COL=['#579BFC','#A25DDC','#FDAB3D','#00C875','#E2445C','#FF7575','#037F4C','#9CD326','#BB3354','#225091'];
+const stName=k=>({todo:L('Not started','未开始'),doing:L('Working on it','进行中'),wait:L('Waiting / follow up','等待跟进'),done:L('Done','完成')})[k];
+const initials=n=>String(n||'').trim().split(/\s+/).map(w=>w[0]).join('').slice(0,2).toUpperCase();
+const nameCol=n=>{let h=0;for(const c of String(n))h=(h*31+c.charCodeAt(0))>>>0;return GRP_COL[h%GRP_COL.length]};
+const avatarOf=n=>n?`<span title="${esc(n)}" style="display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;background:${nameCol(n)};color:#fff;font-size:11px;font-weight:700;flex:none">${esc(initials(n))}</span>`:`<span style="display:inline-grid;place-items:center;width:28px;height:28px;border-radius:50%;border:1.5px dashed var(--line);color:var(--muted);font-size:14px">+</span>`;
+function battery(items,h=8){const t=items.length||1;const c={todo:0,doing:0,wait:0,done:0};items.forEach(x=>c[preSt(x)]++);
+  return `<div style="display:flex;height:${h}px;border-radius:999px;overflow:hidden;background:var(--line)">${['done','doing','wait','todo'].map(k=>c[k]?`<i title="${stName(k)} ${c[k]}" style="width:${c[k]/t*100}%;background:${ST_COL[k]}"></i>`:'').join('')}</div>`}
+(function(){if(document.getElementById('mb-css'))return;const st=document.createElement('style');st.id='mb-css';st.textContent=`
+#view.wide{max-width:1180px}
+.mb-scroll{overflow-x:auto;-webkit-overflow-scrolling:touch;border-radius:12px}
+.mb-t{min-width:760px;border-collapse:separate;border-spacing:0;width:100%;font-size:13px}
+.mb-r{display:grid;grid-template-columns:22px minmax(150px,2.4fr) 112px 56px 72px 150px 118px 40px;align-items:stretch;border-bottom:1px solid var(--line);background:var(--surface)}
+.mb-r>div{padding:6px 8px;display:flex;align-items:center;min-width:0;border-right:1px solid var(--line)}
+.mb-r>div:last-child{border-right:0}
+.mb-h{background:var(--sunk);font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.03em}
+.mb-h>div{justify-content:center}.mb-h>div.mb-n{justify-content:flex-start}
+.mb-n{position:sticky;left:0;z-index:2;background:inherit;cursor:pointer;gap:6px}
+.mb-r .drag{position:sticky;left:0}
+.mb-st{justify-content:center;color:#fff;font-weight:700;cursor:pointer;text-align:center;font-size:12px;padding:6px 4px!important;border-right:2px solid var(--surface)!important}
+.mb-c{justify-content:center;text-align:center}
+.mb-g{border-radius:12px;overflow:hidden;border:1px solid var(--line);border-left-width:6px}
+.mb-k{display:flex;gap:10px;overflow-x:auto;padding-bottom:6px;align-items:flex-start}
+.mb-kc{flex:0 0 240px;background:var(--sunk);border-radius:12px;padding:8px;display:flex;flex-direction:column;gap:8px}
+.mb-card{background:var(--surface);border-radius:10px;padding:10px;border:1px solid var(--line);cursor:pointer;display:flex;flex-direction:column;gap:6px}
+.mb-gantt{position:relative;min-width:var(--gw)}
+`;document.head.appendChild(st)})();
 function vPreopen(){const l=curLoc();const d=bizDate();const od=preOpenDate(l);const days=od?Math.round((parseYmd(od)-parseYmd(d))/864e5):null;const p=preProg(l);
-  const team=Object.entries(D.employees).filter(([id,e])=>e.active!==false&&worksAt(id,l));
   if(!isMgr)return `<div class="stack"><div><div class="eyebrow">${esc(locName(l))}</div><h2>${L('Opening soon','即将开业')}</h2></div><div class="card empty">${L('This store isn\'t open yet. Your manager will share your training schedule.','这家店还没开业，经理会告诉你培训安排。')}</div></div>`;
-  const all=preItems(l);const S=PRE_ST();const f=UI.preF||'all';
-  const cnt={all:all.length,todo:0,doing:0,wait:0,done:0,fu:p.fu,late:p.late};all.forEach(x=>cnt[preSt(x)]++);
-  const show=x=>f==='all'||(f==='fu'?preFuDue(x,d):f==='late'?preLate(x,d):preSt(x)===f);
-  const filt=[['all',L('All','全部')],['fu',L('Follow up now','需跟进')],['late',L('Overdue','逾期')],['doing',S.doing[0]],['wait',S.wait[0]],['todo',S.todo[0]],['done',S.done[0]]];
-  const row=(x,i)=>{const st=preSt(x);const last=(x.log||[]).slice(-1)[0];
-    return `<div class="li" style="gap:8px;padding-left:6px;align-items:flex-start" data-sid="${i}">${DRAG_H}
-      <button class="btn sm ${st==='done'?'pri':''}" data-act="preTog" data-i="${i}" aria-pressed="${st==='done'?'true':'false'}" aria-label="${L('Done','完成')}: ${esc(x.name)}" style="min-width:40px">${st==='done'?'✓':'☐'}</button>
-      <div class="grow tap" data-act="preItem" data-i="${i}" tabindex="0" style="cursor:pointer;min-width:0"><div class="t" style="${st==='done'?'text-decoration:line-through;opacity:.6':''}">${esc(x.name)}</div>
-        <div class="row wrapr" style="gap:4px;margin-top:3px">${st==='todo'?'':chip(S[st][1],S[st][0])}${x.start&&st!=='done'?`<span class="tiny muted">${L('Start','开始')} ${md(x.start)}</span>`:''}${x.due&&st!=='done'?chip(preLate(x,d)?'bad':x.due<=addDays(d,7)?'warn':'',`${L('Due','截止')} ${md(x.due)}`):''}${x.who?`<span class="tiny muted">· ${esc(x.who)}</span>`:''}${st==='done'&&x.done?`<span class="tiny muted">${esc(x.done.by)} · ${md(x.done.at.slice(0,10))}</span>`:''}</div>
-        ${x.fu&&st!=='done'?`<div class="tiny" style="margin-top:3px;color:${preFuDue(x,d)?'var(--bad)':'var(--warn)'};font-weight:600">🔔 ${L('Follow up','跟进')} ${md(x.fu)}${x.fuWith?` · ${esc(x.fuWith)}`:''}</div>`:''}
-        ${last?`<div class="tiny muted" style="margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">💬 ${esc(last.text)} — ${esc(last.by)}, ${md(last.at.slice(0,10))}</div>`:x.note?`<div class="tiny muted" style="margin-top:3px">${esc(x.note)}</div>`:''}</div>
-      <button class="btn sm" data-act="preItem" data-i="${i}" aria-label="${L('Edit','编辑')} ${esc(x.name)}">✎</button></div>`};
-  return `<div class="stack">
-  <div><div class="eyebrow">${esc(locName(l))} · ${L('Opening soon','即将开业')}</div><h2>${L('Opening plan','开业计划')}</h2></div>
-  <div class="stats"><div class="stat"><b>${p.pct}%</b><span>${L('Done','完成')} (${p.n}/${p.t})</span></div>
-   <div class="stat"><b style="color:${days!=null&&days<0?'var(--bad)':'inherit'}">${days==null?'—':days<0?L(`${-days}d late`,`晚了${-days}天`):days}</b><span>${days==null?L('Opening date not set','未定开业日'):days<0?L('past target','超过目标'):L('days to opening','天后开业')}</span></div>
-   <div class="stat tap" data-act="preF" data-k="fu" style="cursor:pointer"><b style="color:${p.fu?'var(--bad)':'inherit'}">${p.fu}</b><span>${L('Follow up now','需跟进')}</span></div>
-   <div class="stat tap" data-act="preF" data-k="late" style="cursor:pointer"><b style="color:${p.late?'var(--bad)':'inherit'}">${p.late}</b><span>${L('Overdue','逾期')}</span></div></div>
-  <div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div>
-  <div class="card row" style="gap:8px;flex-wrap:wrap"><label class="f grow" style="min-width:160px">${L('Target opening date','目标开业日')}<input class="in" type="date" id="pre_open" value="${esc(od)}"></label><button class="btn" data-act="preDate">${L('Save date','保存日期')}</button></div>
-  <div class="row" style="gap:6px;overflow-x:auto;padding-bottom:2px;flex-wrap:nowrap">${filt.map(([k,n])=>`<button class="btn sm ${f===k?'pri':''}" style="white-space:nowrap;flex:none" data-act="preF" data-k="${k}">${n} ${cnt[k]}</button>`).join('')}</div>
-  ${f==='all'?`<p class="tiny muted" style="margin:0">${L('Tap an item to set its status, start / due dates, follow-up and updates. Hold ⋮⋮ to drag it; ↑ ↓ moves a section.','点项目设置状态、开始/截止日、跟进和进展。按住 ⋮⋮ 拖动排序；↑ ↓ 移动分类。')}</p>`:''}
-  <div class="stack">${prePhases(l).map((ph,pi)=>{const it=all.map((x,i)=>({x,i})).filter(({x})=>x.phase===ph);const vis=it.filter(({x})=>show(x));const dn=it.filter(({x})=>x.done).length;
-    if(f!=='all'&&!vis.length)return'';
-    return `<div><div class="row" style="gap:6px"><h3 class="grow">${esc(ph)}</h3><span class="small muted">${dn}/${it.length}</span>${f==='all'?`<button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="-1" ${pi===0?'disabled':''} aria-label="${L('Move section up','分类上移')}">↑</button><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="1" ${pi===prePhases(l).length-1?'disabled':''} aria-label="${L('Move section down','分类下移')}">↓</button><button class="btn sm" data-act="prePh" data-ph="${esc(ph)}" aria-label="${L('Edit section','编辑分类')} ${esc(ph)}">✎</button>`:''}</div>
-      <div class="card flush list" data-sortable="preitems">${vis.map(({x,i})=>row(x,i)).join('')||'<div class="empty small">—</div>'}
-      ${f==='all'?`<button class="li tap" data-act="preItem" data-ph="${esc(ph)}" style="width:100%;border:0;background:none;color:var(--brand);font-weight:600;text-align:left;cursor:pointer">${ic('plus')} ${L('Add','添加')}</button>`:''}</div></div>`}).join('')||`<div class="card empty">${L('Nothing here.','没有。')}</div>`}</div>
-  ${f==='all'?`<button class="btn" data-act="prePh">${ic('plus')} ${L('Add a section','添加分类')}</button>`:''}
-  <div class="card stack" style="gap:6px"><b>${L('Team for this store','这家店的员工')}</b>${team.length?`<div class="small">${team.map(([id])=>esc(empName(id))).join(', ')}</div>`:`<div class="small muted">${L('Nobody yet. In Team → People, set someone\'s main store or "Can also work at" to this store.','还没有。去 团队 → 员工，把人的门店设成这家店。')}</div>`}</div>
-  <p class="tiny muted">${L('When the store opens, go to Settings → Stores and switch it to "Open". Then the daily checklists, schedule and counts start like the other stores.','开业后，去 设置 → 门店 改成"营业中"，就会和其他店一样开始每日清单、排班和盘点。')}</p>
-  </div>`}
+  const all=preItems(l);const f=UI.preF||'all';const view=UI.preV||'table';const who=UI.preWho||'';
+  const show=x=>(f==='all'||(f==='fu'?preFuDue(x,d):f==='late'?preLate(x,d):preSt(x)===f))&&(!who||x.who===who);
+  const people=[...new Set(all.map(x=>x.who).filter(Boolean))].sort();
+  const phases=prePhases(l);const gcol=i=>GRP_COL[i%GRP_COL.length];
+  const head=`<div class="stack" style="gap:10px">
+    <div class="row" style="align-items:flex-end;gap:10px;flex-wrap:wrap"><div class="grow"><div class="eyebrow">${esc(locName(l))} · ${L('Opening soon','即将开业')}</div><h2 style="margin:0">${L('Opening plan','开业计划')}</h2></div>
+      <div class="card row" style="gap:8px;padding:6px 10px;flex-wrap:wrap"><span style="font-size:22px;font-weight:800;font-family:var(--display);color:${days!=null&&days<0?'var(--bad)':'inherit'}">${days==null?'—':days<0?-days:days}</span><span class="tiny muted" style="line-height:1.2">${days==null?L('opening date<br>not set','未定<br>开业日'):days<0?L('days past<br>target','天<br>超过目标'):L('days to<br>opening','天后<br>开业')}</span>
+      <input class="in" type="date" id="pre_open" value="${esc(od)}" style="width:auto;min-height:34px;padding:4px 8px" aria-label="${L('Target opening date','目标开业日')}"><button class="btn sm" data-act="preDate">${L('Save','保存')}</button></div></div>
+    <div class="card stack" style="gap:8px"><div class="row" style="gap:8px"><b class="grow">${p.pct}% ${L('done','完成')} <span class="small muted">(${p.n}/${p.t})</span></b>
+      ${p.fu?`<button class="btn sm ${f==='fu'?'pri':''}" data-act="preF" data-k="fu" style="color:${f==='fu'?'':'var(--bad)'}">🔔 ${p.fu} ${L('follow up','跟进')}</button>`:''}${p.late?`<button class="btn sm ${f==='late'?'pri':''}" data-act="preF" data-k="late" style="color:${f==='late'?'':'var(--bad)'}">⏰ ${p.late} ${L('overdue','逾期')}</button>`:''}</div>
+      ${battery(all,12)}
+      <div class="row wrapr" style="gap:10px">${['done','doing','wait','todo'].map(k=>{const n=all.filter(x=>preSt(x)===k).length;return `<button class="row tiny" data-act="preF" data-k="${k}" style="gap:4px;border:0;background:none;cursor:pointer;color:var(--ink);font-weight:${f===k?800:500};padding:0"><i style="width:10px;height:10px;border-radius:3px;background:${ST_COL[k]};display:inline-block"></i>${stName(k)} ${n}</button>`}).join('')}${f!=='all'?`<button class="tiny" data-act="preF" data-k="all" style="border:0;background:none;color:var(--brand);font-weight:700;cursor:pointer;padding:0">✕ ${L('Clear filter','清除筛选')}</button>`:''}</div></div>
+    <div class="row" style="gap:6px;flex-wrap:wrap"><div class="row" style="gap:0;border:1px solid var(--line);border-radius:10px;overflow:hidden">${[['table','▦ '+L('Table','表格')],['kanban','▥ '+L('Kanban','看板')],['gantt','▬ '+L('Timeline','时间线')]].map(([k,n])=>`<button class="btn sm ${view===k?'pri':''}" style="border-radius:0;border:0" data-act="preV" data-k="${k}">${n}</button>`).join('')}</div>
+      <span class="grow"></span>${people.length?`<select class="in" id="pre_who" style="width:auto;min-height:34px;padding:4px 8px" aria-label="${L('Person','负责人')}"><option value="">👤 ${L('Everyone','所有人')}</option>${people.map(n=>`<option ${who===n?'selected':''}>${esc(n)}</option>`).join('')}</select>`:''}
+      <button class="btn sm pri" data-act="preItem" data-ph="${esc(phases[0]||'')}">${ic('plus')} ${L('New item','新项目')}</button></div></div>`;
+  let body='';
+  if(view==='table'){
+    body=phases.map((ph,pi)=>{const it=all.map((x,i)=>({x,i})).filter(({x})=>x.phase===ph);const vis=it.filter(({x})=>show(x));if(f!=='all'&&!vis.length)return'';const closed=(UI.preClosed||{})[ph];const c=gcol(pi);
+      return `<div class="stack" style="gap:6px"><div class="row" style="gap:6px"><button data-act="preFold" data-ph="${esc(ph)}" style="border:0;background:none;cursor:pointer;color:${c};font-size:14px;padding:0 2px" aria-label="${closed?'Open':'Close'}">${closed?'▶':'▼'}</button>
+        <b style="color:${c};font-size:16px;font-family:var(--display)" class="grow">${esc(ph)}</b><span class="tiny muted">${it.filter(({x})=>x.done).length}/${it.length}</span>
+        ${f==='all'?`<button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="-1" ${pi===0?'disabled':''} aria-label="Up">↑</button><button class="btn sm" data-act="prePhMv" data-ph="${esc(ph)}" data-n="1" ${pi===phases.length-1?'disabled':''} aria-label="Down">↓</button><button class="btn sm" data-act="prePh" data-ph="${esc(ph)}" aria-label="Edit group">✎</button>`:''}</div>
+      ${closed?`<div style="padding:0 4px">${battery(it.map(({x})=>x))}</div>`:`<div class="mb-g" style="border-left-color:${c}"><div class="mb-scroll"><div class="mb-t">
+        <div class="mb-r mb-h"><div></div><div class="mb-n">${L('Item','项目')}</div><div>${L('Status','状态')}</div><div>${L('Owner','负责')}</div><div>${L('Due','截止')}</div><div>${L('Timeline','时间')}</div><div>${L('Follow up','跟进')}</div><div>💬</div></div>
+        <div data-sortable="preitems">${vis.map(({x,i})=>{const st=preSt(x);const tl=x.start&&x.due?(()=>{const a=parseYmd(x.start),b=parseYmd(x.due),n=parseYmd(d);const pct=Math.max(0,Math.min(100,(n-a)/Math.max(1,b-a)*100));return `<div style="width:100%"><div style="height:18px;border-radius:999px;background:${c}33;position:relative;overflow:hidden"><i style="position:absolute;inset:0 auto 0 0;width:${st==='done'?100:pct}%;background:${c}"></i><span style="position:relative;font-size:10.5px;font-weight:700;display:block;text-align:center;line-height:18px;color:${pct>55||st==='done'?'#fff':'var(--ink)'}">${fmtD(x.start,{month:'short',day:'numeric'})} – ${fmtD(x.due,{month:'short',day:'numeric'})}</span></div></div>`})():`<span class="tiny muted">—</span>`;
+          return `<div class="mb-r" data-sid="${i}"><div style="padding:0;justify-content:center">${DRAG_H}</div>
+          <div class="mb-n" data-act="preItem" data-i="${i}" tabindex="0"><span class="grow" style="${st==='done'?'text-decoration:line-through;opacity:.55':''};overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${esc(x.name)}</span></div>
+          <div class="mb-st" data-act="preStPick" data-i="${i}" style="background:${ST_COL[st]}" tabindex="0">${stName(st)}</div>
+          <div class="mb-c" data-act="preItem" data-i="${i}" style="cursor:pointer">${avatarOf(x.who)}</div>
+          <div class="mb-c" style="${preLate(x,d)?'color:var(--bad);font-weight:700':''}">${x.due?`${preLate(x,d)?'⚠️ ':''}${fmtD(x.due,{month:'short',day:'numeric'})}`:'<span class="tiny muted">—</span>'}</div>
+          <div class="mb-c" data-act="preItem" data-i="${i}" style="cursor:pointer">${tl}</div>
+          <div class="mb-c tiny" style="${preFuDue(x,d)?'color:var(--bad);font-weight:700':''}">${x.fu&&st!=='done'?`🔔 ${fmtD(x.fu,{month:'short',day:'numeric'})}${x.fuWith?`<br>${esc(x.fuWith)}`:''}`:'<span class="muted">—</span>'}</div>
+          <div class="mb-c tiny" data-act="preItem" data-i="${i}" style="cursor:pointer;color:${(x.log||[]).length?'var(--info)':'var(--muted)'}">${(x.log||[]).length||'💬'}</div></div>`}).join('')}</div>
+        ${f==='all'?`<div class="mb-r"><div></div><div class="mb-n" data-act="preItem" data-ph="${esc(ph)}" style="color:var(--muted)">${ic('plus')} ${L('Add item','添加项目')}</div><div></div><div></div><div></div><div></div><div></div><div></div></div>`:''}
+        <div class="mb-r" style="background:var(--sunk)"><div></div><div class="mb-n"></div><div></div><div style="padding:8px">${battery(it.map(({x})=>x))}</div><div></div><div></div><div></div><div></div></div>
+      </div></div></div>`}</div>`}).join('')+(f==='all'?`<button class="btn" data-act="prePh">${ic('plus')} ${L('Add new group','添加分组')}</button>`:'');
+  }else if(view==='kanban'){
+    body=`<div class="mb-k">${['todo','doing','wait','done'].map(k=>{const it=all.map((x,i)=>({x,i})).filter(({x})=>preSt(x)===k&&show(x));
+      return `<div class="mb-kc"><div class="row" style="gap:6px"><i style="width:12px;height:12px;border-radius:4px;background:${ST_COL[k]}"></i><b class="grow">${stName(k)}</b><span class="tiny muted">${it.length}</span></div>
+        ${it.map(({x,i})=>{const pi=phases.indexOf(x.phase);return `<div class="mb-card" data-act="preItem" data-i="${i}" tabindex="0" style="border-top:3px solid ${gcol(pi)}"><div class="t" style="font-size:14px">${esc(x.name)}</div>
+          <div class="tiny" style="color:${gcol(pi)};font-weight:700">${esc(x.phase)}</div>
+          <div class="row" style="gap:6px">${avatarOf(x.who)}<span class="grow"></span>${x.fu&&k!=='done'?`<span class="tiny" style="color:${preFuDue(x,d)?'var(--bad)':'var(--warn)'};font-weight:700">🔔 ${fmtD(x.fu,{month:'short',day:'numeric'})}</span>`:''}${x.due&&k!=='done'?chip(preLate(x,d)?'bad':'',fmtD(x.due,{month:'short',day:'numeric'})):''}${(x.log||[]).length?`<span class="tiny muted">💬${x.log.length}</span>`:''}</div>
+          <div class="row" style="gap:4px;flex-wrap:nowrap"><span class="tiny muted">${L('Move','移到')}</span>${['todo','doing','wait','done'].filter(s=>s!==k).map(s=>`<button class="tiny" data-act="preSet" data-i="${i}" data-k="${s}" title="${stName(s)}" style="border:0;border-radius:999px;padding:3px 8px;background:${ST_COL[s]};color:#fff;font-weight:700;cursor:pointer;white-space:nowrap">${({todo:L('To do','未开始'),doing:L('Doing','进行'),wait:L('Waiting','等待'),done:L('Done','完成')})[s]}</button>`).join('')}</div></div>`}).join('')||`<div class="tiny muted" style="text-align:center;padding:12px">—</div>`}
+        ${k==='todo'?`<button class="btn sm" data-act="preItem" data-ph="${esc(phases[0]||'')}">${ic('plus')} ${L('Add','添加')}</button>`:''}</div>`}).join('')}</div>`;
+  }else{
+    const dated=all.map((x,i)=>({x,i})).filter(({x})=>show(x)&&(x.start||x.due));const undated=all.filter(x=>show(x)&&!x.start&&!x.due).length;
+    if(!dated.length)body=`<div class="card empty">${L('Give items a start and due date to see them on the timeline.','给项目设开始日和截止日，就能在时间线上看到。')}</div>`;
+    else{const ds=dated.flatMap(({x})=>[x.start,x.due].filter(Boolean)).concat([d,od].filter(Boolean)).sort();let a=wkStart(addDays(ds[0],-3)),z=addDays(ds[ds.length-1],7);
+      const nd=Math.round((parseYmd(z)-parseYmd(a))/864e5)+1;const W=22;const gw=nd*W+180;const xOf=s=>Math.round((parseYmd(s)-parseYmd(a))/864e5)*W;
+      const weeks=[];for(let s=a;s<=z;s=addDays(s,7))weeks.push(s);
+      body=`<div class="card" style="padding:0;overflow:hidden"><div class="mb-scroll" id="gantt_sc" data-today="${180+xOf(d)}"><div class="mb-gantt" style="--gw:${gw}px;min-width:${gw}px">
+        <div style="display:flex;border-bottom:1px solid var(--line);background:var(--sunk);position:sticky;top:0"><div style="width:180px;flex:none;position:sticky;left:0;background:var(--sunk);z-index:3;padding:6px 8px" class="tiny muted"><b>${L('Item','项目')}</b></div><div style="position:relative;height:28px;flex:1">${weeks.map(s=>`<span class="tiny muted" style="position:absolute;left:${xOf(s)}px;top:6px;white-space:nowrap;padding-left:4px;border-left:1px solid var(--line)">${fmtD(s,{month:'short',day:'numeric'})}</span>`).join('')}</div></div>
+        ${phases.map((ph,pi)=>{const rows=dated.filter(({x})=>x.phase===ph);if(!rows.length)return'';const c=gcol(pi);
+          return `<div style="display:flex"><div style="width:180px;flex:none;position:sticky;left:0;background:var(--surface);z-index:2;padding:6px 8px;color:${c};font-weight:800;font-size:13px">${esc(ph)}</div><div style="flex:1"></div></div>`+rows.map(({x,i})=>{const st=preSt(x);const s0=x.start||x.due,s1=x.due||x.start;const left=xOf(s0),w=Math.max(W,xOf(s1)-left+W);
+            return `<div style="display:flex;border-top:1px solid var(--line);min-height:34px"><div data-act="preItem" data-i="${i}" style="width:180px;flex:none;position:sticky;left:0;background:var(--surface);z-index:2;padding:6px 8px;font-size:12.5px;cursor:pointer;display:flex;gap:6px;align-items:center"><i style="width:4px;align-self:stretch;border-radius:2px;background:${c}"></i><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;${st==='done'?'text-decoration:line-through;opacity:.55':''}">${esc(x.name)}</span></div>
+              <div style="position:relative;flex:1"><div data-act="preItem" data-i="${i}" title="${esc(x.name)}" style="position:absolute;left:${left}px;width:${w}px;top:7px;height:20px;border-radius:999px;background:${ST_COL[st]};cursor:pointer;color:#fff;font-size:10.5px;font-weight:700;line-height:20px;padding:0 8px;overflow:hidden;white-space:nowrap;box-shadow:inset 0 0 0 2px ${preLate(x,d)?'var(--bad)':'transparent'}">${x.who?esc(initials(x.who))+' · ':''}${fmtD(s0,{month:'short',day:'numeric'})}${s1!==s0?' – '+fmtD(s1,{month:'short',day:'numeric'}):''}</div></div></div>`}).join('')}).join('')}
+        <div style="position:absolute;top:0;bottom:0;left:${180+xOf(d)+W/2}px;width:2px;background:var(--bad);z-index:1" title="${L('Today','今天')}"><span class="tiny" style="position:absolute;top:30px;left:4px;color:var(--bad);font-weight:800;white-space:nowrap">${L('Today','今天')}</span></div>
+        ${od?`<div style="position:absolute;top:0;bottom:0;left:${180+xOf(od)+W/2}px;width:2px;background:var(--ok);z-index:1"><span class="tiny" style="position:absolute;top:30px;left:4px;color:var(--ok);font-weight:800;white-space:nowrap">🎉 ${L('Opening','开业')}</span></div>`:''}
+      </div></div></div>${undated?`<p class="tiny muted">${L(`${undated} item${undated>1?'s':''} without dates aren't shown.`,`${undated} 个项目没有日期，未显示。`)}</p>`:''}`}
+  }
+  const team=Object.entries(D.employees).filter(([id,e])=>e.active!==false&&worksAt(id,l));
+  return `<div class="stack">${head}${body||`<div class="card empty">${L('Nothing here.','没有。')}</div>`}
+  <div class="card stack" style="gap:6px"><b>${L('Team for this store','这家店的员工')}</b>${team.length?`<div class="row wrapr" style="gap:6px">${team.map(([id])=>`<span class="row" style="gap:4px">${avatarOf(empName(id))}<span class="small">${esc(empName(id))}</span></span>`).join('')}</div>`:`<div class="small muted">${L('Nobody yet. In Team → People, set someone\'s main store or "Can also work at" to this store.','还没有。去 团队 → 员工，把人的门店设成这家店。')}</div>`}</div>
+  <p class="tiny muted">${L('When the store opens, go to Settings → Stores and switch it to "Open".','开业后，去 设置 → 门店 改成"营业中"。')}</p></div>`}
+function preStPick(i){const x=preItems(curLoc())[i];if(!x)return;openSheet({title:()=>esc(x.name),body:()=>`<div class="stack" style="gap:8px">${['todo','doing','wait','done'].map(k=>`<button data-act="preSet" data-i="${i}" data-k="${k}" style="border:0;border-radius:10px;padding:14px;background:${ST_COL[k]};color:#fff;font-weight:800;font-size:15px;cursor:pointer;${preSt(x)===k?'box-shadow:0 0 0 3px var(--ink)':''}">${stName(k)}${preSt(x)===k?' ✓':''}</button>`).join('')}
+  <button class="btn" data-act="preItem" data-i="${i}">${L('Open item details','打开详情')}</button></div>`,foot:()=>''})}
+async function preSetStatus(i,k){const l=curLoc();const it=preItems(l).map(x=>({...x}));const x=it[i];if(!x)return;x.st=k;if(k==='done'){if(!x.done)x.done={by:meName(),at:new Date().toISOString()}}else delete x.done;if(k==='doing'&&!x.start)x.start=bizDate();await preWrite(l,{items:it})}
+
 function preItemSheet(i,ph){const l=curLoc();const x=i!=null?preItems(l)[i]:{name:'',phase:ph||prePhases(l)[0]};const st=preSt(x);const S=PRE_ST();
   openSheet({title:()=>i!=null?L('Edit item','编辑'):L('Add item','添加'),body:()=>`<div class="stack">
     <label class="f">${L('What needs to happen','要做的事')}<input class="in" id="pi_name" value="${esc(x.name)}" maxlength="120"></label>
     <div class="f" style="display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:600;color:var(--muted)">${L('Status','状态')}
       <div class="row wrapr" style="gap:6px">${Object.entries(S).map(([k,[n]])=>`<label class="btn sm" style="cursor:pointer;gap:6px;color:var(--ink)"><input type="radio" name="pi_st" value="${k}" ${st===k?'checked':''}> ${n}</label>`).join('')}</div></div>
     <div class="g2"><label class="f">${L('Start date','开始日')}<input class="in" type="date" id="pi_start" value="${esc(x.start||'')}"></label><label class="f">${L('Due date','截止日')}<input class="in" type="date" id="pi_due" value="${esc(x.due||'')}"></label></div>
-    <label class="f">${L('Who is responsible','负责人')}<input class="in" id="pi_who" value="${esc(x.who||'')}" maxlength="40" placeholder="e.g. Ashley"></label>
+    <label class="f">${L('Who is responsible','负责人')}<input class="in" id="pi_who" list="pi_who_l" value="${esc(x.who||'')}" maxlength="40" placeholder="e.g. Ashley"><datalist id="pi_who_l">${[...new Set([...Object.values(D.employees).filter(e=>e.active!==false&&['Manager','Shift Lead'].includes(e.role)).map(e=>e.name),...preItems(l).map(y=>y.who).filter(Boolean)])].map(n=>`<option value="${esc(n)}">`).join('')}</datalist></label>
     <div class="card stack" style="gap:8px;background:var(--sunk)"><div class="eyebrow">🔔 ${L('Follow up','跟进')}</div>
       <div class="g2"><label class="f">${L('Follow up on','跟进日期')}<input class="in" type="date" id="pi_fu" value="${esc(x.fu||'')}"></label><label class="f">${L('With whom','跟谁')}<input class="in" id="pi_fuw" value="${esc(x.fuWith||'')}" maxlength="60" placeholder="${L('e.g. Health dept, landlord','例如：卫生局、房东')}"></label></div>
       <p class="tiny muted" style="margin:0">${L('On that day it shows red under "Follow up now". Clear the date when it\'s handled.','到那天会在"需跟进"里变红。处理完把日期清空。')}</p></div>
@@ -1238,6 +1301,10 @@ function prePhSheet(ph){const l=curLoc();const n=ph?preItems(l).filter(x=>x.phas
 SORT.preitems=async ids=>{const l=curLoc();const it=preItems(l).map(x=>({...x}));const pos=ids.map(Number).slice().sort((a,b)=>a-b);const nx=it.slice();pos.forEach((p,k)=>{nx[p]=it[+ids[k]]});await preWrite(l,{items:nx})};
 const PRE_ACT={
   preF:d=>{UI.preF=UI.preF===d.k&&d.k!=='all'?'all':d.k;render()},
+  preV:d=>{UI.preV=d.k;render()},
+  preFold:d=>{UI.preClosed={...(UI.preClosed||{}),[d.ph]:!(UI.preClosed||{})[d.ph]};render()},
+  preStPick:d=>preStPick(+d.i),
+  preSet:async d=>{const open=!!SH;await preSetStatus(+d.i,d.k);if(open)closeSheet()},
   prePh:d=>prePhSheet(d.ph||null),
   prePhSave:async d=>{const l=curLoc();const v=$('#ph_name').value.trim();if(!v){$('#ph_name').focus();return}const ph=prePhases(l);
     if(v!==d.ph&&ph.includes(v)){toast(L('That section already exists','已经有这个分类'));return}
@@ -1387,6 +1454,9 @@ async function onBatchDiscard(t){const f=t.files?.[0];const id=t.dataset.id;cons
   if(await W(A.db.doc('batches/'+id).update(p))){D.batches[id]={...b,...p};toast(L('Thrown out — thanks!','已丢弃，谢谢！'));render()}}
 
 function mountView(){
+  const pw=$('#pre_who');if(pw)pw.onchange=()=>{UI.preWho=pw.value;render()};
+  $('#view')?.classList.toggle('wide',!!$('#pre_open'));
+  const gs=$('#gantt_sc');if(gs&&!gs.dataset.done){gs.dataset.done=1;gs.scrollLeft=Math.max(0,+gs.dataset.today-gs.clientWidth/3)}
   document.querySelectorAll('[data-pname]').forEach(async el=>{const u=el.dataset.pname;if(!A.user){el.textContent=L('New account','新账号');return}const ps=await A.user.profiles([u]);el.textContent=ps[u]?.name||L('New account','新账号')});
   const pp=$('#pdate_pick');if(pp)pp.onchange=()=>{if(pp.value){UI.pDate=pp.value;render(true)}};
   const psi=$('#ps_in'),pli=$('#pl_in');if(psi)psi.onchange=()=>{if(psi.value){UI.ps=psi.value;render(true)}};if(pli)pli.onchange=()=>{UI.pl=+pli.value;render(true)};
