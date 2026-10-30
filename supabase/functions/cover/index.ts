@@ -625,7 +625,7 @@ async function batchDuty(org: string, ctx: Json) {
     const at = ctx.locs.length > 1 ? ` · ${ctx.locName(loc)}` : "";
     const to: string[] = kind === "esc" ? ctx.managers(loc) : ctx.onShift(loc);
     if (!to.length) continue; // nobody on shift (store closed): try again on the next run
-    const title = kind === "soon" ? `⏳ ${b.name} expires at ${hmOf(b.expAt)}${at}` : kind === "exp" ? `🗑️ Throw out ${b.name} now${at}` : `⚠️ ${b.name} expired and is still not thrown out${at}`;
+    const title = kind === "soon" ? `⏳ ${b.name}${b.code ? " #" + b.code : ""} expires at ${hmOf(b.expAt)}${at}` : kind === "exp" ? `🗑️ Throw out ${b.name}${b.code ? " #" + b.code : ""} now${at}` : `⚠️ ${b.name}${b.code ? " #" + b.code : ""} expired and is still not thrown out${at}`;
     const body = kind === "soon" ? `Use it first. When it's done or expired, mark it in the app.` : kind === "exp" ? `It expired at ${hmOf(b.expAt)}. Throw it out and tap "Thrown out" in the app with a photo.` : `It expired at ${hmOf(b.expAt)}. Staff were reminded 30 min ago. Please make sure it's thrown out.`;
     await sendPush(to, title, body, `${(env("APP_URL") || "").replace(/\/$/, "")}/`);
     await merge(org, `batches/${r.doc_id}`, { alerts: { [kind]: new Date().toISOString() } });
@@ -640,7 +640,7 @@ async function batchDuty(org: string, ctx: Json) {
     const hrs = (ctx.settings.hours || HOURS_DEF)[l.id]?.[dow]; const open = (Array.isArray(hrs) && hrs[0]) || ctx.settings.prep1 || "11:30";
     const kind = tasteAlert(open, now.hm, pending.length, sent[l.id] || {}); if (!kind) continue;
     const to: string[] = kind === "esc" ? ctx.managers(l.id) : ctx.onShift(l.id); if (!to.length) continue;
-    const at = ctx.locs.length > 1 ? ` · ${ctx.locName(l.id)}` : ""; const names = [...new Set(pending.map((r) => r.data.name))].slice(0, 5).join(", ");
+    const at = ctx.locs.length > 1 ? ` · ${ctx.locName(l.id)}` : ""; const names = pending.map((r) => r.data.name + (r.data.code ? " #" + r.data.code : "")).slice(0, 5).join(", ");
     await sendPush(to, kind === "ask" ? `👅 Morning taste check${at}` : `⚠️ Taste check not done${at}`,
       kind === "ask" ? `Taste before opening (${fmtT(open)}): ${names}. Tap 👍 or 👎 in the app, throw out anything that's off.` : `${pending.length} item${pending.length === 1 ? "" : "s"} not tasted yet (${names}). The store opened at ${fmtT(open)}.`,
       `${(env("APP_URL") || "").replace(/\/$/, "")}/`);
