@@ -450,8 +450,11 @@ const countedIn=p=>{if(!p.in||!seePay()||!D.noEarly?.[p.empId])return p.in;const
 const shiftEndAt=(p,s)=>{const e=atTime(p.date,s.end);if(s.start&&toMin(s.end)<=toMin(s.start))e.setDate(e.getDate()+1);return e};
 const countedOut=p=>{if(!p.out||!seePay()||!D.noLate?.[p.empId])return p.out;const s=punchShift(p);if(!s?.end)return p.out;const en=shiftEndAt(p,s);return new Date(p.out)>en?en.toISOString():p.out};
 const punchHrs=p=>p.out?Math.max(0,(new Date(countedOut(p))-new Date(countedIn(p)))/36e5):0;
+// A week's availability is only what was sent for that week (no copying to other weeks). Old records saved before
+// per-week sending existed (no snap at all) still use their single weekly pattern.
+const avWeek=(a,ws)=>!a?null:a.snap&&Object.keys(a.snap).length?(a.snap[ws]?.weekly||null):(a.weekly||null);
 function availFor(emp,date,start,end){const a=D.avail[emp];if(!a)return'unknown';if((a.off||[]).includes(date))return'off';
-  const w=(a.snap?.[weekStart(date)]?.weekly||a.weekly)?.[parseYmd(date).getDay()];if(!w||w.mode==='no')return'no';if(w.mode==='all')return'yes';
+  const wk=avWeek(a,weekStart(date));if(!wk)return'unknown';const w=wk[parseYmd(date).getDay()];if(!w||w.mode==='no')return'no';if(w.mode==='all')return'yes';
   if(!start)return'partial';return toMin(start)>=toMin(w.from)&&toMin(end)<=toMin(w.to)?'yes':'partial'}
 const availChip=s=>({yes:chip('ok',L('Available','有空')),partial:chip('warn',L('Partly','部分时间')),no:chip('bad',L('Unavailable','没空')),off:chip('bad',L('Time off','请假')),unknown:chip('',L('Not set','未填写'))}[s]);
 const FREQS=[['daily','Daily',1],['twice','Twice a week',3],['weekly','Weekly',7]];
@@ -672,10 +675,10 @@ function vEShift(){const me=actor(),d=today();const up=Object.values(D.shifts).f
   <div class="card stack"><div class="sec-t"><h3>${L('My availability','我的可上班时间')}</h3><button class="btn sm" data-act="availSheet" data-id="${me}">${L('Edit','修改')}</button></div>
   ${availSummary(me)}${a?.updatedAt?`<div class="tiny muted">${L('Updated','更新于')} ${fmtDT(a.updatedAt)}</div>`:`<div class="hint">${L('Tell your manager when you can work so you get scheduled.','请填写你能上班的时间，经理会据此排班。')}</div>`}</div>
   <p class="tiny muted">${L('Shift reminders: tap "Add to calendar" to get an alert on your phone 1 hour before each shift.','班次提醒：点"加入日历"，手机会在每班开始前 1 小时提醒你。')}</p>${UI.kiosk?'':accountCard()}</div>`}
-function availSummary(emp,wk){const a=D.avail[emp];const order=[1,2,3,4,5,6,0];const src=a?.snap?.[wk||nextWk()]?.weekly||a?.weekly;
+function availSummary(emp,wk){const a=D.avail[emp];const order=[1,2,3,4,5,6,0];const src=avWeek(a,wk||nextWk());
   return `<div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;text-align:center">${order.map(i=>{const w=src?.[i];const m=w?.mode||'no';
-    const bg=!a?'var(--sunk)':m==='all'?'var(--ok-bg)':m==='custom'?'var(--warn-bg)':'var(--sunk)';const fg=!a?'var(--muted)':m==='all'?'var(--ok)':m==='custom'?'var(--warn)':'var(--muted)';
-    return `<div style="background:${bg};color:${fg};border-radius:8px;padding:6px 2px"><div class="tiny" style="font-weight:700">${WD()[i]}</div><div style="font-size:10px">${!a?'—':m==='all'?L('All day','全天'):m==='custom'?`${esc(w.from)}<br>${esc(w.to)}`:L('No','否')}</div></div>`}).join('')}</div>
+    const bg=!src?'var(--sunk)':m==='all'?'var(--ok-bg)':m==='custom'?'var(--warn-bg)':'var(--sunk)';const fg=!src?'var(--muted)':m==='all'?'var(--ok)':m==='custom'?'var(--warn)':'var(--muted)';
+    return `<div style="background:${bg};color:${fg};border-radius:8px;padding:6px 2px"><div class="tiny" style="font-weight:700">${WD()[i]}</div><div style="font-size:10px">${!src?'—':m==='all'?L('All day','全天'):m==='custom'?`${esc(w.from)}<br>${esc(w.to)}`:L('No','否')}</div></div>`}).join('')}</div>
     ${(a?.off||[]).filter(x=>x>=today()).length?`<div class="small">${L('Time off','请假')}: ${(a.off||[]).filter(x=>x>=today()).sort().map(x=>fmtD(x,{month:'short',day:'numeric'})).join(', ')}</div>`:''}${a?.note?`<div class="small muted">${esc(a.note)}</div>`:''}`}
 function vETrain(){return trainTabs(actor(),false)}
 // The training list: how-to pages by section (from the Training SOP). Anyone can read; managers edit.
@@ -1853,7 +1856,7 @@ function shiftSheet(id,date){const s=id?D.shifts[id]:{empId:'',date,start:'11:00
 function shEmpList(emps,s){return emps.map(e=>{const av=availFor(e.id,s.date,s.start,s.end);const clash=Object.values(D.shifts).some(x=>x.empId===e.id&&x.date===s.date&&x!==D.shifts[SH?.editId]&&toMin(x.start)<toMin(s.end)&&toMin(s.start)<toMin(x.end));
   return `<label class="li tap"><input type="radio" name="sh_emp" value="${e.id}" ${s.empId===e.id?'checked':''} data-act="shEmp">${avatar(e.id)}<span class="grow t">${esc(e.name)}</span>${clash?chip('bad',L('Already on','已有班')):''}${availChip(av)}</label>`}).join('')||`<div class="empty">${L('Add team members first.','请先添加员工。')}</div>`}
 
-function availSheet(emp){const a=D.avail[emp]||{weekly:{},off:[]};const wk=JSON.parse(JSON.stringify(a.snap?.[nextWk()]?.weekly||a.weekly||{}));const sel=[nextWk()];const off=[...(a.off||[])];
+function availSheet(emp){const a=D.avail[emp]||{weekly:{},off:[]};const wk=JSON.parse(JSON.stringify(avWeek(a,nextWk())||{}));const sel=[nextWk()];const off=[...(a.off||[])];
   openSheet({sel,emp,wk,off,title:()=>`${L('Availability','可上班时间')} · ${esc(empName(emp))}`,body:()=>{const A_=availState(emp);return `<div class="hint ${A_.st==='overdue'?'warn':''}"><b>For the week of ${fmtD(A_.wk,{month:'short',day:'numeric'})} – ${fmtD(addDays(A_.wk,6),{month:'short',day:'numeric'})}</b> · due ${fmtD(A_.due,{weekday:'long',month:'short',day:'numeric'})}${A_.at?` · sent ${fmtDT(A_.at)}`:''}<br>Check your times, add any days off, then tap Submit. Submit every week, even if nothing changed.</div>
    <div class="card stack"><b>${L('Which week?','哪一周？')}</b>
     <div class="row wrapr" style="gap:6px">${[0,1,2,3,4,5].map(i=>{const w=addDays(nextWk(),7*(i-1));const on=SH?.sel?.[0]===w;const sent=D.avail[emp]?.weeks?.[w];return `<button class="btn sm ${on?'pri':''}" data-act="avWk" data-w="${w}" aria-pressed="${on?'true':'false'}" style="flex-direction:column;gap:0;line-height:1.2;padding:6px 10px">${fmtD(w,{month:'short',day:'numeric'})}–${fmtD(addDays(w,6),{day:'numeric'})}<span style="font-size:10px;font-weight:500;opacity:.85">${i===0?'This week':i===1?'Next week':''}${sent?(i<2?' · ':'')+'Sent ✓':''}</span></button>`}).join('')}</div>
@@ -2060,7 +2063,7 @@ const ACT={
  clockIn:()=>doClockIn(),clockOut:d=>doClockOut(d.id),
  receive:d=>receiveSheet(d.id),receiveSave:()=>receiveSave(),
  availSheet:d=>availSheet(d.id),
- avWk:d=>{grabAvail();SH.rep=!!$('#av_rep')?.checked;SH.sel=[d.w];const a=D.avail[SH.emp]||{};const nw=JSON.parse(JSON.stringify(a.snap?.[d.w]?.weekly||a.weekly||{}));Object.keys(SH.wk).forEach(k=>delete SH.wk[k]);Object.assign(SH.wk,nw);redrawAvail()},
+ avWk:d=>{grabAvail();SH.rep=!!$('#av_rep')?.checked;SH.sel=[d.w];const a=D.avail[SH.emp]||{};const nw=JSON.parse(JSON.stringify(avWeek(a,d.w)||{}));Object.keys(SH.wk).forEach(k=>delete SH.wk[k]);Object.assign(SH.wk,nw);redrawAvail()},
  avWkAll:()=>{grabAvail();SH.sel=[0,1,2,3].map(i=>addDays(nextWk(),7*i));redrawAvail()},
  avMode:(d,el)=>{},avOffAdd:()=>{grabAvail();const v=$('#av_offin').value;if(v&&!SH.off.includes(v))SH.off.push(v);const n=$('#av_note').value;SH.body0=n;redrawAvail()},
  avOffDel:d=>{grabAvail();SH.off.splice(SH.off.indexOf(d.d),1);redrawAvail()},
@@ -2435,7 +2438,7 @@ function parseHourlyCsv(text){const lines=text.replace(/\r/g,'').split('\n').fil
     const m$=i=>i>=0?(+String(c[i]).replace(/[$,]/g,'')||0):null;rows.push({store:iS>=0?c[iS]:'',date:d,hour:h,net:m$(iN)||0,orders:iO>=0?(+c[iO]||0):0,tips:m$(iT),tax:m$(iX),recv:m$(iR)})});
   return{rows,err:rows.length?'':'No valid rows found.'}}
 async function hourlySave(loc,days){const doc={days,updatedAt:new Date().toISOString()};if(!await W(A.db.doc('owner/hourly_'+loc).set(doc)))return false;D.hourly={...(D.hourly||{}),[loc]:days};FCM={};return true}
-function availWin(emp,date){const a=D.avail[emp];if(!a)return'unknown';if((a.off||[]).includes(date))return'none';const w=(a.snap?.[weekStart(date)]?.weekly||a.weekly)?.[parseYmd(date).getDay()];if(!w||w.mode==='no')return'none';if(w.mode==='all')return'any';return `${w.from}-${w.to}`}
+function availWin(emp,date){const a=D.avail[emp];if(!a)return'unknown';if((a.off||[]).includes(date))return'none';const wk=avWeek(a,weekStart(date));if(!wk)return'unknown';const w=wk[parseYmd(date).getDay()];if(!w||w.mode==='no')return'none';if(w.mode==='all')return'any';return `${w.from}-${w.to}`}
 const sPrio=e=>D.schedCfg?.prio?.[e]||'normal';const sMax=e=>num(D.schedCfg?.maxHrs?.[e]);
 const ovl=(a,b)=>a.date===b.date&&toMin(a.start)<toMin(b.end)&&toMin(b.start)<toMin(a.end);
 function greedySchedule(ws,ems,keep,n){n=n||7;const out=[];const hrs={};keep.forEach(s=>{hrs[s.empId]=(hrs[s.empId]||0)+shiftHrs(s)});const rank={high:0,normal:1,low:2};

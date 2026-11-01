@@ -52,7 +52,9 @@ async function hmac(alg: "SHA-256" | "SHA-1", key: Uint8Array, data: Uint8Array)
 export function availFits(av: Json | undefined, date: string, start: string, end: string): "yes" | "no" | "unknown" {
   if (!av) return "unknown";
   if ((av.off || []).includes(date)) return "no";
-  const w = (av.snap?.[weekStart(date)]?.weekly || av.weekly)?.[dow(date)];
+  const wk = av.snap && Object.keys(av.snap).length ? av.snap[weekStart(date)]?.weekly : av.weekly; // only what was sent for that week
+  if (!wk) return "unknown";
+  const w = wk[dow(date)];
   if (!w || w.mode === "no") return "no";
   if (w.mode === "all") return "yes";
   const a = toMin(w.from), b = toMin(w.to) || 1440, s = toMin(start); let e = toMin(end); if (e <= s) e += 1440;
