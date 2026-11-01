@@ -1343,7 +1343,7 @@ const PREP=()=>D.prepCfg||[];
 // Batch number, e.g. MC-1030-2 = Matcha Cloud, made Oct 30, 2nd batch of it that day at this store.
 const itemAbbr=n=>{const w=String(n||'').replace(/[^A-Za-z0-9 ]/g,' ').trim().split(/\s+/).filter(Boolean);return (w.length>1?w.map(x=>x[0]).join(''):(w[0]||'B').slice(0,2)).toUpperCase().slice(0,4)};
 const batCode=b=>{if(b.code)return b.code;const same=BAT().filter(x=>x.item===b.item&&x.loc===b.loc&&x.madeDate===b.madeDate).sort((a,c)=>String(a.madeAt).localeCompare(String(c.madeAt)));return `${itemAbbr(b.name)}-${String(b.madeDate||'').slice(5).replace('-','')}-${Math.max(1,same.findIndex(x=>x.id===b.id)+1)}`};
-const bName=b=>`${esc(b.name)} <span class="chip" style="font-family:ui-monospace,monospace;font-size:11px;padding:1px 6px">${esc(batCode(b))}</span>`;
+const bName=b=>`${esc(b.name)} <span style="display:inline-block;font-family:ui-monospace,monospace;font-size:12px;font-weight:800;padding:1px 7px;border-radius:6px;background:var(--brand);color:var(--brand-ink,#fff);white-space:nowrap;vertical-align:1px">#${esc(batCode(b))}</span>`;
 const BAT=()=>Object.values(D.batches||{});
 const batActive=l=>BAT().filter(b=>b.loc===l&&b.status==='active').sort((a,b)=>String(a.expAt).localeCompare(String(b.expAt)));
 const lifeTxt=h=>h>=24&&h%24===0?L(`${h/24} day${h===24?'':'s'}`,`${h/24}天`):L(`${h} h`,`${h}小时`);
@@ -2900,6 +2900,17 @@ function exportPay(ps,pl){const R=payroll(ps,pl);const TRX=Object.values(R).some
 function exportIcs(){const me=actor();const up=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=today()&&shiftVisible(s));const f=(date,t)=>date.replace(/-/g,'')+'T'+t.replace(':','')+'00';
   const ev=up.map(s=>{let ed=s.date;if(toMin(s.end)<toMin(s.start))ed=addDays(s.date,1);return['BEGIN:VEVENT',`UID:bliss-${s.id}@bliss`,`DTSTAMP:${new Date().toISOString().replace(/[-:]/g,'').slice(0,15)}Z`,`DTSTART:${f(s.date,s.start)}`,`DTEND:${f(ed,s.end)}`,'SUMMARY:BLISS shift','BEGIN:VALARM','TRIGGER:-PT60M','ACTION:DISPLAY','DESCRIPTION:BLISS shift in 1 hour','END:VALARM','END:VEVENT'].join('\r\n')});
   save('BLISS-shifts.ics',['BEGIN:VCALENDAR','VERSION:2.0','PRODID:-//BLISS//Shifts//EN',...ev,'END:VCALENDAR'].join('\r\n'))}
+
+/* ---------- auto update ----------
+   Home-screen apps (iPhone) keep running an old copy until they're fully closed. Check the published page when the
+   app comes back to the front and every 10 min; if it changed, reload (right away if nothing is open, otherwise show
+   a "New version" bar). */
+const UPD={base:null,busy:false};
+async function pageSig(){const r=await fetch(location.pathname+'?_v='+Date.now(),{cache:'no-store'});if(!r.ok)return null;const t=await r.text();let h=0;for(let i=0;i<t.length;i++)h=(h*31+t.charCodeAt(i))|0;return t.length+':'+h}
+async function checkUpdate(){if(UPD.busy||!navigator.onLine)return;UPD.busy=true;try{const s=await pageSig();if(!s)return;if(!UPD.base){UPD.base=s;return}
+  if(s!==UPD.base){if(!SH&&!typing($('#view'))&&!DRAGGING){location.reload();return}
+    if(!$('#updbar')){const b=document.createElement('button');b.id='updbar';b.textContent=L('New version of the app — tap to update','App 有新版本 — 点这里更新');b.style.cssText='position:fixed;left:50%;transform:translateX(-50%);bottom:calc(84px + env(safe-area-inset-bottom,0px));z-index:300;border:0;border-radius:999px;padding:10px 16px;background:var(--brand);color:var(--brand-ink,#fff);font-weight:700;box-shadow:0 6px 20px rgba(0,0,0,.25);cursor:pointer';b.onclick=()=>location.reload();document.body.appendChild(b)}}}catch(e){}finally{UPD.busy=false}}
+checkUpdate();setInterval(checkUpdate,10*6e4);document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')checkUpdate()});addEventListener('pageshow',e=>{if(e.persisted)checkUpdate()});
 
 /* ---------- boot ---------- */
 function subscribe(q,fn){try{return q.onSnapshot(s=>{fn(s);D.ready=true;rerender()},e=>console.warn('sub',e))}catch(e){console.warn(e)}}
