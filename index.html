@@ -1121,6 +1121,22 @@ function rmBody(){{const d=UI.rmDay||bizDate();const wk=wkStart(d);const mo=d.sl
       ${mine?`<label class="f">${isOwner?L('Notes this week','本周备注'):L('Notes for the owner this week','本周给老板的备注')}<textarea class="in" id="rm_note" rows="3" placeholder="${L('e.g. West Hartford ice machine leaking, technician Thursday.','例如：West Hartford 制冰机漏水，周四修。')}">${esc(nt.text||'')}</textarea></label>
       <button class="btn" data-act="rmNote" data-k="${wk}">${L('Save notes','保存备注')}</button>`:nt.text?`<div class="card"><div class="eyebrow">${L('Notes','备注')}</div><div style="white-space:pre-wrap">${esc(nt.text)}</div></div>`:''}
       ${nt.at?`<div class="tiny muted">${L('Saved','保存于')} ${fmtD(String(nt.at).slice(0,10),{month:'short',day:'numeric'})}</div>`:''}`}}
+// All stores' schedules side by side for a week: days down, stores across. Flags days nobody is scheduled and
+// people booked at two stores at overlapping times.
+function regionSched(){const ws=UI.rgWk||weekStart(bizDate());const days=[...Array(7)].map((_,i)=>addDays(ws,i));const td=bizDate();
+  const sh=Object.values(D.shifts).filter(x=>x.date>=ws&&x.date<=days[6]);
+  const S=LOCS().filter(l=>!isPre(l.id)||sh.some(x=>shLoc(x)===l.id));
+  const ov=new Set();days.forEach(d=>{const a=sh.filter(x=>x.date===d);a.forEach(x=>a.forEach(y=>{if(x!==y&&x.empId===y.empId&&shLoc(x)!==shLoc(y)){const x0=toMin(x.start),x1=toMin(x.end)<=x0?toMin(x.end)+1440:toMin(x.end),y0=toMin(y.start),y1=toMin(y.end)<=y0?toMin(y.end)+1440:toMin(y.end);if(x0<y1&&y0<x1){ov.add(x.id);ov.add(y.id)}}}))});
+  const hrs=l=>sh.filter(x=>shLoc(x)===l).reduce((a,x)=>a+shiftHrs(x),0);
+  const stChipW=l=>{try{const st=weekState(l,ws);return st==='live'?'':chip(st==='published'?'ok':st==='approved'?'ok':st==='submitted'?'warn':'',({published:L('Published','已发布'),approved:L('Approved','已批准'),submitted:L('Waiting for review','待审核'),draft:L('Draft','草稿'),changes:L('Needs changes','需修改')})[st]||st)}catch(e){return''}};
+  const col=`minmax(132px,1fr)`;
+  return `<div class="row" style="gap:6px"><h3 class="grow">${L('Schedules','排班')}</h3><button class="btn sm" data-act="rgWk" data-n="-7" aria-label="Previous week">‹</button><b class="small">${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(days[6],{month:'short',day:'numeric'})}</b><button class="btn sm" data-act="rgWk" data-n="7" aria-label="Next week">›</button>${ws!==weekStart(td)?`<button class="btn sm" data-act="rgWk" data-n="0">${L('This week','本周')}</button>`:''}</div>
+  <div class="card" style="padding:0;overflow:hidden"><div class="mb-scroll"><div style="display:grid;grid-template-columns:62px repeat(${S.length},${col});min-width:${62+S.length*132}px;font-size:12.5px">
+    <div style="background:var(--sunk);position:sticky;left:0;z-index:2"></div>${S.map(l=>`<div class="tap" data-act="rgSched" data-l="${l.id}" style="background:var(--sunk);padding:8px;border-left:1px solid var(--line);cursor:pointer"><b>${esc(l.name)}</b><div class="tiny muted">${fmtH(hrs(l.id))} h ${stChipW(l.id)}</div></div>`).join('')}
+    ${days.map(d=>`<div style="padding:8px 6px;border-top:1px solid var(--line);position:sticky;left:0;z-index:1;background:${d===td?'var(--info-bg)':'var(--surface)'};font-weight:${d===td?800:600}"><div>${fmtD(d,{weekday:'short'})}</div><div class="tiny muted">${fmtD(d,{month:'numeric',day:'numeric'})}</div></div>${S.map(l=>{const a=sh.filter(x=>x.date===d&&shLoc(x)===l.id).sort((x,y)=>toMin(x.start)-toMin(y.start));const open=storeHrs(l.id,parseYmd(d).getDay());
+      return `<div class="tap" data-act="rgSched" data-l="${l.id}" data-d="${d}" style="padding:6px;border-top:1px solid var(--line);border-left:1px solid var(--line);cursor:pointer;display:flex;flex-direction:column;gap:3px;background:${d===td?'var(--info-bg)':'transparent'}">${a.length?a.map(x=>`<div class="row" style="gap:5px;${ov.has(x.id)?'color:var(--bad);font-weight:700':''}" title="${ov.has(x.id)?L('Also scheduled at another store at the same time','同一时间在另一家店也有班'):''}">${avatar(x.empId)}<div style="min-width:0;line-height:1.25"><div style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:600">${esc(empName(x.empId).split(' ')[0])}</div><div class="tiny ${ov.has(x.id)?'':'muted'}" style="white-space:nowrap">${fmtT(x.start)}–${fmtT(x.end)}${ov.has(x.id)?' ⚠️':''}</div></div></div>`).join('')
+        :open&&!isPre(l.id)?`<span class="tiny" style="color:var(--bad);font-weight:700">${L('Nobody scheduled','没人排班')}</span>`:`<span class="tiny muted">—</span>`}</div>`}).join('')}`).join('')}
+  </div></div></div>${ov.size?`<p class="tiny" style="color:var(--bad);margin:0">⚠️ ${L('Red = the same person is scheduled at two stores at overlapping times.','红色 = 同一个人在同一时间被排到两家店。')}</p>`:''}<p class="tiny muted" style="margin-top:-6px">${L('Tap a store to open its schedule.','点门店打开它的排班。')}</p>`}
 function vRegion(){const d=bizDate();
   const stores=LOCS().map(l=>{if(isPre(l.id)){const p=preProg(l.id);const od=preOpenDate(l.id);return `<div class="card stack tap" data-act="regGo" data-l="${l.id}" style="cursor:pointer;min-width:0;border:2px dashed var(--line)" tabindex="0"><div class="row"><b class="grow">${esc(l.name)}</b>${chip('info',L('Opening soon','即将开业'))}</div><div class="small"><b>${p.pct}%</b> ${L('done','完成')} (${p.n}/${p.t})${p.fu?` · <span style="color:var(--bad);font-weight:600">🔔 ${p.fu} ${L('to follow up','需跟进')}</span>`:''}${p.late?` · <span style="color:var(--bad)">${p.late} ${L('overdue','逾期')}</span>`:''}${od?` · ${L('opens','开业')} ${fmtD(od,{month:'short',day:'numeric'})}`:''}</div><div class="bar"><i style="width:${p.pct}%;background:var(--ok)"></i></div></div>`}
     const t=storeToday(l.id);return `<div class="card stack tap" data-act="regGo" data-l="${l.id}" style="cursor:pointer;min-width:0;gap:6px" tabindex="0"><div class="row"><b class="grow">${esc(l.name)}</b>${t.att?chip('bad',t.att):''}</div>
@@ -1129,6 +1145,7 @@ function vRegion(){const d=bizDate();
       <div class="small muted">${t.low==null?L('No count yet','还没盘点'):`${t.low} ${L('low / out','偏低')}`} · ${t.arriving} ${L('deliveries','到货')}</div></div>`}).join('');
   return `<div class="stack"><div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})}</div><h2>${L('Region','区域')}</h2></div>
   <h3>${L('Stores today','各店今天')}</h3><div class="g2">${stores}</div><p class="tiny muted" style="margin-top:-6px">${L('Tap a store to open it.','点门店进入。')}</p>
+  ${regionSched()}
   ${regionPrep()}
   <div class="row"><h3 class="grow">${L('Weekly checklist','每周清单')}</h3>${pvRM()?'':`<button class="btn sm" data-act="rmEdit">${L('Edit list','编辑清单')}</button>`}</div>
   ${rmBody()}</div>`}
@@ -1153,6 +1170,8 @@ const RM_ACT={
   rmNote:async d=>{const w=rmMe();if(!w)return;const p={text:$('#rm_note').value.trim(),by:meName(),at:new Date().toISOString()};
     if(await W(A.db.doc('mgr/rmlog_'+d.k).update({notes:{[w]:p}}))){const lg=rmLog(d.k);D.rmLog={...(D.rmLog||{}),[d.k]:{...lg,notes:{...(lg.notes||{}),[w]:p}}};toast(L('Saved','已保存'));drawSheet()}},
   rmEdit:()=>{UI.rmE=(D.rmList?.length?D.rmList:RM_DEF).map(x=>({...x}));rmEditSheet()},
+  rgWk:d=>{UI.rgWk=+d.n?addDays(UI.rgWk||weekStart(bizDate()),+d.n):weekStart(bizDate());render()},
+  rgSched:d=>{UI.loc=d.l;ls.set('loc',d.l);UI.week=UI.rgWk||weekStart(bizDate());if(d.d)UI.day=d.d;UI.tab='sched';UI.sub={...(UI.sub||{}),sched:'plan'};window.scrollTo(0,0);render()},
   regGo:d=>{UI.loc=d.l;ls.set('loc',d.l);UI.tab='home';window.scrollTo(0,0);render()},
   rmDel:d=>{rmGrab();UI.rmE.splice(+d.i,1);drawSheet()},
   rmAdd:()=>{rmGrab();const v=$('#rme_new').value.trim();if(!v)return;UI.rmE.push({id:slug(v)+'-'+uidGen().slice(-3),name:v,rep:'weekly',perStore:false});drawSheet()},
