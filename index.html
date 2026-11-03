@@ -1870,11 +1870,26 @@ function reviewSheet(date,type){const doc=photoDoc(date,type);if(!doc)return;con
    <label class="f">${L('Note to staff','给员工的备注')}<textarea class="in" id="rv_note" placeholder="${L('e.g. wipe under the blender, drains not cleaned','例如：搅拌机下面没擦，下水道没清理')}">${esc(doc.review?.note||'')}</textarea></label>`,
    foot:()=>`<button class="btn bad" data-act="reviewSave" data-st="issue">${L('Has issues','有问题')}</button><button class="btn pri" data-act="reviewSave" data-st="ok">${ic('check')} ${L('Passed','合格')}${RQ&&RQ.i<RQ.list.length-1?' · next':''}</button>`,mount:()=>{SH.flags=flags;SH.date=date;SH.type=type;aiBackfill(date,type)}})}
 
+// Quick shift times on Add / Edit shift: set per store by managers (config/settings.shiftPresets[loc]).
+const SHP_DEF=[['10:30','16:30'],['11:00','17:00'],['16:00','22:30'],['17:00','23:00']];
+const shpList=()=>D.settings.shiftPresets?.[curLoc()]||SHP_DEF;
+const shpButtons=()=>shpList().map(([a,b])=>`<button class="btn sm" data-act="shPreset" data-a="${a}" data-b="${b}">${fmtT(a)}–${fmtT(b)}</button>`).join('')+(isMgr?`<button class="btn sm" data-act="shpEdit" aria-label="${L('Edit quick times','编辑常用时间')}" title="${L('Edit quick times','编辑常用时间')}">✎</button>`:'');
+function shpEdRows(l){return l.map(([a,b],i)=>`<div class="row" style="gap:6px" data-shp="${i}"><input class="in" type="time" value="${esc(a)}" aria-label="Start"><span>–</span><input class="in" type="time" value="${esc(b)}" aria-label="End"><button class="btn sm bad" data-act="shpDel" aria-label="${L('Remove','删除')}">✕</button></div>`).join('')}
+function shpRead(){return [...document.querySelectorAll('#shp_ed [data-shp]')].map(r=>{const[x,y]=r.querySelectorAll('input');return[x.value,y.value]}).filter(([a,b])=>a&&b)}
+const SHP_ACT=({
+  shpEdit:()=>{const ed=$('#shp_ed');if(!ed)return;if(!ed.hidden){ed.hidden=true;return}
+    ed.innerHTML=`<div class="card stack" style="gap:8px;background:var(--sunk)"><div class="small"><b>${L('Quick shift times','常用班次时间')}</b> · ${esc(locName(curLoc()))}</div><div class="stack" style="gap:6px" id="shp_rows">${shpEdRows(shpList())}</div>
+      <div class="row" style="gap:6px"><button class="btn sm" data-act="shpAdd">${ic('plus')} ${L('Add a time','添加时间')}</button><span class="grow"></span><button class="btn sm" data-act="shpEdit">${L('Cancel','取消')}</button><button class="btn sm pri" data-act="shpSave">${L('Save','保存')}</button></div></div>`;ed.hidden=false},
+  shpAdd:()=>{const r=$('#shp_rows');if(!r)return;const l=shpRead();r.innerHTML=shpEdRows([...l,['11:00','17:00']])},
+  shpDel:(d,el)=>{(el||event?.target)?.closest('[data-shp]')?.remove()},
+  shpSave:async()=>{const l=shpRead().sort((x,y)=>x[0].localeCompare(y[0]));const sp={...(D.settings.shiftPresets||{}),[curLoc()]:l};const st={...D.settings,shiftPresets:sp};
+    if(await W(A.db.doc('config/settings').set(st))){D.settings=st;const row=$('#shp_row');if(row)row.innerHTML=shpButtons();$('#shp_ed').hidden=true;toast(L('Saved','已保存'))}},
+});
 function shiftSheet(id,date){const s=id?D.shifts[id]:{empId:'',date,start:'11:00',end:'17:00',note:''};const ems=emps();
   SH={editId:id||null};openSheet({editId:id||null,title:()=>id?L('Edit shift','编辑班次'):L('Add shift','添加班次'),body:()=>`
    <label class="f">${L('Date','日期')}<input class="in" type="date" id="sh_date" value="${esc(s.date)}"></label>
    <div class="g2"><label class="f">${L('Start','开始')}<input class="in" type="time" id="sh_start" value="${esc(s.start)}"></label><label class="f">${L('End','结束')}<input class="in" type="time" id="sh_end" value="${esc(s.end)}"></label></div>
-   <div class="row wrapr">${[['10:30','16:30'],['11:00','17:00'],['16:00','22:30'],['17:00','23:00']].map(([a,b])=>`<button class="btn sm" data-act="shPreset" data-a="${a}" data-b="${b}">${fmtT(a)}–${fmtT(b)}</button>`).join('')}</div>
+   <div class="row wrapr" id="shp_row">${shpButtons()}</div><div id="shp_ed" hidden></div>
    <div class="eyebrow">${L('Who','员工')}</div><div class="card flush list" id="sh_emps">${shEmpList(ems,s)}</div>
    <label class="f">${L('Note','备注')}<input class="in" id="sh_note" value="${esc(s.note||'')}" placeholder="${L('e.g. opening, closing','例如：开店、打烊')}"></label>
    ${id&&backupOn()?(()=>{const c=backupCands(s);return `<label class="row" style="gap:8px"><input type="checkbox" id="sh_needbk" ${s.noBackup?'':'checked'} onchange="document.getElementById('sh_bkf').hidden=!this.checked"> Needs a backup</label><label class="f" id="sh_bkf" ${s.noBackup?'hidden':''}>Backup (asked first if they can't come)<select class="in" id="sh_backup"><option value="">${c.length?'Automatic: '+esc(empName(c[0])):'No one is free then'}</option>${c.map(e=>`<option value="${e}" ${s.backup===e?'selected':''}>${esc(empName(e))}</option>`).join('')}</select>${c.length?'':'<span class="tiny" style="color:var(--bad)">No one else has this time open in their availability.</span>'}</label>`})():''}
@@ -2841,7 +2856,7 @@ function fcGrab(){const c=fcCfg();const v=(id,d)=>{const x=num($(id)?.value);ret
   return{...c,cap:Math.max(20,v('#fc_cap',c.cap)),max1:Math.max(20,v('#fc_max1',c.max1)),minStaff:Math.max(0,Math.round(v('#fc_min',c.minStaff))),buffer:v('#fc_buf',c.buffer),weeks:Math.max(3,Math.min(16,Math.round(v('#fc_weeks',c.weeks)))),geo:{...(c.geo||{}),...FCS.geo},
   opened:Object.fromEntries(LOCS().map(l=>{const x=$('#fc_open_'+l.id)?.value;return[l.id,x&&/^\d{4}-\d\d-\d\d$/.test(x)?x:(c.opened?.[l.id]||'')]}).filter(([,x])=>x))}}
 async function fcSaveCfg(f){const cfg={...(D.schedCfg||{}),forecast:f};if(!await W(A.db.doc('mgr/sched').set(cfg)))return false;D.schedCfg=cfg;FCM={};return true}
-Object.assign(ACT,RM_ACT,PRE_ACT,PREP_ACT);
+Object.assign(ACT,RM_ACT,PRE_ACT,PREP_ACT,SHP_ACT);
 // Manager / owner: make the photos on a checklist this store's example photos (for every checklist that has the same item).
 ACT.exAll=async d=>{const k=d.type+d.date;if(UI.exAll!==k){UI.exAll=k;drawSheet();return}UI.exAll=null;
   const loc=curLoc();const doc=photoDoc(d.date,d.type);const ph=doc?.photos||{};const list=JSON.parse(JSON.stringify(taskList()));let n=0;
