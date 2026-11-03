@@ -698,6 +698,36 @@ function trainStats(emp,gk){gk=gk||'training';const pre=kpre(gk);const tp=new Pr
 const barHtml=(n,s1,s2)=>n?`<div class="bar" title="${s2}/${n}"><i class="b2" style="width:${s2/n*100}%"></i><i class="b1" style="width:${s1/n*100}%"></i></div>`:'';
 function trainTabs(emp,editable){const k=UI.tbk||'training';
   return `<div class="stack">${editable?'':`<h2>${L('My training','我的培训')}</h2>`}<div class="seg" role="tablist" aria-label="Lists">${LKEYS.map(x=>{const S=trainStats(emp,x);return `<button role="tab" class="${k===x?'on':''}" data-act="tbk" data-k="${x}">${LISTNAME(x)} <span class="tiny">${S.tot?Math.round(S.s2/S.tot*100):0}%</span></button>`}).join('')}</div>${trainBoard(emp,editable,k)}</div>`}
+// Training hours to date: every day they clocked in while in training (Trainee role, or up to their "training until"
+// date), plus logged training sessions on days without a clock-in. Target = sum of the training list's section hours.
+const sessHrs=t=>{const m=String(t||'').match(/(\d{1,2})(?::(\d\d))?\s*([ap])?m?\s*[-–~到至]\s*(\d{1,2})(?::(\d\d))?\s*([ap])?m?/i);if(!m)return 0;
+  const toM=(H,M,ap)=>{let h=+H;if(ap){h=h%12+(/p/i.test(ap)?12:0)}else if(h<7)h+=12;return h*60+(+M||0)};
+  const a=toM(m[1],m[2],m[3]),b=toM(m[4],m[5],m[6]);let e=b;if(!m[6]&&e<=a&&e+720>a)e+=720;return Math.max(0,((e<=a?e+1440:e)-a)/60)};
+function trainHours(emp){const e=D.employees[emp]||{};const until=D.trainUntil?.[emp]||'';const isT=e.role==='Trainee';
+  const inT=d=>until?d<=until:isT;const tp=D.training[emp]||{};
+  const ps=Object.values(D.punches).filter(p=>p.empId===emp&&inT(p.date)).sort((x,y)=>String(x.in).localeCompare(String(y.in)));
+  const rows=ps.map(p=>({date:p.date,src:'clock',in:p.in,out:p.out,h:punchHrs(p),loc:shLoc(p),open:!p.out}));
+  const days=new Set(rows.map(r=>r.date));
+  (tp.sessions||[]).forEach((x,i)=>{const h=sessHrs(x.time);rows.push({date:x.date,src:'log',time:x.time,trainer:x.trainer,h:days.has(x.date)?0:h,dup:days.has(x.date),i})});
+  rows.sort((x,y)=>String(x.date).localeCompare(String(y.date))||(x.src==='clock'?-1:1));const first0=rows[0]?.date||null;rows.reverse();
+  const total=rows.reduce((a,r)=>a+r.h,0);const target=(D.trainCfg?.sections||[]).reduce((a,x)=>a+(+x.hours||0),0);
+  const first=first0;return{rows,total,target,days:new Set(rows.filter(r=>r.h>0||r.open).map(r=>r.date)).size,first,until,active:isT||!!until}}
+const hh=n=>String(Math.round(n*10)/10);
+function trainHoursCard(emp,editable){const T=trainHours(emp);const pct=T.target?Math.min(100,Math.round(T.total/T.target*100)):null;
+  const tm=iso=>fmtT(hm(new Date(iso)));
+  return `<div class="card stack"><div class="row" style="align-items:flex-end;gap:10px"><div class="grow"><div class="eyebrow">${L('Training hours to date','累计培训时数')}</div>
+      <div style="font-family:var(--display);font-weight:800;font-size:28px">${hh(T.total)} h${T.target?`<span class="small muted" style="font-weight:600"> / ${T.target} h</span>`:''}</div>
+      <div class="small muted">${T.days} ${L(T.days===1?'day':'days','天')}${T.first?` · ${L('since','自')} ${fmtD(T.first,{month:'short',day:'numeric'})}`:''}${T.until?` · ${L('training until','培训到')} ${fmtD(T.until,{month:'short',day:'numeric'})}`:''}</div></div>${pct!=null?`<b style="font-size:20px;color:${pct>=100?'var(--ok)':'inherit'}">${pct}%</b>`:''}</div>
+    ${T.target?`<div class="bar" style="height:10px"><i style="width:${pct}%;background:${pct>=100?'var(--ok)':'var(--info)'}"></i></div>`:''}
+    ${!T.active&&!T.rows.length?`<div class="small muted">${L('Clock-ins count as training while the person is a Trainee, or up to their "training until" date (Team → person → Training pay).','员工职位是 Trainee，或在"培训到"日期之前（团队 → 员工 → 培训工资），打卡时间算培训时间。')}</div>`:''}
+    <div class="list">${T.rows.length?T.rows.map(r=>r.src==='clock'?`<div class="li" style="gap:8px;padding-inline:0"><span style="width:58px;flex:none"><b class="small">${fmtD(r.date,{weekday:'short'})}</b><div class="tiny muted">${fmtD(r.date,{month:'numeric',day:'numeric'})}</div></span>
+        <div class="grow"><div class="small">${ic('clock')} ${tm(r.in)} – ${r.open?`<span style="color:var(--info)">${L('still in','还在班')}</span>`:tm(r.out)}</div><div class="tiny muted">${esc(locName(r.loc))}</div></div><b class="small">${r.open?'…':hh(r.h)+' h'}</b></div>`
+      :`<div class="li" style="gap:8px;padding-inline:0"><span style="width:58px;flex:none"><b class="small">${fmtD(r.date,{weekday:'short'})}</b><div class="tiny muted">${fmtD(r.date,{month:'numeric',day:'numeric'})}</div></span>
+        <div class="grow"><div class="small">📝 ${esc(r.time||'')}${r.trainer?` · ${L('with','带教')} ${esc(r.trainer)}`:''}</div><div class="tiny muted">${r.dup?L('Logged · already counted from clock-in','手动记录 · 已按打卡计算'):L('Logged by hand','手动记录')}</div></div>
+        <b class="small">${r.dup?'—':hh(r.h)+' h'}</b>${editable?`<button class="btn sm" data-act="trainDelSess" data-emp="${emp}" data-i="${r.i}" aria-label="${L('Delete','删除')}">${ic('x')}</button>`:''}</div>`).join('')
+      :`<div class="small muted">${L('No training time yet.','还没有培训时间。')}</div>`}</div>
+    ${editable?`<details><summary class="small" style="cursor:pointer;font-weight:600">${L('Add training time by hand (no clock-in)','手动补记培训时间（没打卡）')}</summary><div class="stack" style="margin-top:8px"><div class="g3"><input class="in" type="date" id="ts_date" value="${today()}"><input class="in" id="ts_time" placeholder="9:30-18:00"><input class="in" id="ts_tr" placeholder="${L('Trainer','带教人')}"></div><button class="btn" data-act="trainAddSess" data-emp="${emp}">${L('Add','添加')}</button></div></details>`:''}
+  </div>`}
 function trainBoard(emp,editable,gk){gk=gk||'training';const pre=kpre(gk);const cfg=CFGK(gk),tp=D.training[emp]||{};const st=tp.status||{};const S=trainStats(emp,gk);
   if(!(cfg.sections||[]).length)return `<div class="empty card"><b>No ${LISTNAME(gk).toLowerCase()} yet</b>${editable?`<button class="btn sm" data-act="trainEdit" data-k="${gk}">Add it</button>`:''}</div>`;
   const lbl=v=>v===2?null:v===1?L('Shown','已教过'):L('Not started','未开始');
@@ -711,9 +741,7 @@ function trainBoard(emp,editable,gk){gk=gk||'training';const pre=kpre(gk);const 
     ${open?`<div class="grp-cols"><span>${L('Item','项目')}</span><span style="text-align:center">${L('Status','状态')}</span></div>${(sec.items||[]).map(it=>{const k=pre+sec.id+'__'+it.id,v=tStat(emp,k);const selfEd=!editable&&mode()==='emp'&&v<2;
       return `<div class="grp-r"><div class="n tap" data-act="guideGo" data-k="${gk}" data-s="${sec.id}" data-i="${it.id}" data-emp="${emp}" tabindex="0" role="button" style="cursor:pointer">${esc(it.name)}${it.body||(it.photos||[]).length?' <span style="color:var(--brand);font-weight:700">›</span>':''}</div><button class="pill s${v}" ${editable?`data-act="trainCycle" data-emp="${emp}" data-k="${k}"`:selfEd?`data-act="trainSelf" data-emp="${emp}" data-k="${k}" aria-label="Mark ${esc(it.name)} as ${v?'not started':'shown'}"`:'disabled'}>${v===2?esc(done):lbl(v)}</button></div>`}).join('')}
       ${editable&&gk==='training'?`<div class="grp-r" style="grid-template-columns:1fr"><button class="btn sm" style="margin:8px 14px;justify-self:start" data-act="trainAddItem" data-sec="${sec.id}">${ic('plus')} ${L('Add item','添加项目')}</button></div>`:''}`:''}</div>`}).join('')}
-  ${gk!=='training'?'':`<div class="card stack"><h3>${L('Training time log','培训时间记录')}</h3>
-  ${(tp.sessions||[]).length?(tp.sessions||[]).map((s,i)=>`<div class="row"><span class="chip">${i+1}</span><div class="grow">${fmtD(s.date)} · ${esc(s.time||'')}${s.trainer?` · ${L('with','带教')} ${esc(s.trainer)}`:''}</div>${editable?`<button class="btn sm bad" data-act="trainDelSess" data-emp="${emp}" data-i="${i}" aria-label="${L('Delete','删除')}">${ic('x')}</button>`:''}</div>`).join(''):`<div class="muted small">${L('No sessions logged yet.','还没有记录。')}</div>`}
-  ${editable?`<div class="g3"><input class="in" type="date" id="ts_date" value="${today()}"><input class="in" id="ts_time" placeholder="9:30-18:00"><input class="in" id="ts_tr" placeholder="${L('Trainer','带教人')}"></div><button class="btn" data-act="trainAddSess" data-emp="${emp}">${ic('plus')} ${L('Add session','添加记录')}</button>`:''}</div>`}
+  ${gk!=='training'?'':trainHoursCard(emp,editable)}
   </div>`}
 
 /* ---------- manager views ---------- */
@@ -912,7 +940,7 @@ function teamTrain(){const es=emps().filter(e=>e.role==='Trainee');const sub=['l
   const seg=`<div class="seg" role="tablist" aria-label="Training"><button role="tab" class="${sub==='check'?'on':''}" data-act="ttSub" data-k="check">Trainees</button><button role="tab" class="${sub==='list'?'on':''}" data-act="ttSub" data-k="list">${esc(LISTNAME('training'))}</button><button role="tab" class="${sub==='drinks'?'on':''}" data-act="ttSub" data-k="drinks">${esc(LISTNAME('guide'))}</button></div>`;
   if(sub==='list')return seg+trainListView('training');if(sub==='drinks')return seg+trainListView('guide');
   return seg+`<div class="legend"><span><i style="background:var(--st2)"></i>${L('Fluent','熟练')}</span><span><i style="background:var(--st1)"></i>${L('Shown','已教过')}</span><span><i style="background:var(--st0)"></i>${L('Not started','未开始')}</span></div>
-  ${es.map(e=>{const SG=trainStats(e.id,'guide'),SD=trainStats(e.id,'training'),S=SD;const T2=SG.tot+SD.tot,F2=SG.s2+SD.s2;return `<div class="card stack tap" data-act="trainOpen" data-id="${e.id}" style="cursor:pointer" tabindex="0"><div class="row">${avatar(e.id)}<div class="grow t">${esc(e.name)}</div><b style="font-family:var(--display);font-size:20px">${T2?Math.round(F2/T2*100):0}%</b>${ic('chev')}</div>
+  ${es.map(e=>{const SG=trainStats(e.id,'guide'),SD=trainStats(e.id,'training'),S=SD;const T2=SG.tot+SD.tot,F2=SG.s2+SD.s2;return `<div class="card stack tap" data-act="trainOpen" data-id="${e.id}" style="cursor:pointer" tabindex="0"><div class="row">${avatar(e.id)}<div class="grow"><div class="t">${esc(e.name)}</div><div class="tiny muted">⏱ ${(()=>{const H=trainHours(e.id);return `${hh(H.total)} h${H.target?` / ${H.target} h`:''} · ${H.days} ${L(H.days===1?'day':'days','天')}`})()}</div></div><b style="font-family:var(--display);font-size:20px">${T2?Math.round(F2/T2*100):0}%</b>${ic('chev')}</div>
    ${[['training',SD],['guide',SG]].filter(([k,X])=>X.tot).map(([k,X])=>`<div class="row" style="gap:8px"><span class="small" style="width:42%;font-weight:700">${LISTNAME(k)}</span><div class="grow">${barHtml(X.tot,X.s1,X.s2)}</div><span class="tiny muted" style="width:44px;text-align:right">${X.s2}/${X.tot}</span></div>`).join('')}
    ${[].map((sec,gi)=>{const p=S.per[sec.id];return `<div class="row" style="gap:8px"><span class="small" style="width:42%;color:${GC[gi%GC.length]};font-weight:600">${esc(sec.title)}</span><div class="grow">${barHtml(p.n,p.s1,p.s2)}</div><span class="tiny muted" style="width:36px;text-align:right">${p.s2}/${p.n}</span></div>`}).join('')}</div>`}).join('')||`<div class="empty card"><b>No trainees right now</b>Training progress shows only for people whose role is Trainee. Change the role in People to start someone's training board.</div>`}`}
 function teamEval(){const ev=Object.values(D.evals).filter(x=>locOf(x.empId)===curLoc()).sort((a,b)=>(b.date||'').localeCompare(a.date||''));const by={};ev.forEach(x=>{(by[x.empId]=by[x.empId]||[]).push(x)});
