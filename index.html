@@ -527,7 +527,8 @@ function storeUrl(it){if(it.url)return it.url;const q=encodeURIComponent(it.name
 function suggestions(){return D.items.map(it=>{const q=stockQty(it.id)?.q;if(q==null)return null;const par=num(it.par),min=num(it.min);
   if(par==null||!(q<=(min??par)))return null;const need=par-q;if(need<=0)return null;const o=buyOpts(it)[0];const pk=o?num(o.per):1;return{it,q,packs:Math.ceil(need/pk),opt:o}}).filter(Boolean)}
 const nextWk=d=>addDays(weekStart(d||today()),7);
-const availDue=d=>addDays(weekStart(d||today()),((D.settings.availDueDay??3)+6)%7);
+// Availability for next week is due every Monday.
+const availDue=d=>weekStart(d||today());
 function availState(emp,d){d=d||today();const wk=nextWk(d);const at=D.avail[emp]?.weeks?.[wk];const due=availDue(d);return{wk,due,at,st:at?'done':d<due?'todo':d===due?'due':'overdue'}}
 function availRow(emp){const a=availState(emp);const c=a.st==='done'?chip('ok','Done'):a.st==='overdue'?chip('bad','Overdue'):a.st==='due'?chip('warn','Due today'):chip('',`Due ${fmtD(a.due,{weekday:'short'})}`);
   return `<div class="li tap" data-act="availSheet" data-id="${emp}" tabindex="0">${ic('cal')}<div class="grow"><div class="t">Fill availability for next week</div><div class="small muted">${fmtD(a.wk,{month:'short',day:'numeric'})} – ${fmtD(addDays(a.wk,6),{month:'short',day:'numeric'})}${a.at?' · sent '+fmtDT(a.at):` · due ${fmtD(a.due,{weekday:'long'})}`}</div></div>${c}${ic('chev')}</div>`}
