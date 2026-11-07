@@ -321,6 +321,19 @@ const wageOf=e=>({pay:num(D.wages[e])||0,cash:num(D.cashRates?.[e])||0,cap:num(D
 // Training pay: its own rate while someone is training (until the end date, or while their role is Trainee if no date).
 const trainOf=e=>({rate:num(D.trainRates?.[e])||0,via:D.trainVia?.[e]==='cash'?'cash':'payroll',until:D.trainUntil?.[e]||''});
 const inTraining=(e,date)=>{const t=trainOf(e);if(!t.rate)return false;return t.until?date<=t.until:D.employees[e]?.role==='Trainee'};
+// Labor cost of one person's hours in one Mon–Sun week, same rules as payroll: training hours at the training rate,
+// the rest split payroll / cash, 1.5× over the weekly overtime limit, employer payroll tax on payroll pay only.
+// items: [{date,h}] for that person and week. Used by Schedule (Est. labor) and Owner → Forecast so they agree.
+function weekLabor(e,items){const W_=wageOf(e),TR=trainOf(e),tx=(()=>{const t=taxRates();return((+t.fica||0)+(+t.futa||0)+(+t.suta||0))/100})();
+  const h=items.reduce((a,x)=>a+x.h,0);if(!h)return{cost:0,wages:0,tax:0,h:0,noRate:false};const o=Math.max(0,h-(D.settings.otWeekly||40));
+  const th=items.filter(x=>inTraining(e,x.date)).reduce((a,x)=>a+x.h,0),rh=h-th,oR=Math.min(o,rh),oT=o-oR;
+  const[ph,ch]=splitHrs(rh,W_);const oc=Math.min(ch,oR),op=oR-oc;
+  const pay=(ph-op)*W_.pay+op*W_.pay*1.5,cash=(ch-oc)*W_.cash+oc*W_.cash*1.5,tr=th*TR.rate+oT*TR.rate*.5;
+  const taxed=pay+(TR.via==='cash'?0:tr);const tax=taxed*tx;const wages=pay+cash+tr;
+  return{cost:wages+tax,wages,tax,h,noRate:(rh>0&&!W_.pay&&!W_.cash)||(th>0&&!TR.rate)}}
+// Sum weekLabor over a list of shifts or punches (any people, any weeks). hOf gives each item's hours.
+function laborOf(list,hOf){const g={};list.forEach(x=>{const k=x.empId+'|'+weekStart(x.date);(g[k]=g[k]||{e:x.empId,items:[]}).items.push({date:x.date,h:hOf(x)})});
+  return Object.values(g).reduce((a,{e,items})=>{const r=weekLabor(e,items);a.cost+=r.cost;a.wages+=r.wages;a.tax+=r.tax;a.h+=r.h;if(r.noRate)a.noRate=true;return a},{cost:0,wages:0,tax:0,h:0,noRate:false})}
 function splitHrs(h,W_){if(!W_.cash)return[h,0];if(!W_.pay)return[0,h];let ph,ch;if(W_.cap!=null&&W_.ccap!=null){ph=Math.min(h,W_.cap);ch=Math.min(h-ph,W_.ccap);ph=h-ch}else if(W_.cap!=null){ph=Math.min(h,W_.cap);ch=h-ph}else if(W_.ccap!=null){ch=Math.min(h,W_.ccap);ph=h-ch}else{ph=h;ch=0}return[ph,ch]}
 const payType=e=>{const w=wageOf(e);return w.pay&&w.cash?'split':w.cash?'cash':'payroll'};
 const wageLabel=e=>{if(!seePay())return'';const w=wageOf(e);const a=[];if(w.pay)a.push(money(w.pay)+'/h payroll'+(w.cash&&w.cap!=null?` (first ${w.cap} h/wk)`:''));if(w.cash)a.push(money(w.cash)+'/h cash');return a.join(' + ')};
@@ -844,11 +857,23 @@ function vPhotos(){const d=UI.pDate||bizDate();const days=[...Array(7)].map((_,i
 function vSched(){const s=curSub('sched','plan');
   return `<div class="stack"><h2>${L('Schedule & hours','排班与工时')}</h2>${subTabs('sched',[['plan',L('Schedule','排班')],['avail',L('Availability','可上班')],['time',L('Hours & pay','工时工资')]])}
   ${s==='plan'?schedPlan():s==='avail'?schedAvail():schedTime()}</div>`}
+// Owner only: this week's estimated labor for the store on the Schedule page (same math as Forecast and Est. labor).
+function laborBar(ws){if(!seePay())return'';const loc=curLoc(),cache={};const days=[...Array(7)].map((_,i)=>addDays(ws,i));
+  const sh=Object.values(D.shifts).filter(x=>x.date>=ws&&x.date<=days[6]&&shLoc(x)===loc);
+  const byDay=days.map(d=>{const a=sh.filter(x=>x.date===d);return{d,h:a.reduce((t,x)=>t+shiftHrs(x),0),c:a.reduce((t,x)=>t+shiftHrs(x)*fcWeekRate(x.empId,ws,cache),0)}});
+  const LB=laborOf(sh,shiftHrs);const tot=byDay.reduce((a,x)=>a+x.c,0),hrs=byDay.reduce((a,x)=>a+x.h,0);
+  let net=0,nOk=0;try{fcRows(loc,ws,7).forEach(r=>{if(r.net!=null){net+=r.net;nOk++}})}catch(e){}
+  const lp=net>0&&nOk===7?tot/net:null;const mx=Math.max(1,...byDay.map(x=>x.c));const noRate=sh.some(x=>!fcWeekRate(x.empId,ws,cache));
+  return `<div class="card stack" style="gap:8px"><div class="row" style="gap:8px;flex-wrap:wrap"><span class="eyebrow grow">${L('Est. labor this week','本周预计人工')}</span><span class="tiny muted">${L('Owner only','仅老板可见')}</span></div>
+    <div class="row" style="gap:8px;flex-wrap:wrap">${[[L('Est. labor','预计人工'),money(tot),true],[L('Hours','工时'),fmtH(hrs)],[nOk===7?L('Sales (forecast)','销售（预测）'):L('Sales so far','销售'),net?money(net):'—'],[L('Labor % of sales','人工占比'),lp==null?'—':pctChip(lp)]].map(([n,v,big])=>`<div style="flex:1;min-width:110px;padding:8px 10px;border-radius:10px;background:${big?'color-mix(in srgb,var(--brand) 14%,transparent)':'var(--sunk)'}"><div class="tiny muted">${n}</div><div style="font-weight:800;font-size:${big?20:16}px">${v}</div></div>`).join('')}</div>
+    <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;align-items:end;height:80px;margin-bottom:4px">${byDay.map(x=>`<div style="display:flex;flex-direction:column;align-items:center;gap:2px;height:100%;justify-content:flex-end" title="${fmtD(x.d,{weekday:'short'})} · ${fmtH(x.h)} h · ${money(x.c)}"><span class="tiny" style="font-weight:700">${x.c?'$'+Math.round(x.c):''}</span><i style="width:70%;border-radius:4px 4px 0 0;background:var(--brand);height:${Math.max(2,x.c/mx*40)}px;opacity:${x.d===bizDate()?1:.7}"></i><span class="tiny muted">${WD()[parseYmd(x.d).getDay()]}</span></div>`).join('')}</div>
+    <div class="tiny muted">${L(`Wages ${money(LB.wages)} + employer tax ${money(LB.tax)}, with overtime and training rates. Same numbers as Owner → Forecast.`,`工资 ${money(LB.wages)} + 雇主税 ${money(LB.tax)}，含加班和培训工资。与 老板 → 预测 一致。`)}${noRate?` <b style="color:var(--warn)">${L('Someone on the schedule has no pay rate.','排班里有人没设工资。')}</b>`:''}</div></div>`}
 function schedPlan(){const ws=UI.week||weekStart(today());const day=UI.day&&UI.day>=ws&&UI.day<=addDays(ws,6)?UI.day:(today()>=ws&&today()<=addDays(ws,6)?today():ws);
   const days=[...Array(7)].map((_,i)=>addDays(ws,i));const list=shiftsOn(day);
   const ems=emps();const wkH={};Object.values(D.shifts).forEach(s=>{if(s.date>=ws&&s.date<=addDays(ws,6))wkH[s.empId]=(wkH[s.empId]||0)+shiftHrs(s)});
   return `<div class="row"><button class="btn sm" data-act="wk" data-n="-7" aria-label="${L('Previous week','上一周')}">${ic('left')}</button><div class="grow" style="text-align:center;font-weight:700">${fmtD(ws,{month:'short',day:'numeric'})} – ${fmtD(addDays(ws,6),{month:'short',day:'numeric'})}</div><button class="btn sm" data-act="wk" data-n="7" aria-label="${L('Next week','下一周')}">${ic('chev')}</button></div>
   ${pubBar(ws)}
+  ${laborBar(ws)}
   <div class="chips">${days.map(x=>{const n=shiftsOn(x).length;return `<button class="${x===day?'on':''}" data-act="day" data-d="${x}"><span>${WD()[parseYmd(x).getDay()]} ${parseYmd(x).getDate()}</span><b>${n||'·'}</b>${noBackupCount([x])?'<i class="nobk" title="A shift has no backup"></i>':''}</button>`}).join('')}</div>
   ${(()=>{const n=noBackupCount(days);return !backupOn()?'':n?`<div class="hint warn">⚠ ${n} shift${n===1?' has':'s have'} no backup this week: no one else is free then. Ask someone to open up their availability, move the shift, or open the shift and turn off "Needs a backup".</div>`:days.some(x=>shiftsOn(x).length)?`<div class="small muted">✓ Every upcoming shift this week has a backup person.</div>`:''})()}
   <div class="card flush list"><div class="li" style="background:var(--sunk);min-height:0;padding-block:10px"><span class="eyebrow grow">${fmtD(day,{weekday:'long',month:'short',day:'numeric'})}</span><button class="btn sm pri" data-act="shiftEdit" data-d="${day}">${ic('plus')} ${L('Add shift','加班次')}</button></div>
@@ -2775,19 +2800,20 @@ ACT.fcCushion=async d=>{if(!isOwner)return;const v=+d.v;if(+fcCfg().buffer===v)r
    Labor: past days use actual clock-in hours; otherwise scheduled shifts × each person's cost (payroll rate + employer payroll tax, cash rate, 1.5× over the weekly
    overtime limit); days with no shifts yet use the forecast's people-per-hour × the store's average hourly cost. */
 const fcTaxPct=()=>{const t=taxRates();return ((+t.fica||0)+(+t.futa||0)+(+t.suta||0))/100};
-function fcAvgRate(loc){const tx=fcTaxPct();const r=Object.values(D.employees).filter(e=>e.active!==false&&worksAt(e.id,loc)).map(e=>{const w=wageOf(e.id);return w.pay?w.pay*(1+tx):w.cash||0}).filter(x=>x>0);return r.length?r.reduce((a,b)=>a+b,0)/r.length:null}
-// cost per scheduled hour for one person in one Monday–Sunday week
-function fcWeekRate(empId,ws,cache){const k=empId+'|'+ws;if(cache[k]!=null)return cache[k];const W_=wageOf(empId),tx=fcTaxPct();
-  const h=Object.values(D.shifts).filter(s=>s.empId===empId&&s.date>=ws&&s.date<=addDays(ws,6)).reduce((a,s)=>a+shiftHrs(s),0);
-  if(!h||(!W_.pay&&!W_.cash))return cache[k]=0;const[ph,ch]=splitHrs(h,W_);const ot=Math.max(0,h-(D.settings.otWeekly||40));
-  const base=ph*W_.pay*(1+tx)+ch*W_.cash;const otExtra=ot*.5*(W_.pay?W_.pay*(1+tx):W_.cash);return cache[k]=(base+otExtra)/h}
+function fcAvgRate(loc){const tx=fcTaxPct();const r=Object.values(D.employees).filter(e=>e.active!==false&&worksAt(e.id,loc)).map(e=>{const w=wageOf(e.id),t=trainOf(e.id);return inTraining(e.id,bizDate())?t.rate*(t.via==='cash'?1:1+tx):w.pay?w.pay*(1+tx):w.cash||0}).filter(x=>x>0);return r.length?r.reduce((a,b)=>a+b,0)/r.length:null}
+// cost per hour for one person in one Monday–Sunday week, from all their shifts (or clock-ins) that week at every store,
+// using weekLabor (payroll rules + employer tax), so overtime and training rates land where payroll would put them.
+function fcWeekRate(empId,ws,cache,actual){const k=(actual?'p|':'s|')+empId+'|'+ws;if(cache[k]!=null)return cache[k];const we=addDays(ws,6);
+  const items=actual?Object.values(D.punches).filter(p=>p.empId===empId&&p.date>=ws&&p.date<=we).map(p=>({date:p.date,h:punchHrs(p)}))
+    :Object.values(D.shifts).filter(x=>x.empId===empId&&x.date>=ws&&x.date<=we).map(x=>({date:x.date,h:shiftHrs(x)}));
+  const r=weekLabor(empId,items);return cache[k]=r.h?r.cost/r.h:0}
 function fcRows(loc,from,n){const d0=bizDate(),H=hourlyOf(loc),avg=fcAvgRate(loc),cache={};
   return [...Array(n)].map((_,i)=>{const d=addDays(from,i),past=d<d0;let net=null,tax=null,tips=null,recv=null,wx=null,ok=true;
     if(past){const v=H[d];if(v&&dayTot(v)>0){const m=dayMoney(v);net=m.net;if(m.full){tax=m.tax;tips=m.tips;recv=m.recv}}else ok=false}
     else{const F=fcDay(loc,d);if(F.ok){net=F.tot;tax=F.tax??null;tips=F.tips??null;recv=F.recv??null;wx=F.wx}else ok=false}
     const sh=Object.values(D.shifts).filter(s=>s.date===d&&shLoc(s)===loc);let lh=0,lc=null,src='none';
     const pu=past?Object.values(D.punches).filter(x=>x.date===d&&shLoc(x)===loc):[];
-    if(pu.length){const tx=fcTaxPct();lh=pu.reduce((a,x)=>a+punchHrs(x),0);lc=pu.reduce((a,x)=>{const W_=wageOf(x.empId);return a+punchHrs(x)*(W_.pay?W_.pay*(1+tx):W_.cash||0)},0);src='actual'}
+    if(pu.length){lh=pu.reduce((a,x)=>a+punchHrs(x),0);lc=pu.reduce((a,x)=>a+punchHrs(x)*fcWeekRate(x.empId,weekStart(d),cache,true),0);src='actual'}
     else if(sh.length){lh=sh.reduce((a,s)=>a+shiftHrs(s),0);lc=sh.reduce((a,s)=>a+shiftHrs(s)*fcWeekRate(s.empId,weekStart(d),cache),0);src='sched'}
     else if(!past&&needsFor(loc,parseYmd(d).getDay()).length){lh=needsAt(loc,d).reduce((a,x)=>a+((toMin(x.end)-toMin(x.start))/60)*(x.n||1),0);lc=avg!=null?lh*avg:null;src='est'}
     return{d,past,ok,net,tax,tips,recv,wx,lh,lc,src}})}
@@ -3196,13 +3222,13 @@ function pubBar(ws){if(!pubOn())return ownerAct()?`<div class="small muted row w
 
 function pubSheet(loc,ws){openSheet({live:true,title:()=>`${esc(locName(loc))} · week of ${fmtD(ws,{month:'short',day:'numeric'})}`,body:()=>{const st=weekState(loc,ws);const sh=pubShifts(loc,ws).sort((a,b)=>(a.date+a.start).localeCompare(b.date+b.start));const [k,t]=PUBST[st];const sub=D.schedSub?.[pubKey(loc,ws)];const p=PUB().weeks?.[pubKey(loc,ws)];
   const hrs={};sh.forEach(s=>{hrs[s.empId]=(hrs[s.empId]||0)+shiftHrs(s)});const tot=Object.values(hrs).reduce((a,b)=>a+b,0);
-  const cost=seePay()?Object.entries(hrs).reduce((a,[e,h])=>{const W_=wageOf(e);return a+h*(W_.pay||W_.cash||trainOf(e).rate||0)},0):null;
+  const LB=seePay()?laborOf(sh,shiftHrs):null;const cost=LB?LB.cost:null;
   const future=sh.filter(s=>atTime(s.date,s.start).getTime()>Date.now());const nobk=future.filter(s=>needsBackup(s)&&!backupOf(s));const unav=sh.filter(s=>['no','off'].includes(availFor(s.empId,s.date,s.start,s.end)));const dbl=sh.filter(s=>sh.some(x=>x!==s&&x.empId===s.empId&&ovl(x,s)));
   const max=D.schedCfg?.maxHrs||{};const over=Object.entries(hrs).filter(([e,h])=>num(max[e])&&h>num(max[e]));
   const diff=st==='published'?pubDiff(loc,ws):[];const line=x=>`${esc(empName(x.e))} · ${fmtD(x.d,{weekday:'short',month:'numeric',day:'numeric'})} ${fmtT(x.s)}–${fmtT(x.t)}`;
   return `<div class="card stack"><div>${chip(k,t)}</div>${sub?.at?`<div class="small muted">Sent by ${esc(sub.byName||'manager')} · ${fmtDT(sub.at)}${sub.note?`<br>“${esc(sub.note)}”`:''}</div>`:''}${p?.at?`<div class="small muted">${p.status==='published'?'Approved':'Changes asked'} by ${esc(p.byName||'owner')} · ${fmtDT(p.at)}${p.status==='changes'&&p.note?`<br>“${esc(p.note)}”`:''}</div>`:''}</div>
    ${diff.length?`<div class="card stack" style="border-left:4px solid var(--info)"><h3>Changed since you approved</h3>${diff.map(x=>`<div class="small">${x.k==='add'?`<b style="color:var(--ok)">Added</b> ${line(x.n)}`:x.k==='del'?`<b style="color:var(--bad)">Removed</b> ${line(x.o)}`:`<b style="color:var(--warn)">Changed</b> ${line(x.o)} → ${x.n.e!==x.o.e?esc(empName(x.n.e))+' · ':''}${fmtD(x.n.d,{weekday:'short'})} ${fmtT(x.n.s)}–${fmtT(x.n.t)}${D.shifts[x.n.id]?.coverId?' <span class="muted">(shift cover)</span>':''}`}</div>`).join('')}${ownerAct()?`<button class="btn" data-act="pubAck" data-l="${loc}" data-ws="${ws}">${ic('check')} Got it</button>`:''}</div>`:''}
-   <div class="stats" style="grid-template-columns:repeat(${cost!=null?3:2},1fr)"><div class="stat"><b>${sh.length}</b><span>Shifts</span></div><div class="stat"><b>${fmtH(tot)}</b><span>Total hours</span></div>${cost!=null?`<div class="stat"><b>${money(cost)}</b><span>Est. labor</span></div>`:''}</div>
+   <div class="stats" style="grid-template-columns:repeat(${cost!=null?3:2},1fr)"><div class="stat"><b>${sh.length}</b><span>Shifts</span></div><div class="stat"><b>${fmtH(tot)}</b><span>Total hours</span></div>${cost!=null?`<div class="stat" title="${L('Wages','工资')} ${money(LB.wages)} + ${L('employer tax','雇主税')} ${money(LB.tax)}"><b>${money(cost)}</b><span>${L('Est. labor','预计人工')}</span></div>`:''}</div>${cost!=null?`<div class="tiny muted" style="margin-top:-6px">${L(`Est. labor = wages ${money(LB.wages)} + employer tax ${money(LB.tax)}, with overtime and training rates — same as Forecast.`,`预计人工 = 工资 ${money(LB.wages)} + 雇主税 ${money(LB.tax)}，含加班和培训工资，与预测一致。`)}${LB.noRate?` <b style="color:var(--warn)">${L('Some people have no pay rate.','有人没有设工资。')}</b>`:''}</div>`:''}
    ${[[nobk,'bad',x=>`No backup: ${esc(empName(x.empId))} ${fmtD(x.date,{weekday:'short'})} ${fmtT(x.start)}–${fmtT(x.end)}`],[unav,'warn',x=>`Not available then: ${esc(empName(x.empId))} ${fmtD(x.date,{weekday:'short'})} ${fmtT(x.start)}–${fmtT(x.end)}`],[dbl,'bad',x=>`Double-booked: ${esc(empName(x.empId))} ${fmtD(x.date,{weekday:'short'})}`],[over,'warn',([e,h])=>`Over max hours: ${esc(empName(e))} ${fmtH(h)} h (max ${fmtH(num(max[e]))})`]].filter(([l])=>l.length).map(([l,c,f])=>`<div class="hint ${c==='bad'?'warn':''}">${l.slice(0,8).map(f).join('<br>')}${l.length>8?`<br>+${l.length-8} more`:''}</div>`).join('')||(sh.length?'<div class="small" style="color:var(--ok)">✓ No problems found: everyone is available, no double-booking, every shift has a backup.</div>':'')}
    ${sh.length?`<div class="small muted">Tap a shift to see who else can work it and swap them in.</div>`+schedChart(sh,ws,7,[]):'<div class="empty card">No shifts this week yet.</div>'}
    <div class="card stack"><h3>Hours per person</h3>${Object.entries(hrs).sort((a,b)=>b[1]-a[1]).map(([e,h])=>`<div class="row">${avatar(e)}<span class="grow">${esc(empName(e))}</span><b>${fmtH(h)} h</b></div>`).join('')||'<div class="small muted">—</div>'}</div>
