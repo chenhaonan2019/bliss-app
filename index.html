@@ -3425,16 +3425,19 @@ Object.assign(ACT,{
 });
 
 /* ---------- shift bonus: paid per shift when the tasks due during that shift were done ---------- */
-const bonusCfg=()=>({perShift:0,minPct:100,noIssues:true,onTime:false,via:'payroll',...(D.bonusCfg||D.bonusPub||{})});
+const bonusCfg=()=>({perShift:0,minPct:100,noIssues:true,onTime:false,via:'payroll',grace:30,...(D.bonusCfg||D.bonusPub||{})});
 const bonusOn=()=>D.bonusCfg?num(D.bonusCfg.perShift)>0:!!D.bonusPub?.on;
 // Staff and managers can't read mgr/wages, so the bonus rules (not the $ amount) are copied to config/bonus for everyone to see.
-const bonusPubOf=v=>({on:num(v?.perShift)>0,minPct:num(v?.minPct)??100,noIssues:v?.noIssues!==false,onTime:!!v?.onTime});
+const bonusPubOf=v=>({on:num(v?.perShift)>0,minPct:num(v?.minPct)??100,noIssues:v?.noIssues!==false,onTime:!!v?.onTime,grace:num(v?.grace)??30});
+// For the bonus, a photo task is on time if it's finished within the bonus grace (default 30 min) after its due time.
+function bonusTaskSt(date,T,loc,g){const s=taskState(date,T.type,loc);if(!s.total)return s;const due=atTime(date,T.time(date,loc)).getTime()+g*6e4;const done=s.filled>=s.total;
+  if(done){const at=s.doc?.completedAt?new Date(s.doc.completedAt).getTime():null;return{...s,st:at&&at>due?'late':'ontime'}}return{...s,st:Date.now()>due?'missed':s.filled?'progress':'todo'}}
 let bonusPubSynced=false;function syncBonusPub(){if(!isOwner||!D.bonusCfg||bonusPubSynced)return;const pub=bonusPubOf(D.bonusCfg);const cur=D.bonusPub;
-  if(cur&&cur.on===pub.on&&cur.minPct===pub.minPct&&cur.noIssues===pub.noIssues&&cur.onTime===pub.onTime)return;bonusPubSynced=true;A.db.doc('config/bonus').set(pub).then(()=>{D.bonusPub=pub}).catch(e=>console.warn(e))}
+  if(cur&&cur.on===pub.on&&cur.minPct===pub.minPct&&cur.noIssues===pub.noIssues&&cur.onTime===pub.onTime&&cur.grace===pub.grace)return;bonusPubSynced=true;A.db.doc('config/bonus').set(pub).then(()=>{D.bonusPub=pub}).catch(e=>console.warn(e))}
 // One worked day = one shift (several punches on the same day are joined). A task belongs to the shift when it is due between clock-in and clock-out (+ photo grace).
 function bonusDays(emp,P){const c=bonusCfg();const by={};P.filter(p=>p.out).forEach(p=>{(by[p.date]=by[p.date]||[]).push(p)});
-  return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,ps])=>{const a=Math.min(...ps.map(p=>new Date(p.in).getTime())),b=Math.max(...ps.map(p=>new Date(p.out).getTime()))+(D.settings.photoGrace||0)*6e4;const loc=ps[0].loc||locOf(emp);const late=Math.max(0,...ps.map(p=>p.late||0));
-    const due=tasksOn(date).filter(T=>{const t=atTime(date,T.time(date,loc)).getTime();return t>=a&&t<=b}).map(T=>({T,s:taskState(date,T.type,loc)}));
+  return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,ps])=>{const a=Math.min(...ps.map(p=>new Date(p.in).getTime())),g=num(c.grace)??30,b=Math.max(...ps.map(p=>new Date(p.out).getTime()))+g*6e4;const loc=ps[0].loc||locOf(emp);const late=Math.max(0,...ps.map(p=>p.late||0));
+    const due=tasksOn(date).filter(T=>{const t=atTime(date,T.time(date,loc)).getTime();return t>=a&&t<=b}).map(T=>({T,s:bonusTaskSt(date,T,loc,g)}));
     const on=due.filter(x=>x.s.st==='ontime').length,iss=due.filter(x=>x.s.doc?.review?.status==='issue').length;const pct=due.length?Math.round(on/due.length*100):100;
     const why=[];if(pct<num(c.minPct))why.push(`tasks on time ${on}/${due.length}`);if(c.noIssues&&iss)why.push(`${iss} task${iss>1?'s':''} flagged`);if(c.onTime&&late)why.push(`late ${late} min`);
     return{date,due,on,iss,pct,late,ok:!why.length,why}})}
@@ -3442,7 +3445,7 @@ function bonusDays(emp,P){const c=bonusCfg();const by={};P.filter(p=>p.out).forE
 function myBonusCard(me){if(!bonusOn())return'';const c=bonusCfg(),cur=payPeriodOf(today()),ps=UI.ebp||cur,pe=addDays(ps,payLen()-1);
   const B=bonusDays(me,Object.values(D.punches).filter(p=>p.empId===me&&p.date>=ps&&p.date<=pe));const ok=B.filter(x=>x.ok).length;
   const st=x=>x.s.st==='ontime'?`<span style="color:var(--ok)">✓ ${L('on time','按时')}</span>`:x.s.st==='late'?`<span style="color:var(--bad)">${L('late','晚了')}</span>`:x.s.st==='todo'||x.s.st==='progress'?`<span class="muted">${L('not due yet','未到时间')}</span>`:`<span style="color:var(--bad)">✗ ${L('not done','没做')}</span>`;
-  const rules=[L(`${num(c.minPct)}% of your tasks done on time`,`${num(c.minPct)}% 的任务按时完成`),c.noIssues?L('no task flagged by a manager','没有任务被经理标记问题'):'',c.onTime?L('clock in on time','按时打卡上班'):''].filter(Boolean).join(L(' · ','、'));
+  const rules=[L(`${num(c.minPct)}% of your tasks done on time (up to ${num(c.grace)??30} min after due is OK)`,`${num(c.minPct)}% 的任务按时完成（截止后 ${num(c.grace)??30} 分钟内都算按时）`),c.noIssues?L('no task flagged by a manager','没有任务被经理标记问题'):'',c.onTime?L('clock in on time','按时打卡上班'):''].filter(Boolean).join(L(' · ','、'));
   return `<div class="card stack"><div class="row"><h3 class="grow">${L('My shift bonus','我的班次奖金')}</h3><button class="btn sm" data-act="ebp" data-n="-1" aria-label="Previous pay period">${ic('left')}</button><span class="small" style="font-weight:700">${fmtD(ps,{month:'short',day:'numeric'})} – ${fmtD(pe,{month:'short',day:'numeric'})}</span><button class="btn sm" data-act="ebp" data-n="1" aria-label="Next pay period" ${ps>=cur?'disabled':''}>${ic('chev')}</button></div>
    <div class="row" style="gap:12px"><div style="font-size:30px;font-weight:800;color:${B.length&&ok===B.length?'var(--ok)':'var(--ink)'}">${ok}<span class="muted" style="font-size:18px">/${B.length}</span></div><div class="small muted grow">${L('shifts earned the bonus this pay period','个班次拿到了奖金（本期）')}</div></div>
    <div class="tiny muted">${L('To earn it on a shift: ','每个班次要拿到奖金需要：')}${esc(rules)}</div>
@@ -3452,19 +3455,21 @@ function myBonusCard(me){if(!bonusOn())return'';const c=bonusCfg(),cur=payPeriod
 function bonusCard(ps,pl,R){if(!isMgr)return'';const c=bonusCfg();const own=seePay();
   if(!bonusOn())return own?`<div class="card row wrapr"><div class="grow"><div class="t">Shift bonus</div><div class="small muted">Pay a bonus for each shift where the tasks were done on time.</div></div><button class="btn sm" data-act="bonusEdit">Set up</button></div>`:'';
   const rows=Object.values(R).filter(r=>r.bon&&r.bon.days.length);const ok=rows.reduce((a,r)=>a+r.bon.ok,0),all=rows.reduce((a,r)=>a+r.bon.days.length,0);
-  return `<div class="card stack"><div class="row wrapr"><div class="grow"><div class="t">Shift bonus${own?` · ${money(num(c.perShift))} per shift`:''}</div><div class="small muted">${num(c.minPct)}% of tasks on time${c.noIssues?' · no flagged tasks':''}${c.onTime?' · clocked in on time':''}${own?` · paid ${c.via==='cash'?'in cash':'with payroll'}`:''}</div></div>${own?`<button class="btn sm" data-act="bonusEdit">Edit</button>`:''}</div>
+  return `<div class="card stack"><div class="row wrapr"><div class="grow"><div class="t">Shift bonus${own?` · ${money(num(c.perShift))} per shift`:''}</div><div class="small muted">${num(c.minPct)}% of tasks on time (${num(c.grace)??30} min grace)${c.noIssues?' · no flagged tasks':''}${c.onTime?' · clocked in on time':''}${own?` · paid ${c.via==='cash'?'in cash':'with payroll'}`:''}</div></div>${own?`<button class="btn sm" data-act="bonusEdit">Edit</button>`:''}</div>
    <div class="stats" style="grid-template-columns:repeat(${own?3:2},1fr)"><div class="stat"><b>${ok}/${all}</b><span>Shifts earned it</span></div><div class="stat"><b>${rows.filter(r=>r.bon.ok).length}</b><span>People</span></div>${own?`<div class="stat"><b>${money(rows.reduce((a,r)=>a+r.bon.amt,0))}</b><span>Bonus total</span></div>`:''}</div></div>`}
 function bonusDetail(emp,ps,pl){if(!bonusOn())return'';const pe=addDays(ps,pl-1);const P=Object.values(D.punches).filter(p=>p.empId===emp&&p.date>=ps&&p.date<=pe);const B=bonusDays(emp,P);if(!B.length)return'';const ok=B.filter(x=>x.ok).length;
   return `<div class="eyebrow">Shift bonus · ${ok}/${B.length} shifts${seePay()?` · ${money(ok*num(bonusCfg().perShift))}`:''}</div><div class="card flush list">${B.map(x=>`<div class="li"><span style="font-size:18px;color:${x.ok?'var(--ok)':'var(--bad)'}">${x.ok?'✓':'✗'}</span><div class="grow"><div class="t">${fmtD(x.date)}</div><div class="small muted">${x.due.length?`${x.on}/${x.due.length} tasks on time: ${x.due.map(d=>esc(d.T.name())+(d.s.st==='ontime'?' ✓':d.s.st==='late'?' (late)':' ✗')).join(', ')}`:'No tasks due during this shift'}${x.why.length?` · <b style="color:var(--bad)">${esc(x.why.join(', '))}</b>`:''}</div></div></div>`).join('')}</div>`}
 function bonusSheet(){const c=bonusCfg();openSheet({title:()=>'Shift bonus',body:()=>`<p class="small muted">Each shift is checked on its own. A task counts for a shift when it's due between that person's clock-in and clock-out. Shifts with no tasks due still earn it if the other rules are met.</p>
    <div class="g2"><label class="f">Bonus per shift ($)<input class="in" type="number" min="0" step="0.5" id="bo_amt" value="${num(c.perShift)||''}" placeholder="0 = off"></label><label class="f">Tasks on time at least (%)<input class="in" type="number" min="0" max="100" step="5" id="bo_pct" value="${num(c.minPct)}"></label></div>
+   <label class="f">Photo grace period (min)<input class="in" type="number" min="0" step="5" id="bo_grace" value="${num(c.grace)??30}"></label>
+   <p class="tiny muted" style="margin:0">A photo task still counts as on time for the bonus if it's finished within this many minutes after it's due.</p>
    <label class="row" style="gap:8px"><input type="checkbox" id="bo_iss" ${c.noIssues?'checked':''}> No task flagged by a manager review</label>
    <label class="row" style="gap:8px"><input type="checkbox" id="bo_late" ${c.onTime?'checked':''}> Clocked in on time</label>
    <label class="f">Paid<select class="in" id="bo_via"><option value="payroll" ${c.via!=='cash'?'selected':''}>With payroll</option><option value="cash" ${c.via==='cash'?'selected':''}>In cash</option></select></label>`,
   foot:()=>`<button class="btn" data-act="closeSheet">Cancel</button><button class="btn pri" data-act="bonusSave">Save</button>`})}
 Object.assign(ACT,{
  bonusEdit:()=>bonusSheet(),
- bonusSave:async()=>{const v={perShift:Math.max(0,num($('#bo_amt').value)||0),minPct:Math.min(100,Math.max(0,num($('#bo_pct').value)??100)),noIssues:$('#bo_iss').checked,onTime:$('#bo_late').checked,via:$('#bo_via').value};
+ bonusSave:async()=>{const v={perShift:Math.max(0,num($('#bo_amt').value)||0),minPct:Math.min(100,Math.max(0,num($('#bo_pct').value)??100)),noIssues:$('#bo_iss').checked,onTime:$('#bo_late').checked,via:$('#bo_via').value,grace:Math.max(0,num($('#bo_grace').value)??30)};
    const ref=A.db.doc('mgr/wages');if(await W(ref.update({bonus:v}).catch(()=>ref.set({rates:D.wages||{},bonus:v})))){D.bonusCfg=v;await A.db.doc('config/bonus').set(bonusPubOf(v)).then(()=>{D.bonusPub=bonusPubOf(v)}).catch(e=>console.warn(e));toast(v.perShift?`Bonus: ${money(v.perShift)} per shift`:'Shift bonus is off');closeSheet()}},
 });
 
