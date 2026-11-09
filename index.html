@@ -674,11 +674,13 @@ function vEToday(){const me=actor(),d=bizDate();const sh=shiftsOn(d,me);const op
   ${next?`<div class="card row">${ic('cal')}<div class="grow"><div class="small muted">${L('Next shift','下一班')}</div><div class="t">${fmtD(next.date)} · ${fmtT(next.start)} – ${fmtT(next.end)}</div></div></div>`:''}
   </div>`}
 function vEShift(){const me=actor(),d=today();const up=Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=d&&shiftVisible(s)).sort((a,b)=>a.date.localeCompare(b.date)||toMin(a.start)-toMin(b.start));
-  const ws=weekStart(d),we=addDays(ws,6);const wk=Object.values(D.punches).filter(p=>p.empId===me&&p.date>=ws&&p.date<=we);const hrs=wk.reduce((s,p)=>s+punchHrs(p),0);
+  const ws=weekStart(d),we=addDays(ws,6),pps=payPeriodOf(d),ppe=addDays(pps,payLen()-1);const mySh=(a0,b0)=>Object.values(D.shifts).filter(s=>s.empId===me&&s.date>=a0&&s.date<=b0&&shiftVisible(s)).reduce((t,s)=>t+shiftHrs(s),0);
   const a=D.avail[me];
   return `<div class="stack"><div class="row"><h2 class="grow">${L('My shifts','我的排班')}</h2>${A.downloads&&up.length?`<button class="btn sm" data-act="ics">${ic('dl')} ${L('Add to calendar','加入日历')}</button>`:''}</div>
   ${coverStaffCard(me)}${availCard(me)}${backupDuty(me)}
-  <div class="stats" style="grid-template-columns:1fr 1fr"><div class="stat"><b>${fmtH(hrs)}</b><span>${L('Hours this week','本周工时')}</span></div><div class="stat"><b>${up.length}</b><span>${L('Upcoming shifts','即将的班次')}</span></div></div>
+  <div class="eyebrow">${L('My scheduled hours','我的排班工时')}</div>
+  <div class="stats" style="grid-template-columns:repeat(3,1fr);margin-top:-6px"><div class="stat"><b>${fmtH(mySh(ws,we))}</b><span>${L('This week','本周')}</span></div><div class="stat"><b>${fmtH(mySh(addDays(ws,7),addDays(we,7)))}</b><span>${L('Next week','下周')}</span></div><div class="stat"><b>${fmtH(mySh(pps,ppe))}</b><span>${L('Pay period','本期')} ${fmtD(pps,{month:'numeric',day:'numeric'})}–${fmtD(ppe,{month:'numeric',day:'numeric'})}</span></div></div>
+  ${myBonusCard(me)}
   ${up.length?`<div class="card flush list">${up.map(s=>`<div class="li"><div class="grow"><div class="t">${fmtD(s.date)}</div><div class="small muted">${fmtT(s.start)} – ${fmtT(s.end)} · ${fmtH(shiftHrs(s))} h${s.note?' · '+esc(s.note):''}</div></div>${s.date===d?chip('brand',L('Today','今天')):''}${coverFor(s.id)?`<button class="btn sm" data-act="cvOpen" data-id="${esc(coverFor(s.id).id)}">Finding cover…</button>`:atTime(s.date,s.start).getTime()>Date.now()?`<button class="btn sm" data-act="cvCant" data-id="${s.id}">Can't make it</button>`:''}</div>`).join('')}</div>`
    :`<div class="empty card"><b>${L('No upcoming shifts','暂无排班')}</b>${L('Your manager will post the schedule here.','经理排班后会显示在这里。')}</div>`}
   ${(()=>{const ws=UI.ew||weekStart(today());const days=[...Array(7)].map((_,i)=>addDays(ws,i));
@@ -2276,6 +2278,7 @@ const ACT={
    toast(L(`Copied ${n} shifts`,`已复制 ${n} 个班次`))},
  per:d=>{const n=+d.n;if(n===0){UI.ps=payPeriodOf(today());UI.pl=payLen()}else UI.ps=addDays(UI.ps||payPeriodOf(today()),n*(UI.pl||payLen()));render()},
  empTime:d=>empTimeSheet(d.id,d.ps,+d.pl),
+ ebp:d=>{const c=payPeriodOf(today());const n=addDays(UI.ebp||c,+d.n*payLen());UI.ebp=n>c?c:n;render()},
  ppWk:d=>{const n=+d.n,c=payPeriodOf(today());UI.pps=n===0?c:addDays(UI.pps||c,n*payLen());render()},
  payReview:async d=>{if(!seePay())return;const v=d.undo?null:{at:new Date().toISOString(),payroll:+d.pp,cash:+d.cp};const prev=D.wagesDoc;
    const pr={...(prev?.payReview||{}),[d.key]:v};D.wagesDoc={...(prev||{}),payReview:pr};render();
@@ -3064,7 +3067,7 @@ async function boot(){
   if(!db){render();return}
   uid=user?await user.id():null;isMgr=user?await user.canEdit():false;isOwner=user?await user.isOwner():false;
   c.use('assets').then(x=>{A.assets=x;rerender()});c.use('sample').then(x=>{A.sample=x;rerender()});c.use('downloads').then(x=>{A.downloads=x;rerender()});
-  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='files')D.files=v.list||[];if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='prep')D.prepCfg=v.list||[];if(d.id==='tasknotes'){D.taskNotes=v.notes||{};D.taskWeekly=v.weekly||{}}if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='guide')D.guideCfg=v;if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
+  subscribe(db.collection('config'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='former')D.former=v;if(d.id==='files')D.files=v.list||[];if(d.id==='tasks')D.taskCfg=v.list||[];if(d.id==='prep')D.prepCfg=v.list||[];if(d.id==='tasknotes'){D.taskNotes=v.notes||{};D.taskWeekly=v.weekly||{}}if(d.id==='itemTypes')D.itemTypes=v.list||[];if(d.id==='items')D.items=v.list||[];if(d.id==='settings')D.settings={...DEF_SET,...v};if(d.id==='bonus')D.bonusPub=v;if(d.id==='photoSlots')D.slots={close:v.close||[],prep:v.prep||[],deep:v.deep||[],deepDays:v.deepDays||null};if(d.id==='guide')D.guideCfg=v;if(d.id==='training')D.trainCfg={sections:v.sections||[],docs:v.docs||[]}})});
   subscribe(db.collection('employees'),s=>{D.employees=mapDocs(s)});
   subscribe(db.collection('batches').where('madeDate','>=',addDays(today(),-40)),s=>{D.batches=mapDocs(s)});
   subscribe(db.collection('links'),s=>{D.links=mapDocs(s)});
@@ -3082,7 +3085,7 @@ async function boot(){
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:d.data().days||{}};FCM={}}if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wagesDoc=v;D.noEarly=v.noearly||{};D.noLate=v.nolate||{};D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{}}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id==='rmlist')D.rmList=v.list||[];if(d.id.startsWith('rmlog_'))D.rmLog={...(D.rmLog||{}),[d.id.slice(6)]:v};if(d.id.startsWith('preopen_'))D.preopen={...(D.preopen||{}),[d.id.slice(8)]:v};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wagesDoc=v;D.noEarly=v.noearly||{};D.noLate=v.nolate||{};D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{};setTimeout(syncBonusPub,1500)}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id==='rmlist')D.rmList=v.list||[];if(d.id.startsWith('rmlog_'))D.rmLog={...(D.rmLog||{}),[d.id.slice(6)]:v};if(d.id.startsWith('preopen_'))D.preopen={...(D.preopen||{}),[d.id.slice(8)]:v};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
@@ -3422,8 +3425,12 @@ Object.assign(ACT,{
 });
 
 /* ---------- shift bonus: paid per shift when the tasks due during that shift were done ---------- */
-const bonusCfg=()=>({perShift:0,minPct:100,noIssues:true,onTime:false,via:'payroll',...(D.bonusCfg||{})});
-const bonusOn=()=>num(bonusCfg().perShift)>0;
+const bonusCfg=()=>({perShift:0,minPct:100,noIssues:true,onTime:false,via:'payroll',...(D.bonusCfg||D.bonusPub||{})});
+const bonusOn=()=>D.bonusCfg?num(D.bonusCfg.perShift)>0:!!D.bonusPub?.on;
+// Staff and managers can't read mgr/wages, so the bonus rules (not the $ amount) are copied to config/bonus for everyone to see.
+const bonusPubOf=v=>({on:num(v?.perShift)>0,minPct:num(v?.minPct)??100,noIssues:v?.noIssues!==false,onTime:!!v?.onTime});
+let bonusPubSynced=false;function syncBonusPub(){if(!isOwner||!D.bonusCfg||bonusPubSynced)return;const pub=bonusPubOf(D.bonusCfg);const cur=D.bonusPub;
+  if(cur&&cur.on===pub.on&&cur.minPct===pub.minPct&&cur.noIssues===pub.noIssues&&cur.onTime===pub.onTime)return;bonusPubSynced=true;A.db.doc('config/bonus').set(pub).then(()=>{D.bonusPub=pub}).catch(e=>console.warn(e))}
 // One worked day = one shift (several punches on the same day are joined). A task belongs to the shift when it is due between clock-in and clock-out (+ photo grace).
 function bonusDays(emp,P){const c=bonusCfg();const by={};P.filter(p=>p.out).forEach(p=>{(by[p.date]=by[p.date]||[]).push(p)});
   return Object.entries(by).sort((a,b)=>a[0].localeCompare(b[0])).map(([date,ps])=>{const a=Math.min(...ps.map(p=>new Date(p.in).getTime())),b=Math.max(...ps.map(p=>new Date(p.out).getTime()))+(D.settings.photoGrace||0)*6e4;const loc=ps[0].loc||locOf(emp);const late=Math.max(0,...ps.map(p=>p.late||0));
@@ -3431,6 +3438,17 @@ function bonusDays(emp,P){const c=bonusCfg();const by={};P.filter(p=>p.out).forE
     const on=due.filter(x=>x.s.st==='ontime').length,iss=due.filter(x=>x.s.doc?.review?.status==='issue').length;const pct=due.length?Math.round(on/due.length*100):100;
     const why=[];if(pct<num(c.minPct))why.push(`tasks on time ${on}/${due.length}`);if(c.noIssues&&iss)why.push(`${iss} task${iss>1?'s':''} flagged`);if(c.onTime&&late)why.push(`late ${late} min`);
     return{date,due,on,iss,pct,late,ok:!why.length,why}})}
+// Staff view: how many shifts earned the bonus this pay period, and why each one did or didn't (no $ shown).
+function myBonusCard(me){if(!bonusOn())return'';const c=bonusCfg(),cur=payPeriodOf(today()),ps=UI.ebp||cur,pe=addDays(ps,payLen()-1);
+  const B=bonusDays(me,Object.values(D.punches).filter(p=>p.empId===me&&p.date>=ps&&p.date<=pe));const ok=B.filter(x=>x.ok).length;
+  const st=x=>x.s.st==='ontime'?`<span style="color:var(--ok)">✓ ${L('on time','按时')}</span>`:x.s.st==='late'?`<span style="color:var(--bad)">${L('late','晚了')}</span>`:x.s.st==='todo'||x.s.st==='progress'?`<span class="muted">${L('not due yet','未到时间')}</span>`:`<span style="color:var(--bad)">✗ ${L('not done','没做')}</span>`;
+  const rules=[L(`${num(c.minPct)}% of your tasks done on time`,`${num(c.minPct)}% 的任务按时完成`),c.noIssues?L('no task flagged by a manager','没有任务被经理标记问题'):'',c.onTime?L('clock in on time','按时打卡上班'):''].filter(Boolean).join(L(' · ','、'));
+  return `<div class="card stack"><div class="row"><h3 class="grow">${L('My shift bonus','我的班次奖金')}</h3><button class="btn sm" data-act="ebp" data-n="-1" aria-label="Previous pay period">${ic('left')}</button><span class="small" style="font-weight:700">${fmtD(ps,{month:'short',day:'numeric'})} – ${fmtD(pe,{month:'short',day:'numeric'})}</span><button class="btn sm" data-act="ebp" data-n="1" aria-label="Next pay period" ${ps>=cur?'disabled':''}>${ic('chev')}</button></div>
+   <div class="row" style="gap:12px"><div style="font-size:30px;font-weight:800;color:${B.length&&ok===B.length?'var(--ok)':'var(--ink)'}">${ok}<span class="muted" style="font-size:18px">/${B.length}</span></div><div class="small muted grow">${L('shifts earned the bonus this pay period','个班次拿到了奖金（本期）')}</div></div>
+   <div class="tiny muted">${L('To earn it on a shift: ','每个班次要拿到奖金需要：')}${esc(rules)}</div>
+   ${B.length?`<div class="list flush">${B.slice().reverse().map(x=>`<div class="li" style="align-items:flex-start"><span style="font-size:18px;color:${x.ok?'var(--ok)':'var(--bad)'}">${x.ok?'✓':'✗'}</span><div class="grow"><div class="t">${fmtD(x.date)} · ${x.ok?L('Earned','拿到了'):L('Missed','没拿到')}</div>
+     ${x.why.length?`<div class="small" style="color:var(--bad);font-weight:600">${L('Why: ','原因：')}${[x.pct<num(c.minPct)?L(`only ${x.on} of ${x.due.length} tasks on time`,`${x.due.length} 个任务只有 ${x.on} 个按时`):'',c.noIssues&&x.iss?L(`${x.iss} task${x.iss>1?'s':''} flagged by a manager`,`${x.iss} 个任务被经理标记问题`):'',c.onTime&&x.late?L(`clocked in ${x.late} min late`,`上班打卡迟到 ${x.late} 分钟`):''].filter(Boolean).join(L('; ','；'))}</div>`:''}
+     <div class="small muted">${x.due.length?x.due.map(d=>`${esc(d.T.name())} ${st(d)}${d.s.doc?.review?.status==='issue'?` <span style="color:var(--bad)">⚑ ${L('flagged','有问题')}${d.s.doc.review.note?': '+esc(d.s.doc.review.note):''}</span>`:''}`).join(' · '):L('No tasks due during this shift','这个班没有到期任务')}</div></div></div>`).join('')}</div>`:`<div class="empty">${L('No finished shifts in this pay period yet.','这一期还没有完成的班次。')}</div>`}</div>`}
 function bonusCard(ps,pl,R){if(!isMgr)return'';const c=bonusCfg();const own=seePay();
   if(!bonusOn())return own?`<div class="card row wrapr"><div class="grow"><div class="t">Shift bonus</div><div class="small muted">Pay a bonus for each shift where the tasks were done on time.</div></div><button class="btn sm" data-act="bonusEdit">Set up</button></div>`:'';
   const rows=Object.values(R).filter(r=>r.bon&&r.bon.days.length);const ok=rows.reduce((a,r)=>a+r.bon.ok,0),all=rows.reduce((a,r)=>a+r.bon.days.length,0);
@@ -3447,7 +3465,7 @@ function bonusSheet(){const c=bonusCfg();openSheet({title:()=>'Shift bonus',body
 Object.assign(ACT,{
  bonusEdit:()=>bonusSheet(),
  bonusSave:async()=>{const v={perShift:Math.max(0,num($('#bo_amt').value)||0),minPct:Math.min(100,Math.max(0,num($('#bo_pct').value)??100)),noIssues:$('#bo_iss').checked,onTime:$('#bo_late').checked,via:$('#bo_via').value};
-   const ref=A.db.doc('mgr/wages');if(await W(ref.update({bonus:v}).catch(()=>ref.set({rates:D.wages||{},bonus:v})))){D.bonusCfg=v;toast(v.perShift?`Bonus: ${money(v.perShift)} per shift`:'Shift bonus is off');closeSheet()}},
+   const ref=A.db.doc('mgr/wages');if(await W(ref.update({bonus:v}).catch(()=>ref.set({rates:D.wages||{},bonus:v})))){D.bonusCfg=v;await A.db.doc('config/bonus').set(bonusPubOf(v)).then(()=>{D.bonusPub=bonusPubOf(v)}).catch(e=>console.warn(e));toast(v.perShift?`Bonus: ${money(v.perShift)} per shift`:'Shift bonus is off');closeSheet()}},
 });
 
 Object.assign(SORT,{
