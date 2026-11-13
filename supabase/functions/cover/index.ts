@@ -810,14 +810,8 @@ export async function onMail(org: string, msgs: Json[]) {
     // Don't alert for old emails (first run, or the script was off for a while)
     const recent = Date.now() - Date.parse(m.date || "") < 3 * 3600e3;
     const outOfStock = async () => {
-      // researching alternatives takes a minute: send the plain alert now, the full picture when it's ready
+      // just the plain alert; looking at other stores only happens when a manager taps "Check other stores"
       await alertOrder(org, ctx, r.id, r.data, "items_canceled");
-      const id = r.id, snap = JSON.parse(JSON.stringify(r.data)), all = orders.slice();
-      later((async () => {
-        const ask = await cancelInsight(org, ctx, id, snap, all); if (!ask) return;
-        await merge(org, `orders/${id}`, { track: { ask } });
-        if (ctx.push) { const url = orderUrl(id); await sendPush(ctx.owners, ask.zh.title, ask.zh.body, url); await sendPush(ctx.recipients(snap.loc, "plan").filter((u: string) => !ctx.owners.includes(u)), ask.en.title, ask.en.body, url); }
-      })());
     };
     if (r.event === "items_canceled" && recent) { await outOfStock(); continue; }
     if (r.event && recent && (r.data.status === "ordered" || r.event === "canceled")) await alertOrder(org, ctx, r.id, r.data, r.event!);
