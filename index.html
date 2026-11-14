@@ -948,8 +948,45 @@ function schedTime(){const ps=UI.ps||payPeriodOf(today());const pl=UI.pl||payLen
   <div class="row"><span class="tiny muted grow">${L(`Overtime is paid at 1.5× over ${D.settings.otWeekly||40} h per week.`,`每周超过 ${D.settings.otWeekly||40} 小时按 1.5 倍计算加班。`)}</span>${A.downloads?`<button class="btn sm" data-act="payCsv" data-ps="${ps}" data-pl="${pl}">${ic('dl')} ${seePay()?L('Export payroll','导出工资表'):'Export hours'}</button>`:''}</div>`}
 
 function vTeam(){const s=curSub('team','people');
-  return `<div class="stack"><h2>${L('Team','团队')}</h2>${subTabs('team',[['people',L('People','员工')],['files','Files'],['train',L('Training','培训')],['eval',L('Reviews','评估')],['set',L('Settings','设置')]])}
-  ${s==='people'?teamPeople():s==='files'?teamFiles():s==='train'?teamTrain():s==='eval'?teamEval():teamSet()}</div>`}
+  return `<div class="stack"><h2>${L('Team','团队')}</h2>${subTabs('team',[['people',L('People','员工')],['files','Files'],['train',L('Training','培训')],['eval',L('Reviews','评估')],['intv',L('Interviews','面试')],['set',L('Settings','设置')]])}
+  ${s==='people'?teamPeople():s==='files'?teamFiles():s==='intv'?teamIntv():s==='train'?teamTrain():s==='eval'?teamEval():teamSet()}</div>`}
+// ---------- interviews (managers + owners only: stored in mgr/interviews, which staff can't read) ----------
+const INTV_ST=()=>[['scheduled',L('Scheduled','已约'),'info'],['done',L('Interviewed','已面试'),''],['hired',L('Hired','录用'),'ok'],['no',L('Not a fit','不合适'),'bad'],['noshow',L('No-show','没来'),'warn'],['canceled',L('Canceled','取消'),'']];
+const intvSt=k=>INTV_ST().find(x=>x[0]===k)||INTV_ST()[0];
+const intvPos=()=>[L('Staff','员工'),L('Shift lead','领班'),L('Manager','经理')];
+const intvWhen=x=>x.date?`${fmtD(x.date)}${x.time?' · '+fmtT(x.time):''}`:L('No date yet','未定时间');
+function intvRow(x){const st=intvSt(x.status);return `<div class="li tap" data-act="intvEdit" data-id="${esc(x.id)}" style="gap:10px"><div class="grow" style="min-width:0"><div class="t">${esc(x.name)}${x.rating?` <span class="tiny" style="color:var(--warn)">${'★'.repeat(x.rating)}</span>`:''}</div>
+  <div class="small muted">${esc(intvWhen(x))}${x.pos?' · '+esc(x.pos):''}${LOCS().length>1?' · '+esc(locName(x.loc)):''}</div>${x.notes?`<div class="tiny muted" style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(x.notes)}</div>`:''}</div>
+  ${x.phone?`<a class="btn sm" href="tel:${esc(String(x.phone).replace(/[^\d+]/g,''))}" onclick="event.stopPropagation()">📞</a>`:''}${chip(st[2],st[1])}</div>`}
+function teamIntv(){const all=(D.intv||[]).filter(x=>!x.loc||x.loc===curLoc());const t=today();
+  const up=all.filter(x=>x.status==='scheduled'&&(!x.date||x.date>=t)).sort((a,b)=>(a.date||'9999').localeCompare(b.date||'9999')||(a.time||'').localeCompare(b.time||''));
+  const past=all.filter(x=>!up.includes(x)).sort((a,b)=>(b.date||'').localeCompare(a.date||''));
+  const f=UI.intvF||'all';const pf=f==='all'?past:past.filter(x=>x.status===f);
+  return `<button class="btn pri" data-act="intvEdit">${ic('plus')} ${L('Add interview','添加面试')}</button>
+  <p class="small muted">${L("Only managers and owners can see this list.",'只有经理和老板能看到这个列表。')}</p>
+  <h3>${L('Upcoming','即将面试')} ${up.length?`<span class="chip info">${up.length}</span>`:''}</h3>
+  ${up.length?`<div class="card flush"><div class="list">${up.map(intvRow).join('')}</div></div>`:`<div class="empty card">${L('No interviews scheduled','没有安排面试')}</div>`}
+  ${past.length?`<h3>${L('Past','以往')}</h3><div class="row wrapr" style="gap:6px">${[['all',L('All','全部')],...INTV_ST().filter(x=>x[0]!=='scheduled')].map(x=>`<button class="chip ${f===x[0]?'info':''}" style="cursor:pointer" data-act="intvF" data-k="${x[0]}">${x[1]}</button>`).join('')}</div>
+  ${pf.length?`<div class="card flush"><div class="list">${pf.map(intvRow).join('')}</div></div>`:`<div class="empty card">${L('None','无')}</div>`}`:''}`}
+function intvSheet(id){const x=id?(D.intv||[]).find(y=>y.id===id):{status:'scheduled',loc:curLoc(),pos:intvPos()[0],date:'',time:''};if(!x)return;
+  openSheet({title:()=>id?esc(x.name):L('Add interview','添加面试'),body:()=>`<div class="card stack">
+   <label class="f">${L('Name','姓名')}<input class="in" id="iv_name" value="${esc(x.name||'')}" placeholder="${L('e.g. Emily Chen','例如：Emily Chen')}"></label>
+   <div class="g2"><label class="f">${L('Phone','电话')}<input class="in" id="iv_phone" type="tel" value="${esc(x.phone||'')}"></label><label class="f">Email<input class="in" id="iv_email" type="email" value="${esc(x.email||'')}"></label></div>
+   <div class="g2"><label class="f">${L('Date','日期')}<input class="in" id="iv_date" type="date" value="${esc(x.date||'')}"></label><label class="f">${L('Time','时间')}<input class="in" id="iv_time" type="time" value="${esc(x.time||'')}"></label></div>
+   <div class="g2"><label class="f">${L('Position','职位')}<input class="in" id="iv_pos" list="iv_poss" value="${esc(x.pos||'')}"><datalist id="iv_poss">${intvPos().map(p=>`<option value="${esc(p)}">`).join('')}</datalist></label>
+    <label class="f">${L('Store','门店')}<select class="in" id="iv_loc">${LOCS().map(l=>`<option value="${esc(l.id)}" ${(x.loc||curLoc())===l.id?'selected':''}>${esc(l.name)}</option>`).join('')}</select></label></div>
+   <div class="g2"><label class="f">${L('Status','状态')}<select class="in" id="iv_st">${INTV_ST().map(y=>`<option value="${y[0]}" ${x.status===y[0]?'selected':''}>${y[1]}</option>`).join('')}</select></label>
+    <label class="f">${L('Rating','评分')}<select class="in" id="iv_rate"><option value="">—</option>${[5,4,3,2,1].map(n=>`<option value="${n}" ${+x.rating===n?'selected':''}>${'★'.repeat(n)}</option>`).join('')}</select></label></div>
+   <label class="f">${L('Where they found us','招聘来源')}<input class="in" id="iv_src" value="${esc(x.src||'')}" placeholder="${L('e.g. Indeed, walk-in, referral','例如：Indeed、到店、朋友介绍')}"></label>
+   <label class="f">${L('Availability','可上班时间')}<input class="in" id="iv_av" value="${esc(x.avail||'')}" placeholder="${L('e.g. weekends + Tue/Thu after 3pm','例如：周末 + 周二周四下午3点后')}"></label>
+   <label class="f">${L('Notes','备注')}<textarea class="in" id="iv_notes" rows="4" placeholder="${L('e.g. Friendly, 1 yr at Kung Fu Tea, can start Dec 1. Wants 20 hrs/week.','例如：很友善，在 Kung Fu Tea 做过一年，12月1号可以开始，想要每周20小时。')}">${esc(x.notes||'')}</textarea></label>
+   ${id&&x.by?`<div class="tiny muted">${L('Added by','添加人')} ${esc(x.by)}${x.at?' · '+fmtDT(x.at):''}</div>`:''}</div>`,
+   foot:()=>`${id?`<button class="btn bad" data-act="intvDel" data-id="${esc(id)}">${SH?.confirmDel===id?L('Tap again to delete','再点一次删除'):L('Delete','删除')}</button>`:''}<button class="btn pri" data-act="intvSave" data-id="${esc(id||'')}">${L('Save','保存')}</button>`})}
+async function intvSave(id){const name=$('#iv_name').value.trim();if(!name){toast(L('Enter a name','请填写姓名'));return}
+  const old=id?(D.intv||[]).find(y=>y.id===id):null;
+  const x={...(old||{id:uidGen(),by:myName(),at:new Date().toISOString()}),name,phone:$('#iv_phone').value.trim(),email:$('#iv_email').value.trim(),date:$('#iv_date').value,time:$('#iv_time').value,pos:$('#iv_pos').value.trim(),loc:$('#iv_loc').value,status:$('#iv_st').value,rating:num($('#iv_rate').value),src:$('#iv_src').value.trim(),avail:$('#iv_av').value.trim(),notes:$('#iv_notes').value.trim()};
+  const list=old?(D.intv||[]).map(y=>y.id===id?x:y):[...(D.intv||[]),x];
+  if(await W(A.db.doc('mgr/interviews').set({list}))){D.intv=list;toast(L('Saved','已保存'));closeSheet();render()}}
 // ---------- files (PDF, Word, Excel, images…) ----------
 // Everyone's files live in config/files, managers-only files in mgr/files (the database keeps those from staff).
 const FILE_EXT={pdf:'PDF',doc:'Word',docx:'Word',xls:'Excel',xlsx:'Excel',csv:'Excel',ppt:'PowerPoint',pptx:'PowerPoint',txt:'Text',jpg:'Image',jpeg:'Image',png:'Image',heic:'Image',webp:'Image',gif:'Image',mp4:'Video',mov:'Video'};
@@ -2846,6 +2883,8 @@ ACT.askPick=async d=>{const o=D.orders[d.id];if(!o?.track?.ask)return;const x=o.
   const track={...o.track,ask:{...o.track.ask,answer:{i:+d.i,text:x?.en||'',by:myName(),at:new Date().toISOString()}}};if(await W(A.db.doc('orders/'+d.id).update({track})))toast(L('Saved. Managers can see your decision.','已记录，经理能看到你的决定。'))};
 ACT.askAlts=async d=>{if(UI.altsBusy)return;const c=window.blissCover;if(!c?.alts){toast('Not available offline');return}UI.altsBusy=d.id;render();toast(L('Claude is checking other stores… about a minute','Claude 正在查其他店的库存，大约一分钟'));
   try{const r=await c.alts(d.id);if(r?.ask){D.orders[d.id]={...D.orders[d.id],track:{...D.orders[d.id].track,ask:r.ask}};toast(L('Done','查好了'))}else toast(L("Couldn't check right now",'暂时查不了'))}catch(e){toast(String(e.message||e))}finally{UI.altsBusy=null;render()}};
+ACT.intvEdit=d=>intvSheet(d.id);ACT.intvSave=d=>intvSave(d.id);ACT.intvF=d=>{UI.intvF=d.k;render()};
+ACT.intvDel=async d=>{if(SH.confirmDel!==d.id){SH.confirmDel=d.id;drawSheet();return}const list=(D.intv||[]).filter(y=>y.id!==d.id);if(await W(A.db.doc('mgr/interviews').set({list}))){D.intv=list;toast(L('Deleted','已删除'));closeSheet();render()}};
 ACT.askUndo=async d=>{const o=D.orders[d.id];if(!o?.track?.ask)return;const track={...o.track,ask:{...o.track.ask,answer:null}};await W(A.db.doc('orders/'+d.id).update({track}))};
 ACT.tnEdit=d=>taskNoteSheet(d.type,d.date);
 ACT.evSheet=()=>{if(!isOwner){toast('Only the owner can change holidays and events');return}evSheet()};
@@ -3118,7 +3157,7 @@ async function boot(){
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:d.data().days||{}};FCM={}}if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wagesDoc=v;D.noEarly=v.noearly||{};D.noLate=v.nolate||{};D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{};setTimeout(syncBonusPub,1500)}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id==='rmlist')D.rmList=v.list||[];if(d.id.startsWith('rmlog_'))D.rmLog={...(D.rmLog||{}),[d.id.slice(6)]:v};if(d.id.startsWith('preopen_'))D.preopen={...(D.preopen||{}),[d.id.slice(8)]:v};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wagesDoc=v;D.noEarly=v.noearly||{};D.noLate=v.nolate||{};D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{};setTimeout(syncBonusPub,1500)}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='interviews')D.intv=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id==='rmlist')D.rmList=v.list||[];if(d.id.startsWith('rmlog_'))D.rmLog={...(D.rmLog||{}),[d.id.slice(6)]:v};if(d.id.startsWith('preopen_'))D.preopen={...(D.preopen||{}),[d.id.slice(8)]:v};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
