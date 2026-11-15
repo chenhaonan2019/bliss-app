@@ -708,7 +708,7 @@ const GC=['#B7700E','#2C6A9E','#7A4F9E','#1F8A7A','#A23B62','#4E6B45'];
 function trainSelf(emp){const u=Object.entries(D.links).find(([k,v])=>v.empId===emp)?.[0];const r=u&&D.trainreq?.[u];return r&&r.empId===emp?(r.self||{}):{}}
 function tStat(emp,k){const t=D.training[emp]||{};const m=t.status?.[k]||0;if(m===2)return 2;const mt=t.statusAt?.[k]||'';const sf=trainSelf(emp)[k];if(sf&&sf.at>mt)return sf.v;return m}
 // two lists, both renamable: 'training' (config/training) = Training list, 'guide' (config/guide) = Drink checkmark
-const LISTNAME=k=>k==='sop'?(D.sopCfg?.listName||'BLISS SOP'):(k==='guide'?D.guideCfg?.listName:D.trainCfg?.listName)||(k==='guide'?'Drink checkmark':'Training list');const LKEYS=['training','guide'];const kpre=k=>k==='guide'?'g:':'';
+const LISTNAME=k=>k==='sop'?(D.sopCfg?.listName||'BLISS Drink SOP'):(k==='guide'?D.guideCfg?.listName:D.trainCfg?.listName)||(k==='guide'?'Drink checkmark':'Training list');const LKEYS=['training','guide'];const kpre=k=>k==='guide'?'g:':'';
 function trainStats(emp,gk){gk=gk||'training';const pre=kpre(gk);const tp=new Proxy({},{get:(o,k)=>tStat(emp,k)});let tot=0,s1=0,s2=0;const per={};
   (CFGK(gk).sections||[]).forEach(sec=>{let a=0,b=0;(sec.items||[]).forEach(it=>{const v=tp[pre+sec.id+'__'+it.id]||0;tot++;if(v===1){s1++;a++}if(v===2){s2++;b++}});per[sec.id]={n:(sec.items||[]).length,s1:a,s2:b}});return{tot,s1,s2,per}}
 const barHtml=(n,s1,s2)=>n?`<div class="bar" title="${s2}/${n}"><i class="b2" style="width:${s2/n*100}%"></i><i class="b1" style="width:${s1/n*100}%"></i></div>`:'';
@@ -3472,7 +3472,7 @@ function sopLearnBox(g){const it=g.it;const mgr=isMgr&&mode()==='mgr';
 async function sopItemSet(secId,itemId,fn){const cfg=JSON.parse(JSON.stringify(CFGK('sop')));const it=(cfg.sections.find(x=>x.id===secId)?.items||[]).find(x=>x.id===itemId);if(!it)return;fn(it);if(await saveCfg('sop',cfg)){drawSheet();render()}}
 // Store SOP (config/sop): same look as the Training SOP; everyone reads, managers/owners edit.
 function sopCard(){const K='sop',HS=CFGK(K).sections||[];const mgrE=isMgr&&mode()==='mgr';
-  if(!HS.length)return mgrE?`<div class="card stack"><h3>${esc(LISTNAME(K))}</h3><p class="small muted">${L('Put the store SOP here (Opening, Closing…) so staff can tap a topic and read it.','把门店 SOP（开店、打烊…）放在这里，员工点一下就能看。')}</p><button class="btn pri" data-act="sopSetup">${ic('plus')} ${L('Set up SOP','建立 SOP')}</button></div>`:'';
+  if(!HS.length)return mgrE?`<div class="card stack"><h3>${esc(LISTNAME(K))}</h3><p class="small muted">${L('Put the drink SOP here (new drinks, Opening, Closing…) so staff can tap a topic and read it.','把饮品 SOP（新品、开店、打烊…）放在这里，员工点一下就能看。')}</p><button class="btn pri" data-act="sopSetup">${ic('plus')} ${L('Set up SOP','建立 SOP')}</button></div>`:'';
   const all=guideItems(K);const q=(UI.sopQ||'').trim().toLowerCase();const hits=q?all.filter(x=>(x.it.name+' '+x.sec.title+' '+(x.it.body||'')).toLowerCase().includes(q)):[];
   return `<div class="card stack"><div class="row wrapr"><h3 class="grow">${esc(LISTNAME(K))}</h3>${mgrE?`<button class="btn sm" data-act="sopRename">Rename</button><button class="btn sm" data-act="trainEdit" data-k="${K}">${ic('list')} Edit</button>`:''}</div><input class="in" id="sop_q" type="search" placeholder="${L('Search: closing, mop, register, alarm…','搜索：打烊、拖地、收银、警报…')}" value="${esc(UI.sopQ||'')}" autocomplete="off">
    ${q?(hits.length?`<div class="list">${hits.slice(0,12).map(x=>`<div class="li tap" data-act="guideGo" data-k="${K}" data-s="${x.sec.id}" data-i="${x.it.id}" tabindex="0" style="padding-inline:0"><div class="grow"><div class="t">${esc(x.it.name)}</div><div class="small muted">${esc(x.sec.title)}</div></div>${ic('chev')}</div>`).join('')}</div>`:'<div class="small muted">Nothing found.</div>')
@@ -3507,7 +3507,7 @@ Object.assign(ACT,{
  sopRename:async()=>{const n=prompt(L('Name for this box','这个框的名字'),LISTNAME('sop'));if(n==null||!n.trim())return;if(await saveCfg('sop',{...CFGK('sop'),listName:n.trim().slice(0,40)})){toast('Renamed');render()}},
  sopSetup:async()=>{const cl=(taskList().find(t=>t.id==='close')?.items||[]).map(x=>x.name).filter(Boolean);
    const body=cl.length?'## '+L('Before you leave','离开前')+'\n'+cl.map((n,i)=>`${i+1}. ${n}`).join('\n')+'\n! '+L('Take every closing photo in the app before you lock up.','锁门前在 app 里拍完所有打烊照片。'):'';
-   const cfg={listName:'BLISS SOP',sections:[{id:'opening',title:L('Opening','开店'),items:[]},{id:'closing',title:L('Closing','打烊'),items:[{id:'closing-checklist',name:L('Closing checklist','打烊清单'),body}]}]};
+   const cfg={listName:'BLISS Drink SOP',sections:[{id:'opening',title:L('Opening','开店'),items:[]},{id:'closing',title:L('Closing','打烊'),items:[{id:'closing-checklist',name:L('Closing checklist','打烊清单'),body}]}]};
    if(await saveCfg('sop',cfg)){UI.sopSec='closing';render();trainEditSheet('sop')}},
  howRename:async()=>{const n=prompt('Name for this box (e.g. How-to, Recipes, Store guide)',D.guideCfg?.howTitle||'How-to');if(n==null||!n.trim())return;if(await saveCfg('guide',{...CFGK('guide'),howTitle:n.trim().slice(0,40)})){toast('Renamed');render()}},
  trGuide:d=>itemGuideEdit(+d.i),
