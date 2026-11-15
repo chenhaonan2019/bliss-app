@@ -3397,8 +3397,8 @@ Object.assign(ACT,{
 /* ---------- edit the training checklist (config/training) or the training list of how-tos (config/guide) ---------- */
 let TR=null;
 // A training section with link:'<sop key>' shows that SOP box's topics (same ids, so progress is kept); edit them in the SOP box.
-const linkItems=k=>(D.sops?.[k]?.sections||[]).flatMap(x=>(x.items||[]).map(it=>({...it,_src:{k,s:x.id}})));
-const trainResolved=()=>{const c=D.trainCfg;if(!(c?.sections||[]).some(s=>s.link&&D.sops?.[s.link]?.sections?.length))return c;return{...c,sections:c.sections.map(s=>s.link&&D.sops?.[s.link]?.sections?.length?{...s,items:linkItems(s.link)}:s)}};
+const linkItems=(k,sid)=>{const S=D.sops?.[k]?.sections||[];const m=S.filter(x=>x.id===sid);return (m.length?m:S).flatMap(x=>(x.items||[]).map(it=>({...it,_src:{k,s:x.id}})))};
+const trainResolved=()=>{const c=D.trainCfg;if(!(c?.sections||[]).some(s=>s.link&&D.sops?.[s.link]?.sections?.length))return c;return{...c,sections:c.sections.map(s=>s.link&&D.sops?.[s.link]?.sections?.length?{...s,items:linkItems(s.link,s.id)}:s)}};
 const CFGK=k=>k==='guide'?(D.guideCfg||{sections:[]}):isSop(k)?(D.sops?.[k]||{sections:[]}):trainResolved();
 async function saveCfg(k,cfg){cfg={...cfg};delete cfg.id;if(cfg.sections)cfg.sections=cfg.sections.map(x=>({...x,items:(x.items||[]).map(it=>{if(!it._src)return it;const c={...it};delete c._src;return c})}));if(!await W(A.db.doc('config/'+k).set(cfg)))return false;if(k==='guide')D.guideCfg=cfg;else if(isSop(k))D.sops={...(D.sops||{}),[k]:cfg};else D.trainCfg=cfg;return true}
 const docList=cfg=>(cfg?.docs||[]).map(d=>typeof d==='string'?{id:slug(d),name:d}:d).filter(d=>d&&d.name);
@@ -3533,7 +3533,7 @@ Object.assign(ACT,{
    if(TR.direct){if(!await saveCfg(TR.k,{...CFGK(TR.k),sections:TR.S}))return;TR=null;toast('Item deleted');if(SH?.back)SH=SH.back;closeSheet();return}
    const b=SH?.back;if(b){SH=b;drawSheet()}},
  tgCancel:()=>{const dr=TR?.direct,k=TR?.k;TR=null;if(dr)guideSheet(dr.s,dr.i,dr.emp||null,k);else closeSheet()},
- guideEdit:d=>{if((d.k||'guide')==='training'){const ls=(D.trainCfg.sections||[]).find(x=>x.id===d.s);if(ls?.link){const src=linkItems(ls.link).find(x=>x.id===d.i)?._src;if(src)return ACT.guideEdit({...d,k:src.k,s:src.s})}}const k=d.k||'guide';const S0=CFGK(k).sections||[];const si=S0.findIndex(x=>x.id===d.s);if(si<0)return;TR={k,S:JSON.parse(JSON.stringify(S0)),cur:si,del:null,direct:{s:d.s,i:d.i,emp:d.emp}};const ii=TR.S[si].items.findIndex(x=>x.id===d.i);if(ii<0)return;itemGuideEdit(ii)},
+ guideEdit:d=>{if((d.k||'guide')==='training'){const ls=(D.trainCfg.sections||[]).find(x=>x.id===d.s);if(ls?.link){const src=linkItems(ls.link,ls.id).find(x=>x.id===d.i)?._src;if(src)return ACT.guideEdit({...d,k:src.k,s:src.s})}}const k=d.k||'guide';const S0=CFGK(k).sections||[];const si=S0.findIndex(x=>x.id===d.s);if(si<0)return;TR={k,S:JSON.parse(JSON.stringify(S0)),cur:si,del:null,direct:{s:d.s,i:d.i,emp:d.emp}};const ii=TR.S[si].items.findIndex(x=>x.id===d.i);if(ii<0)return;itemGuideEdit(ii)},
  tgPhDel:d=>{tgGrab();TR.S[TR.cur].items[TR.gi].photos.splice(+d.j,1);drawSheet()},
  trImport:()=>{const inp=document.createElement('input');inp.type='file';inp.accept='.json,application/json';inp.onchange=async()=>{try{const j=JSON.parse(await inp.files[0].text());const S=j.sections||j;if(!Array.isArray(S)||!S.every(x=>x.title&&Array.isArray(x.items)))throw 0;
    trGrab();if(TR.S.length&&!confirm(`Replace the current ${TR.S.length} sections with the ${S.length} sections in this file? Nothing is saved until you tap Save.`))return;TR.S=S.map(x=>({...x,id:x.id||slug(x.title)}));if(TR.docs&&Array.isArray(j.docs))TR.docs=docList(j).map(x=>({...x}));TR.cur=0;drawSheet();toast(`Loaded ${S.length} sections. Check them, then Save.`)}catch(e){toast("That file isn't a training checklist")}};inp.click()},
