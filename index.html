@@ -1242,7 +1242,7 @@ function rmCard(){if(!canRM())return'';const d=bizDate();
   const who=pvRM()?[rmWho()]:isOwner?['owner',...rmPeople()]:[rmMe()];
   const line=w=>{const{n,t}=rmProgress(d,w);const pct=t?Math.round(n/t*100):0;return `<div class="row" style="gap:8px"><span class="small" style="width:110px;flex:none;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(rmWhoName(w))}</span><div class="bar grow"><i style="width:${pct}%;background:var(--ok)"></i></div><span class="small muted" style="width:44px;text-align:right">${n}/${t}</span></div>`};
   return `<div class="card stack tap" data-act="tab" data-k="region" tabindex="0" style="border-left:4px solid var(--brand);gap:8px"><div class="row"><span style="font-size:20px">🗺️</span><div class="grow"><div class="t">${L('Regional checklist','区域经理清单')} · ${L('week of','本周')} ${fmtD(wkStart(d),{month:'short',day:'numeric'})}</div>${isOwner&&!UI.pv&&!rmPeople().length?`<div class="tiny muted">${L('No regional manager yet: Team → person → "Regional manager"','还没有区域经理：团队 → 员工 → 勾选"区域经理"')}</div>`:''}</div>${ic('chev')}</div>
-    ${who.map(line).join('')}</div>`}
+    ${who.map(line).join('')}${lnOpen().length?`<div class="small">🚀 ${L('New product launches','上新品')}: ${lnOpen().map(x=>{const p=lnProg(x);return `<b>${esc(x.name)}</b> ${p.n}/${p.t}`}).join(' · ')}</div>`:''}</div>`}
 function rmBody(){{const d=UI.rmDay||bizDate();const wk=wkStart(d);const mo=d.slice(0,7);
     const w=rmWho();const mine=w===rmMe();const ro=!mine;
     const grp=r=>rmList().filter(x=>(x.rep||'weekly')===r);
@@ -1286,6 +1286,7 @@ function vRegion(){const d=bizDate();
   return `<div class="stack"><div><div class="eyebrow">${fmtD(d,{weekday:'long',month:'long',day:'numeric'})}</div><h2>${L('Region','区域')}</h2></div>
   <h3>${L('Stores today','各店今天')}</h3><div class="g2">${stores}</div><p class="tiny muted" style="margin-top:-6px">${L('Tap a store to open it.','点门店进入。')}</p>
   ${regionSched()}
+  ${launchBody()}
   ${regionPrep()}
   <div class="row"><h3 class="grow">${L('Weekly checklist','每周清单')}</h3>${pvRM()?'':`<button class="btn sm" data-act="rmEdit">${L('Edit list','编辑清单')}</button>`}</div>
   ${rmBody()}</div>`}
@@ -1319,6 +1320,48 @@ const RM_ACT={
     if(await W(A.db.doc('mgr/rmlist').set({list}))){D.rmList=list;toast(L('List saved','清单已保存'));closeSheet();render()}},
 };
 
+
+/* ---------- New product launches (regional manager task) ----------
+   Stored in mgr/launches: {items:{<id>:{id,name,at,by,checks:{<step>|<step>@<store>:{by,at}},done?}}}.
+   Every launch gets the same steps; the last two are ticked once per open store. */
+const LN_STEPS=()=>[
+  {id:'sop',n:'1',name:L('Put the SOP in the app','上 SOP'),how:L('Drink SOP → Add drink with the recipe (and a Morning Prep page if it needs prep). On its page tap "Everyone must learn this (new item)".','Drink SOP → 加新品配方（需要备料的话 Morning Prep 也加一页）。在新品页面点"所有员工都要学会（新品）"。')},
+  {id:'photo',n:'2',name:L('Take new product photos','拍新品图片'),how:L('Add the photos to the SOP page.','把图片传到 SOP 页面。')},
+  {id:'menusifu',n:'3',name:L('Menusifu WeChat group: POS + online, send photos, add the item','Menusifu 微信群：POS + online，传图片，上新品'),how:L('Confirm with them that it is live.','跟他们确认已经上线。')},
+  {id:'canva',n:'4',name:L('Canva: update the text menu and the menu screen images','Canva：改文字菜单，更新菜单显示屏图片')},
+  {id:'staff',n:'5',perStore:true,name:L('Every staff member knows it','每个店员都会了'),how:L('Everyone ticked on the drink\'s SOP page.','在新品 SOP 页面每个人都打勾。')},
+  {id:'screens',n:'5',perStore:true,name:L('Kiosk and menu screens checked, no mistakes','Kiosk 和菜单屏幕都确认无误')}];
+const lnSlots=x=>x.perStore?rmStores().map(l=>`${x.id}@${l.id}`):[x.id];
+const lnAll=()=>Object.values(D.launches||{}).filter(x=>x&&x.id).sort((a,b)=>String(b.at).localeCompare(String(a.at)));
+function lnProg(ln){let n=0,t=0;LN_STEPS().forEach(x=>lnSlots(x).forEach(k=>{t++;if(ln.checks?.[k])n++}));return{n,t}}
+const lnSop=ln=>guideItems('sop').find(x=>x.it.name.trim().toLowerCase()===String(ln.name).trim().toLowerCase());
+const lnOpen=()=>lnAll().filter(x=>!x.done);
+async function lnSave(id,patch){const cur=D.launches?.[id]||{};D.launches={...(D.launches||{}),[id]:patch===null?undefined:{...cur,...patch}};render();drawSheet();
+  return W(D.launchDoc?A.db.doc('mgr/launches').update({items:{[id]:patch}}):A.db.doc('mgr/launches').set({items:Object.fromEntries(Object.entries(D.launches).filter(([,v])=>v))}).then(()=>{D.launchDoc=true}))}
+function launchBody(){if(!canRM())return'';const ro=pvRM();const open=lnOpen(),done=lnAll().filter(x=>x.done);
+  const guide=guideItems('sop').find(x=>x.it.id==='new-product-launch');
+  const card=ln=>{const{n,t}=lnProg(ln);const pct=t?Math.round(n/t*100):0;const sp=lnSop(ln);const tg=sp&&sp.it.req?sopTaught(sp.it):null;
+    return `<div class="card stack" style="gap:8px;border-left:4px solid var(--brand)"><div class="row wrapr" style="gap:8px"><b class="grow" style="font-size:17px">🚀 ${esc(ln.name)}</b><span class="small muted">${n}/${t}</span></div>
+      <div class="bar"><i style="width:${pct}%;background:var(--ok)"></i></div>
+      <div class="tiny muted">${L('Started','开始于')} ${fmtD(String(ln.at).slice(0,10),{month:'short',day:'numeric'})}${ln.by?' · '+esc(ln.by):''}${sp?` · <a href="#" data-act="guideGo" data-k="sop" data-s="${sp.sec.id}" data-i="${sp.it.id}">${L('Open its SOP','打开它的 SOP')}</a>`:''}${tg?` · ${L('Taught','已教会')} ${tg.d}/${tg.n}`:''}</div>
+      <div class="card flush list">${LN_STEPS().map(x=>{const sl=lnSlots(x);const all=sl.every(k=>ln.checks?.[k]);
+        return `<div class="li" style="flex-wrap:wrap;gap:6px"><div class="grow" style="min-width:60%"><div class="t">${all?'✅':x.n+'.'} ${esc(x.name)}</div>${x.how?`<div class="tiny muted">${esc(x.how)}</div>`:''}</div>
+         <div class="row wrapr" style="gap:6px">${sl.map(k=>{const v=ln.checks?.[k];const l=k.includes('@')?k.split('@')[1]:null;
+          return `<button class="btn sm ${v?'pri':''}" ${ro?'disabled':''} data-act="lnCheck" data-i="${esc(ln.id)}" data-s="${esc(k)}" aria-pressed="${v?'true':'false'}" title="${v?esc((v.by||'')+' '+fmtD(String(v.at).slice(0,10),{month:'short',day:'numeric'})):''}">${v?'✓':'☐'} ${l?esc(locName(l)):L('Done','完成')}</button>`}).join('')}</div></div>`}).join('')}</div>
+      ${ro?'':`<div class="row wrapr" style="gap:6px">${n===t?`<button class="btn sm pri" data-act="lnDone" data-i="${esc(ln.id)}">🎉 ${L('Launch complete','上新完成')}</button>`:`<span class="tiny muted grow">${L('Complete when every step is ticked.','所有步骤打勾后才算完成。')}</span>`}<button class="btn sm bad" data-act="lnDel" data-i="${esc(ln.id)}">${UI.lnDel===ln.id?L('Tap again to delete','再点一次删除'):L('Delete','删除')}</button></div>`}</div>`};
+  return `<div class="row"><h3 class="grow">${L('New product launches','上新品')}</h3>${guide?`<button class="btn sm" data-act="guideGo" data-k="sop" data-s="${guide.sec.id}" data-i="${guide.it.id}">${L('SOP','SOP')}</button>`:''}${ro?'':`<button class="btn sm pri" data-act="lnAdd">${ic('plus')} ${L('New launch','新品上线')}</button>`}</div>
+   ${open.length?open.map(card).join(''):`<div class="card small muted">${L('No launch in progress. Tap "New launch" when a new item is coming.','目前没有进行中的上新。有新品时点"新品上线"。')}</div>`}
+   ${done.length?`<details class="card"><summary class="small" style="cursor:pointer">${L('Completed launches','已完成的上新')} (${done.length})</summary><div class="list" style="margin-top:6px">${done.map(x=>`<div class="li" style="padding-inline:0"><div class="grow"><div class="t">✅ ${esc(x.name)}</div><div class="tiny muted">${L('Done','完成于')} ${fmtD(String(x.done).slice(0,10),{month:'short',day:'numeric',year:'numeric'})}</div></div>${ro?'':`<button class="btn sm" data-act="lnReopen" data-i="${esc(x.id)}">${L('Reopen','重新打开')}</button>`}</div>`).join('')}</div></details>`:''}`}
+const LN_ACT={
+  lnAdd:async()=>{const v=prompt(L('New item name (use the same name as its SOP page, e.g. Matcha Pumpkin Cloud)','新品名字（和 SOP 页面同名，例如 Matcha Pumpkin Cloud）'));if(v==null||!v.trim())return;
+    const id=slug(v.trim())+'-'+uidGen().slice(-4);if(await lnSave(id,{id,name:v.trim().slice(0,80),at:new Date().toISOString(),by:meName(),checks:{}}))toast(L('Launch started','已开始上新'))},
+  lnCheck:async d=>{const ln=D.launches?.[d.i];if(!ln||pvRM())return;const v=ln.checks?.[d.s]?null:{by:meName(),at:new Date().toISOString()};
+    D.launches={...D.launches,[d.i]:{...ln,checks:{...(ln.checks||{}),[d.s]:v}}};render();await W(A.db.doc('mgr/launches').update({items:{[d.i]:{checks:{[d.s]:v}}}}))},
+  lnDone:d=>lnSave(d.i,{done:new Date().toISOString()}).then(ok=>ok&&toast(L('Launch complete 🎉','上新完成 🎉'))),
+  lnReopen:d=>lnSave(d.i,{done:null}),
+  lnDel:async d=>{if(UI.lnDel!==d.i){UI.lnDel=d.i;render();return}UI.lnDel=null;const items={...(D.launches||{})};delete items[d.i];D.launches=items;render();
+    if(await W(A.db.doc('mgr/launches').set({items})))toast(L('Deleted','已删除'))},
+};
 /* ---------- Store opening soon (pre-opening) ----------
    A store marked "Opening soon" in Settings → Stores shows an opening plan instead of the daily store screen:
    target date, progress, and a checklist by phase. Saved in mgr/preopen_<store> (managers and owners only). */
@@ -3012,7 +3055,7 @@ function fcGrab(){const c=fcCfg();const v=(id,d)=>{const x=num($(id)?.value);ret
   return{...c,cap:Math.max(20,v('#fc_cap',c.cap)),max1:Math.max(20,v('#fc_max1',c.max1)),minStaff:Math.max(0,Math.round(v('#fc_min',c.minStaff))),buffer:v('#fc_buf',c.buffer),weeks:Math.max(3,Math.min(16,Math.round(v('#fc_weeks',c.weeks)))),geo:{...(c.geo||{}),...FCS.geo},
   opened:Object.fromEntries(LOCS().map(l=>{const x=$('#fc_open_'+l.id)?.value;return[l.id,x&&/^\d{4}-\d\d-\d\d$/.test(x)?x:(c.opened?.[l.id]||'')]}).filter(([,x])=>x))}}
 async function fcSaveCfg(f){const cfg={...(D.schedCfg||{}),forecast:f};if(!await W(A.db.doc('mgr/sched').set(cfg)))return false;D.schedCfg=cfg;FCM={};return true}
-Object.assign(ACT,RM_ACT,PRE_ACT,PREP_ACT,SHP_ACT);
+Object.assign(ACT,RM_ACT,PRE_ACT,PREP_ACT,SHP_ACT,LN_ACT);
 // Manager / owner: make the photos on a checklist this store's example photos (for every checklist that has the same item).
 ACT.exAll=async d=>{const k=d.type+d.date;if(UI.exAll!==k){UI.exAll=k;drawSheet();return}UI.exAll=null;
   const loc=curLoc();const doc=photoDoc(d.date,d.type);const ph=doc?.photos||{};const list=JSON.parse(JSON.stringify(taskList()));let n=0;
@@ -3161,7 +3204,7 @@ async function boot(){
   subscribe(db.collection('trainreq'),s=>{D.trainreq=mapDocs(s)});
   if(isOwner)subscribe(db.collection('owner'),s=>{s.docs.forEach(d=>{if(d.id.startsWith('hourly_')){D.hourly={...(D.hourly||{}),[d.id.slice(7)]:d.data().days||{}};FCM={}}if(d.id==='fixed')D.fixed=d.data().list||[];if(d.id==='sales')D.sales=d.data().weeks||{};if(d.id==='settings')D.ownerSet=d.data()})});
   if(isMgr){subscribe(db.collection('pending'),s=>{D.pending=mapDocs(s)});
-    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wagesDoc=v;D.noEarly=v.noearly||{};D.noLate=v.nolate||{};D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{};setTimeout(syncBonusPub,1500)}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='interviews')D.intv=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id==='rmlist')D.rmList=v.list||[];if(d.id.startsWith('rmlog_'))D.rmLog={...(D.rmLog||{}),[d.id.slice(6)]:v};if(d.id.startsWith('preopen_'))D.preopen={...(D.preopen||{}),[d.id.slice(8)]:v};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
+    subscribe(db.collection('mgr'),s=>{s.docs.forEach(d=>{const v=d.data();if(d.id==='wages'){D.wagesDoc=v;D.noEarly=v.noearly||{};D.noLate=v.nolate||{};D.bonusCfg=v.bonus||null;D.trainRates=v.train||{};D.trainVia=v.tvia||{};D.trainUntil=v.tuntil||{};D.wages=v.rates||{};D.cashRates=v.cash||{};D.payCaps=v.caps||{};D.cashCaps=v.ccaps||{};setTimeout(syncBonusPub,1500)}if(d.id==='settings')D.mgrSet={pins:{},...v};if(d.id==='files')D.mgrFiles=v.list||[];if(d.id==='interviews')D.intv=v.list||[];if(d.id==='sched')D.schedCfg=v;if(d.id==='cover')D.coverCfg=v;if(d.id==='schedsub')D.schedSub=v;if(d.id==='hourly_sync')D.hsync=v;if(d.id==='prices')D.prices=v.items||{};if(d.id==='rmlist')D.rmList=v.list||[];if(d.id==='launches'){D.launches=v.items||{};D.launchDoc=true}if(d.id.startsWith('rmlog_'))D.rmLog={...(D.rmLog||{}),[d.id.slice(6)]:v};if(d.id.startsWith('preopen_'))D.preopen={...(D.preopen||{}),[d.id.slice(8)]:v};if(d.id.startsWith('fcneeds_'))D.fcneeds={...(D.fcneeds||{}),[d.id.slice(8)]:v.dates||{}}})});
     subscribe(db.collection('mgr/evals/items'),s=>{D.evals=mapDocs(s)})}
   if(isMgr&&window.blissAccount?.ensureUsers){const k='acctSync',t=today();let last='';try{last=localStorage.getItem(k)||''}catch{}
     if(last!==t)setTimeout(()=>{const em=Object.values(D.employees).filter(e=>e.email&&e.active!==false).map(e=>e.email);
