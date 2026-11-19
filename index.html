@@ -3400,7 +3400,7 @@ Object.assign(ACT,{
 /* ---------- edit the training checklist (config/training) or the training list of how-tos (config/guide) ---------- */
 let TR=null;
 // A training section with link:'<sop key>' shows that SOP box's topics (same ids, so progress is kept); edit them in the SOP box.
-const linkItems=(k,sid)=>{const S=D.sops?.[k]?.sections||[];const m=S.filter(x=>x.id===sid);return (m.length?m:S).flatMap(x=>(x.items||[]).filter(sopVis).map(it=>({...it,_src:{k,s:x.id}})))};
+const linkItems=(k,sid)=>{const S=D.sops?.[k]?.sections||[];const m=S.filter(x=>x.id===sid||x.id.startsWith(sid+'-'));return (m.length?m:S).flatMap(x=>(x.items||[]).filter(sopVis).map(it=>({...it,_src:{k,s:x.id}})))};
 const trainResolved=()=>{const c=D.trainCfg;if(!(c?.sections||[]).some(s=>s.link&&D.sops?.[s.link]?.sections?.length))return c;return{...c,sections:c.sections.map(s=>s.link&&D.sops?.[s.link]?.sections?.length?{...s,items:linkItems(s.link,s.id)}:s)}};
 const CFGK=k=>k==='guide'?(D.guideCfg||{sections:[]}):isSop(k)?(D.sops?.[k]||{sections:[]}):trainResolved();
 async function saveCfg(k,cfg){cfg={...cfg};delete cfg.id;if(cfg.sections)cfg.sections=cfg.sections.map(x=>({...x,items:(x.items||[]).map(it=>{if(!it._src)return it;const c={...it};delete c._src;return c})}));if(!await W(A.db.doc('config/'+k).set(cfg)))return false;if(k==='guide')D.guideCfg=cfg;else if(isSop(k))D.sops={...(D.sops||{}),[k]:cfg};else D.trainCfg=cfg;return true}
